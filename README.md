@@ -10,6 +10,23 @@ Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
 **Für GUI-Entwickler:** [UDP-Schnittstelle](docs/udp-protocol.md) ·
 [eigenständiges C++-Beispiel](examples/gui_udp.cpp).
 
+**Browser-GUI:** Der separate Adapter `qo100_webbridge` verbindet die GUI-UDP-Schnittstelle
+mit HTTP/WebSocket und liefert eine HTML/JS-Testseite aus. Ein Bediener, beliebig weitere
+Zuschauer bis zum konfigurierten Verbindungslimit; nach fünf Minuten ohne Bedienung wird
+der Bediener abgemeldet. [Start und WebSocket-Protokoll](docs/webbridge.md).
+
+```sh
+# Zusätzliche Header-Pakete unter Debian/Ubuntu:
+sudo apt install libboost-dev nlohmann-json3-dev
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+./build/bin/qo100_webbridge --config config/webbridge.conf
+# http://BACKEND-IP:8080/ (Mikrofon über die HTTPS-Adresse der OPNsense)
+```
+
+Der Adapter läuft zusätzlich zum Backend. Währenddessen darf kein weiteres GUI direkt
+den Backend-UDP-Port abonnieren. Für einen Build ohne Adapter: `-DQO100_BUILD_WEBBRIDGE=OFF`.
+
 ## Bauen
 
 Benötigt werden Linux, CMake, ein C++17-Compiler, libiio (0.x-API),

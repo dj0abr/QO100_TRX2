@@ -1,4 +1,5 @@
 /build/
+/build-webbridge/
 __pycache__/
 *.pyc
 *.settings

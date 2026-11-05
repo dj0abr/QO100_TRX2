@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(QO100_TRX2 VERSION 0.10.0 LANGUAGES CXX)
+project(QO100_TRX2 VERSION 0.11.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -70,6 +70,11 @@ target_compile_definitions(qo100_backend PRIVATE
     QO100_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf")
 add_dependencies(qo100_backend pluto)
 
+option(QO100_BUILD_WEBBRIDGE "Build standalone HTTP/WebSocket GUI adapter" ON)
+if(QO100_BUILD_WEBBRIDGE)
+    add_subdirectory(webbridge)
+endif()
+
 add_executable(benchmark_dsp EXCLUDE_FROM_ALL tools/benchmark_dsp.cpp)
 target_link_libraries(benchmark_dsp PRIVATE qo100_core)
 
@@ -102,6 +107,13 @@ if(BUILD_TESTING)
     target_link_libraries(test_rx_channel PRIVATE qo100_core)
     add_test(NAME usb_dsp COMMAND test_rx_channel)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(TARGET qo100_webbridge)
+        add_test(NAME webbridge_udp COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_webbridge.py
+            $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(webbridge_udp PROPERTIES TIMEOUT 60)
+    endif()
     add_test(NAME cpp_gui_udp COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpp_gui.py
         $<TARGET_FILE:gui_udp_example> $<TARGET_FILE:qo100_backend>
