@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in real Pluto RX test. Not part of CTest; never starts TX streaming."""
+"""Opt-in real Pluto RX test. Not part of CTest; TX stays at zero IQ unless GUI software PTT is held."""
 import argparse
 import json
 from pathlib import Path
@@ -39,7 +39,7 @@ def main():
         backend = subprocess.Popen([str(PROJECT / "build/bin/qo100_backend"), "--config", str(config_path)],
                                    stdout=log, stderr=subprocess.STDOUT)
         try:
-            receiver = Receiver("127.0.0.1", int(settings["gui_port"]))
+            receiver = Receiver("127.0.0.1", int(settings["gui_port"]),rx_hz=int(settings["initial_rx_hz"]))
             start = time.monotonic()
             while len(received) < args.frames and time.monotonic() - start < 20 + args.frames / 10:
                 try:

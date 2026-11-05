@@ -42,6 +42,7 @@ int udpsock = 0;
 int udpRXfifo = 0;
 int crossbandrepeater = 0;
 int rx_only = 0;
+int tx_raw_iq = 0;
 
 void udprxfunc(uint8_t *buffer, int len, struct sockaddr_in* fromsock)
 {
@@ -125,14 +126,16 @@ int main ()
 		crossbandrepeater = 0;
 		printf("RX_ONLY enabled; TX streaming disabled\n");
 	}
+	p = getConfigElement("TX_RAW_IQ");
+	tx_raw_iq = (p && *p == '1');
 	if (!rx_only) {
-	udpRXfifo = create_fifo(50, BUFSIZE*4);
+	udpRXfifo = create_fifo(tx_raw_iq ? 9 : 50, BUFSIZE*4);
 	UdpRxInit(&udpsock,UDP_RXSAMPLEPORT,udprxfunc,&keeprunning);
 	printf("App->Pluto: UDP Port:    %d\n",UDP_RXSAMPLEPORT);
 	printf("Pluto->App: UDP Port:    %d\n",UDP_TXSAMPLEPORT);
 	printf("Status messages Port:    %d\n",UDP_STATUSPORT);
 
-	create_interpolator();
+	if (!tx_raw_iq) create_interpolator();
 	}
 	pluto_setup();
 

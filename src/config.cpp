@@ -29,7 +29,7 @@ uint32_t u32(const std::string& s) {
 }
 void Config::validate() const {
     // The vendored driver is built with RX_DECIMATION=2. Keep this milestone explicit.
-    if (pluto_sample_rate != 1200000) throw std::runtime_error("This RX milestone requires pluto_sample_rate=1200000");
+    if (pluto_sample_rate != 1200000) throw std::runtime_error("This backend requires pluto_sample_rate=1200000");
     if (fft_size < 1024 || fft_size > 65536 || (fft_size & (fft_size - 1)))
         throw std::runtime_error("fft_size must be a power of two from 1024 to 65536");
     if (spectrum_fps < 1 || spectrum_fps > 60) throw std::runtime_error("spectrum_fps must be 1..60");
@@ -51,6 +51,10 @@ void Config::validate() const {
         throw std::runtime_error("initial_rx_hz must leave room for the +/-25 kHz zoom");
     if (initial_rx2_hz + 275000 < rx_center_hz || initial_rx2_hz > rx_center_hz + 275000)
         throw std::runtime_error("initial_rx2_hz must remain inside the RX channel window");
+    if (tx_center_hz < 275000 || initial_tx_hz + 275000 < tx_center_hz || initial_tx_hz > tx_center_hz + 275000)
+        throw std::runtime_error("initial_tx_hz must remain inside the TX channel window");
+    if (!std::isfinite(tx_attenuation_db) || tx_attenuation_db < 0 || tx_attenuation_db > 89.75)
+        throw std::runtime_error("tx_attenuation_db must be 0..89.75");
     if (!std::isfinite(subscription_seconds) || subscription_seconds < 2 || subscription_seconds > 60)
         throw std::runtime_error("subscription_seconds must be 2..60");
 }
@@ -87,6 +91,11 @@ Config load_config(const std::filesystem::path& path) {
         else if (k == "spectrum_fps") c.spectrum_fps = u32(v);
         else if (k == "initial_rx_hz") c.initial_rx_hz = integer(v);
         else if (k == "initial_rx2_hz") c.initial_rx2_hz = integer(v);
+        else if (k == "initial_tx_hz") c.initial_tx_hz = integer(v);
+        else if (k == "tx_attenuation_db") {
+            size_t used=0;c.tx_attenuation_db=std::stod(v,&used);
+            if(used!=v.size()) throw std::runtime_error("Invalid tx_attenuation_db");
+        }
         else if (k == "subscription_seconds") {
             size_t used = 0;
             c.subscription_seconds = std::stod(v, &used);

@@ -25,7 +25,8 @@ PlutoProcess::PlutoProcess(const Config& c, const std::filesystem::path& binary)
            << "\nTX_FREQ " << c.pluto_tx_hz / 1e6
            << "\nSAMPLERATE " << c.pluto_sample_rate / 1e6
            << "\nRX_BANDWIDTH " << c.rx_bandwidth_hz / 1e6
-           << "\nTX_BANDWIDTH 0.2\nTX_GAIN -79\nCROSSBANDREPEATER 0\nRX_ONLY 1\n";
+           << "\nTX_BANDWIDTH 0.6\nTX_GAIN " << 10-c.tx_attenuation_db
+           << "\nCROSSBANDREPEATER 0\nRX_ONLY 0\nTX_RAW_IQ 1\n";
     config.close();
     if (!config) throw std::runtime_error("Cannot write Pluto configuration");
     const int logfd = open(log_.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);

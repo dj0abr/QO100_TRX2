@@ -24,9 +24,15 @@ Local integration changes are recorded in `pluto-integration.patch`:
    TX 1290.250 MHz, CROSSBANDREPEATER 0 and RX_ONLY 1.
 
 The existing RX sample conversion and factor-two sample selection are unchanged.
-The original TX processing is retained for future integration; it is not part
-of this RX milestone. Future TX integration must account for the original
-32-bit TX input, interpolation, scaling and marker behavior explicitly.
+The original TX processing remains available when `TX_RAW_IQ` is absent or zero.
+The backend now explicitly selects `TX_RAW_IQ 1`: raw hardware-rate I16/Q16,
+with PTXI block headers, no interpolation, marker or scaling. The raw-mode FIFO
+has eight usable 20 ms slots; PTXS feedback is sent after every hardware push.
+Empty FIFO produces zero samples and push errors fail the driver. The UDP
+receive buffer was increased to accommodate bursts of several TX blocks.
+Generated TX bandwidth is 600 kHz. Backend attenuation is mapped to the original
+driver's `TX_GAIN - 10` hardwaregain convention. No PTT command is provided by
+upstream; the GUI gates audio, while backend and driver continue zero IQ.
 
 Copyright/license notices in the imported files remain unchanged, including
 the differing GPL notices already present in upstream helper files.

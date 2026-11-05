@@ -13,9 +13,9 @@ Python reference format: `struct.Struct("!4sBBHIIQQQIIIHHII")`.
 |---:|---:|---|
 | 0 | 4 | ASCII magic `QTR2` |
 | 4 | 1 | Protocol version, 1 |
-| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO |
+| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO |
 | 6 | 2 | Header size, 64 |
-| 8 | 4 | Stream ID: 0 = full-band spectrum; 1 = RX1; 2 = RX2 |
+| 8 | 4 | Stream ID: 0 = full-band spectrum; 1 = RX1; 2 = RX2; 3 = TX |
 | 12 | 4 | Frame ID / control request ID / audio tuning epoch, uint32 |
 | 16 | 8 | Backend Unix timestamp in nanoseconds at frame emission |
 | 24 | 8 | FFT exclusive end index / audio start index / STATE tuning epoch |
@@ -104,3 +104,58 @@ AGC, compression or digital decoding. In the test GUI only stream 1 is routed
 to ALSA default. Stream 2 enters a separate bounded queue and is monitored by
 packet/sample counts, RMS and peak level. It is then discarded. Test captures
 can store RX2 audio as a separate 12-kHz WAV file.
+
+## USB transmitter (v0.4)
+
+TX shares the subscribed GUI socket and uses stream 3. All controls and audio
+are accepted only from the current subscriber. TX_CONTROL additionally carries
+the current backend session ID (learned from RX STATE). A backend restart must
+reset client PTT to OFF; it requires a new manual PTT press.
+
+TX_CONTROL (6), 64 bytes: frame_id = monotonic uint32 request, center_hz =
+absolute **uplink** USB carrier in Hz, format = 0 PTT off / 1 PTT on,
+session_id = current backend session. Other fields zero. Valid carriers lie
+within tx_center_hz ±275000 Hz. Repeat the latest control at least every 500 ms.
+After 1500 ms without a valid control the backend clears PTT. Older request IDs
+are ignored; repeated identical commands renew the lease without resetting DSP.
+A changed command requires a new request ID. Rejected frequencies retain state.
+
+TX_STATE (7), 64 bytes, echoes request and actual frequency. sample_index =
+TX epoch, session_id = backend session, sample_rate = 12000, format = 0 OK /
+1 out of range. first_bin = actual PTT (0/1), fft_size = audio FIFO samples
+(including resampler buffering), bin_count = estimated driver FIFO blocks,
+total_count = signed int32 clock correction in ppm (two's complement).
+The backend sends acknowledgments and periodic telemetry every 250 ms. Match
+both request and session. Epoch changes on PTT transitions, retunes or forced
+mute. Resending a timed-out ON command cannot re-key; increment request after
+a new manual PTT press. PTT is a data gate, not a hardware/GPIO command.
+
+TX_AUDIO (8) has the same PCM16 layout as RX AUDIO, with stream=3 and exactly
+240 samples at 12000 Hz. frame_id = acknowledged TX epoch, center_hz = confirmed
+uplink carrier, session_id = backend session, sample_index = start index
+(multiple of 240). The index advances by 240 per captured packet and resets
+only when the acknowledged epoch/session changes. Duplicate, old, misaligned,
+wrong-session and wrong-epoch audio is discarded. Clients send only after the
+matching successful ON acknowledgment. No retransmission. Packet gaps are
+silence; after 200 ms without accepted audio the backend clears audio/DSP
+history and emits exact zeros until the FIFO has refilled.
+
+## Local Pluto direct TX transport
+
+Only loopback: backend -> 127.0.0.1:40808, driver status -> 127.0.0.1:40810.
+Generated driver config selects TX_RAW_IQ=1. Legacy 32-bit/interpolated/marker
+transport remains available only when that option is absent or zero.
+
+Each 20 ms block contains 24000 complex I16/Q16 little-endian samples at
+1200000 samples/s (96000 bytes). Two UDP datagrams each carry a 16-byte header:
+ASCII PTXI, uint32 block sequence, uint32 byte offset, uint32 total bytes;
+header integers big endian. Each carries 48000 payload bytes. The driver
+accepts consecutive offsets of a new sequence, enqueues only complete blocks,
+and discards partial, duplicate or old blocks. Loopback transport needs no
+network MTU constraint. A lost fragment loses the block rather than mixing IQ.
+
+After every hardware push: 16-byte status, ASCII PTXS, uint32 sequence,
+uint32 filled FIFO blocks, uint32 usable FIFO capacity (8), all big endian.
+The backend discards stale statuses and fills toward capacity/2. At startup,
+audio absence, or empty FIFO, the driver pushes zeros. Hardware push errors
+terminate the driver and are reported by backend child monitoring.

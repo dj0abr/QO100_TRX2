@@ -120,3 +120,5 @@ extern int crossbandrepeater;
 
 // QO100_TRX2 integration: optional receive-only mode.
 extern int rx_only;
+extern int tx_raw_iq;
+void sendfifostat();

@@ -21,7 +21,7 @@ def main():
         config.write_text(Path(sys.argv[2]).read_text().replace("gui_port = 40900", f"gui_port = {port}"))
         process = subprocess.Popen([sys.argv[1], "--config", str(config), "--source", "synthetic", "--duration", "12"],
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        receiver = Receiver("127.0.0.1", port)
+        receiver = Receiver("127.0.0.1", port, rx_hz=10489748500)
         try:
             f = receiver.frames.get(timeout=6)
             assert f.center_hz == 10489750000 and f.sample_rate == 600000

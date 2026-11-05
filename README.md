@@ -4,7 +4,8 @@ C++-Backend für einen QO-100-Transceiver mit getrenntem GUI über UDP.
 Der aktuelle Stand empfängt **600 kHz**, berechnet das Gesamtspektrum sowie
 einen abstimmbaren **Zoom von ±25 kHz** und demoduliert **zwei unabhängig abstimmbare USB-Audiokanäle**.
 Das Python-Test-GUI zeigt beide Wasserfälle und spielt RX1 über die
-Default-Soundkartenausgabe ab. RX2 wird für Tests getrennt empfangen und überwacht. TX-Modulation folgt später.
+Default-Soundkartenausgabe ab. RX2 wird für Tests getrennt empfangen und überwacht.
+Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
 
 ## Bauen
 
@@ -45,8 +46,8 @@ Voreingestellt sind:
 |---|---:|
 | QO-100 RX-Anzeigemitte | 10.489,750 MHz |
 | Tatsächliche Pluto-RX-Mitte | 739,750 MHz |
-| TX-Referenz für spätere Erweiterung | 2.400,250 MHz |
-| Zugehörige Pluto-TX-Referenz | 1.290,250 MHz |
+| QO-100 TX-Bandmitte | 2.400,250 MHz |
+| Tatsächliche Pluto-TX-Mitte | 1.290,250 MHz |
 
 ```bash
 ./start_backend.sh
@@ -59,11 +60,11 @@ Bei einem unerwarteten Treiberende oder ausbleibenden I/Q-Daten beendet sich das
 Backend mit Fehlermeldung. Bei hartem Tod des Backends erhält der Treiber unter
 Linux zusätzlich ein Elternprozess-Todessignal.
 
-Dieser Stand verwendet ausdrücklich `RX_ONLY 1`: kein TX-Streaming, kein
-Crossband-Repeater und kein Markerton. Es werden keine TX-Puffer angelegt. Die
-TX-Referenzen werden nur für die spätere Erweiterung gespeichert. Der Treiber
-wird in `build/run/pluto-<PID>/` mit eigenem `pluto_config.txt` und `pluto.log`
-gestartet. Die Logs bleiben für die Diagnose erhalten.
+Der Treiber läuft im Vollduplexbetrieb mit `RX_ONLY 0` und `TX_RAW_IQ 1`.
+Das Backend erzeugt fertige IQ-Samples; der zusätzliche direkte Treibermodus
+fügt weder Markerton noch Interpolation oder Pegeländerungen hinzu. Ohne
+TX-Audio werden Nullsamples durchgehend weitergegeben. Der Treiber startet
+in `build/run/pluto-<PID>/` mit eigener Konfiguration und Diagnose-Log.
 
 In einem zweiten Terminal:
 
@@ -71,7 +72,7 @@ In einem zweiten Terminal:
 ./start_gui.sh
 ```
 
-Die Startfrequenz beträgt **10489,748500 MHz** (USB-Träger, nicht die
+Die Startfrequenz beträgt **10489,900000 MHz** (USB-Träger, nicht die
 Mitte des Audio-Durchlassbereichs). Im Feld **RX1 MHz (USB / Audio)** kann die Frequenz
 mit Punkt oder Komma eingegeben und mit Enter oder **Tune** übernommen werden.
 Der Zoom ist auf diese Trägerfrequenz zentriert; das Audio kommt aus dem oberen
@@ -96,14 +97,14 @@ der Anzeige, mit jeweils 50 kHz Reserve.
 ## Die zwei Schnittstellen
 
 1. **Pluto-Anbindung ausschließlich lokal**: `127.0.0.1`,
-   Port 40809 für I/Q vom Treiber zum Backend. Port 40808 für künftige TX-Samples
-   und 40810 für den vorhandenen FIFO-Status sind reserviert.
-   In RX_ONLY werden TX-Empfang und FIFO-Statustimer nicht gestartet.
+   Port 40809 für RX-IQ, Port 40808 für TX-IQ und Port 40810 für die
+   TX-FIFO-Rückmeldung.
    Der QO100-Treiberbuild bindet auch im Normalmodus nur Loopback und erlaubt
    ausgehende Treiber-UDP-Daten ausschließlich an `127.0.0.1`.
 2. **GUI-Anbindung**: ein bidirektionaler UDP-Port, standardmäßig
-   `0.0.0.0:40900`. Anmeldung, Abstimmung mit Bestätigung, Gesamt-/Zoom-FFT und Audio verwenden
-   unterschiedliche Nachrichtentypen. Es gibt keinen Webserver und keine zusätzliche GUI-Verbindung.
+   `0.0.0.0:40900`. Anmeldung, Abstimmung mit Bestätigung, Gesamt-/Zoom-FFT und RX-Audio
+   sowie TX-Audio und Software-PTT verwenden unterschiedliche Nachrichtentypen.
+   Es gibt keinen Webserver und keine zusätzliche GUI-Verbindung.
 
 Nur die Verbindung **vom libiio-Treiber zur Hardware** verwendet das Netz.
 
@@ -183,23 +184,75 @@ des angesprochenen Kanals zurückgesetzt. Eine lokale Änderung der
 RX1-Wiedergabelautstärke verändert die übertragenen Samples von RX2 nicht.
 
 ```bash
-./start_gui.sh --rx-frequency 10489.748500 --rx2-frequency 10489.600000
+./start_gui.sh --rx-frequency 10489.900000 --rx2-frequency 10489.600000
 ```
 
 Der Hardwaretest speichert zusätzlich `build/captures/rx2-usb.wav`, damit sich
 der zweite Audiostrom prüfen lässt. Es sind weiterhin keine Digitalmodems oder
 externen Audio-Routing-Verbindungen Bestandteil des Backends.
 
+## Mikrofon und USB-Sender
+
+Die Testvorgaben sind **RX 10489,900 MHz** und **TX 2400,400 MHz**.
+Die TX-Frequenz ist die Uplink-Trägerfrequenz; bei der konfigurierten Pluto-Mitte
+1290,250 MHz entsteht sie durch einen digitalen Versatz von +150 kHz.
+RX und TX sind unabhängig abstimmbar. Die RX-Bandmitte bleibt 10489,750 MHz.
+
+Im GUI **TX MHz (USB)** eingeben und **Tune TX** drücken. Zum Sprechen die
+Taste **PTT halten — Mikrofon senden** mit der Maus gedrückt halten.
+Loslassen, Escape, Fokusverlust oder Schließen beendet den Mikrofonversand.
+Beim Start und nach einem Backend-Neustart ist PTT aus. Der GUI-Status zeigt
+die bestätigte TX-Frequenz, Paketanzahl, FIFO-Füllstände und Taktkorrektur.
+`--tx-frequency 2400.400000` setzt einen anderen Startwert.
+
+Der eingebundene Treiber besitzt keinen PTT-Steuerbefehl. Seine Erwähnung
+von GPO0/GPO1 betrifft eine externe Schaltung und ist keine Software-Schnittstelle.
+Die GUI-Taste ist deshalb eine **Software-PTT für die Audiodaten**, keine
+Steuerung einer externen Endstufe. Der Hardware-Datenstrom läuft mit Nullsamples
+weiter, solange kein freigegebenes Audio vorliegt.
+
+Die Default-Soundkarte wird nur während PTT als Mono-Eingang mit 48 kHz geöffnet.
+Ein Sinc-Tiefpass reduziert auf 12 kHz. UDP enthält 240 PCM16-Samples je 20 ms,
+über denselben bidirektionalen GUI-Port wie RX und FFT. Eine bestätigte
+TX-Generation schützt vor alten Paketen nach PTT oder Frequenzänderungen.
+
+Im Backend puffert ein begrenzter, nach Sample-Indizes sortierter FIFO das Audio:
+maximal 240 ms, Zielwert 120 ms in der Mitte. Ein langsam geregelter adaptiver
+Sinc-Resampler gleicht Soundkarten- und Pluto-Takt bis ±5000 ppm aus.
+Fehlende Paketintervalle werden mit Stille gefüllt. Bei länger als 200 ms
+fehlendem Audio wird der Modulator geleert; ein Neustart wartet erneut auf
+120 ms Vorfüllung. Ohne gültige PTT-Steuerung für 1,5 s oder bei GUI-Wechsel
+wird die Sendefreigabe gelöscht.
+
+Ein analytischer 513-Tap-FIR erzeugt USB mit +100..4000 Hz Durchlassbereich.
+Danach erfolgen Sinc-Interpolation auf 1,2 MS/s, digitales Mischen auf die
+TX-Frequenz und I16/Q16-Konvertierung mit 6 dB digitaler Pegelreserve.
+Die tatsächliche AD9361-Ausgangsdämpfung steht in `tx_attenuation_db`
+(0..89,75 dB; Projektkonfiguration 0 dB für die getestete Station). Änderungen
+daran werden beim Backend-Start übernommen. Der Sende-/Empfangstest über QO-100
+wurde mit 0 dB TX-Dämpfung erfolgreich durchgeführt.
+
+Der Treiber meldet nach jedem Hardwareblock den TX-Füllstand. Das Backend
+hält vier von acht Plätzen gefüllt (80 ms) und erzeugt neue Blöcke im Takt
+dieser Rückmeldung. Der Audiopuffer regelt den unabhängigen Mikrofontakt.
+Bei leerem Treiber-FIFO wird ein frischer Nullblock an den Pluto übertragen.
+Bereits eingereihte Blöcke und Hardwarepuffer erzeugen beim PTT-Loslassen eine
+kurze Nachlaufzeit. Es wird kein alter IQ-Block wiederholt.
+
+Die automatischen Tests prüfen USB-Pegel und Seitenbandunterdrückung,
+Taktabweichungen von ±1500 ppm über je fünf simulierte Minuten und die komplette
+UDP-TX-Kette mit einem lokalen Treiber-Doppel. Dabei wird keine Hardware benutzt.
+
 ## Ohne Hardware testen
 
 ```bash
 ./start_backend.sh --source synthetic
-./start_gui.sh
+./start_gui.sh --rx-frequency 10489.748500
 ```
 
 Das Gesamtspektrum enthält zwei Referenztöne bei -150 kHz (-12,04 dBFS)
-und +75 kHz (-20 dBFS). Zusätzlich erzeugt die Quelle relativ zur voreingestellten
-USB-Frequenz einen gewünschten +1-kHz-Ton und einen stärkeren -2-kHz-Ton.
+und +75 kHz (-20 dBFS). Zusätzlich erzeugt die Quelle relativ zur synthetischen
+USB-Testfrequenz 10489,748500 MHz einen gewünschten +1-kHz-Ton und einen stärkeren -2-kHz-Ton.
 Für RX2 kommen ein +1700-Hz-Nutzton und ein stärkerer -2200-Hz-Ton hinzu.
 Am Audioausgang bleibt der 1-kHz-Ton. Der Pluto-Treiber wird in diesem Modus
 nicht gestartet. Für einen stillen Test kann `--no-audio` verwendet werden.

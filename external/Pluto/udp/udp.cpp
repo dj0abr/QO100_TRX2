@@ -58,6 +58,8 @@ void UdpRxInit(int *sock, int port, void (*rxfunc)(uint8_t *, int, struct sockad
 		exit(0);
 	}
 	
+    int receive_buffer=4*1024*1024;
+    setsockopt(*sock,SOL_SOCKET,SO_RCVBUF,&receive_buffer,sizeof(receive_buffer));
 	int enable = 1;
 	setsockopt(*sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
 

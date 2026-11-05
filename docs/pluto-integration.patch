@@ -1,258 +1,193 @@
 diff --git a/pluto.cpp b/pluto.cpp
-index 395cc72..0bdbed5 100644
+index 395cc72..b94bddd 100644
 --- a/pluto.cpp
 +++ b/pluto.cpp
-@@ -41,6 +41,7 @@ char plutoid[100] = {PLUTO_ID};
- int udpsock = 0;
- int udpRXfifo = 0;
- int crossbandrepeater = 0;
+@@ -43,0 +44,2 @@ int crossbandrepeater = 0;
 +int rx_only = 0;
- 
- void udprxfunc(uint8_t *buffer, int len, struct sockaddr_in* fromsock)
- {
-@@ -55,6 +56,7 @@ void close_program()
- 
- int main ()
- {
++int tx_raw_iq = 0;
+@@ -57,0 +60 @@ int main ()
 +	setvbuf(stdout, NULL, _IOLBF, 0);
- 	int res = 0;
- 
-     install_signal_handler(close_program);
-@@ -117,6 +119,13 @@ int main ()
- 		} 
- 	}
- 
+@@ -120 +123,10 @@ int main ()
+-	udpRXfifo = create_fifo(50, BUFSIZE*4);
 +	p = getConfigElement("RX_ONLY");
 +	rx_only = (p && *p == '1');
 +	if (rx_only) {
 +		crossbandrepeater = 0;
 +		printf("RX_ONLY enabled; TX streaming disabled\n");
 +	}
++	p = getConfigElement("TX_RAW_IQ");
++	tx_raw_iq = (p && *p == '1');
 +	if (!rx_only) {
- 	udpRXfifo = create_fifo(50, BUFSIZE*4);
- 	UdpRxInit(&udpsock,UDP_RXSAMPLEPORT,udprxfunc,&keeprunning);
- 	printf("App->Pluto: UDP Port:    %d\n",UDP_RXSAMPLEPORT);
-@@ -124,9 +133,10 @@ int main ()
- 	printf("Status messages Port:    %d\n",UDP_STATUSPORT);
- 
- 	create_interpolator();
++	udpRXfifo = create_fifo(tx_raw_iq ? 9 : 50, BUFSIZE*4);
+@@ -126 +138,2 @@ int main ()
+-	create_interpolator();
++	if (!tx_raw_iq) create_interpolator();
 +	}
- 	pluto_setup();
- 
+@@ -129 +142 @@ int main ()
 -	printf("Starting RX/TX streaming (press Ctrl+C to cancel)\n");
 +	printf("Starting %s streaming (press Ctrl+C to cancel)\n", rx_only ? "RX" : "RX/TX");
- 	while (keeprunning)
- 	{
- 		runloop();
-@@ -142,7 +152,7 @@ int main ()
- 
- 	if (ctx) iio_context_destroy(ctx);
- 
+@@ -145 +158 @@ int main ()
 -	destroy_interpolator();
 +	if (!rx_only) destroy_interpolator();
- 	printf("exit program\n");
- 	exit(0);
- 
 diff --git a/pluto.h b/pluto.h
-index 6ef26c8..ec1db59 100644
+index 6ef26c8..d2dfd42 100644
 --- a/pluto.h
 +++ b/pluto.h
-@@ -35,9 +35,15 @@
- // IP address of the application.
- #define UDP_IPADDRESS ""							// if empty, the local IP will be used
- 										
+@@ -37,0 +38 @@
 +#ifndef UDP_TXSAMPLEPORT
- #define UDP_TXSAMPLEPORT  40808			// samples from Pluto are send as UDP frames to this port
+@@ -38,0 +40,2 @@
 +#endif
 +#ifndef UDP_RXSAMPLEPORT
- #define UDP_RXSAMPLEPORT  40808			// samples received on this port are sent to pluto for transmission
+@@ -39,0 +43,2 @@
 +#endif
 +#ifndef UDP_STATUSPORT
- #define UDP_STATUSPORT	  40810			// this program sends status information
+@@ -40,0 +46 @@
 +#endif
- 
- // the pluto runs with its selected sample rate
- // these two settings reduce the load on the UDP interface, not the pluto itself
-@@ -62,8 +68,12 @@
- 
- #define UDPFRAG 32768			// max size of an UDP fragment
- 
+@@ -64,0 +71 @@
 +#ifndef RXBUFSIZE
- #define RXBUFSIZE	(180000*1) 
+@@ -65,0 +73,2 @@
 +#endif
 +#ifndef BUFSIZE
- #define BUFSIZE 	(180000*1)
+@@ -66,0 +76 @@
 +#endif
- 
- #define MHZ(x) ((long long)(x*1000000.0 + .5))
- #define GHZ(x) ((long long)(x*1000000000.0 + .5))
-@@ -107,3 +117,6 @@ extern stream_cfg txcfg;
- extern char *myIP;
- extern int udpRXfifo;
- extern int crossbandrepeater;
+@@ -109,0 +120,5 @@ extern int crossbandrepeater;
 +
 +// QO100_TRX2 integration: optional receive-only mode.
 +extern int rx_only;
++extern int tx_raw_iq;
++void sendfifostat();
+diff --git a/pluto_config.txt b/pluto_config.txt
+index fa60a20..4e9e100 100644
+--- a/pluto_config.txt
++++ b/pluto_config.txt
+@@ -21 +21 @@ PLUTO_ID    ip:192.168.10.25
+-TX_FREQ     435.450
++TX_FREQ     1290.250
+@@ -25 +25 @@ TX_FREQ     435.450
+-RX_FREQ     739.450
++RX_FREQ     739.750
+@@ -46 +46 @@ RX_BANDWIDTH    1
+-CROSSBANDREPEATER 1
++CROSSBANDREPEATER 0
+@@ -48,0 +49,2 @@ CROSSBANDREPEATER 1
++# QO100_TRX2: receive only until TX processing is implemented.
++RX_ONLY 1
 diff --git a/pluto_run.cpp b/pluto_run.cpp
-index 71830b8..703a2c4 100644
+index 71830b8..6201655 100644
 --- a/pluto_run.cpp
 +++ b/pluto_run.cpp
-@@ -72,7 +72,10 @@ void runloop()
- 
- 	// Refill RX buffer
- 	nbytes_rx = iio_buffer_refill(rxbuf);
+@@ -75 +75,4 @@ void runloop()
 -	if (nbytes_rx < 0) { printf("Error refilling buf %d\n",(int) nbytes_rx); }
 +	if (nbytes_rx < 0) {
 +		if (!keeprunning) return;
 +		fprintf(stderr,"Error refilling buf %d\n",(int)nbytes_rx); exit(1);
 +	}
- 
-     //timestamp("refill",0);
- 
-@@ -80,7 +83,8 @@ void runloop()
- 
- 	// sample buffer begins at p_start with length (BUFSIZE * 4) bytes
-     if(crossbandrepeater == 0)
+@@ -83 +86,2 @@ void runloop()
 -        send_buffer((uint8_t *)p_start, (RXBUFSIZE*4));
 +        send_buffer((uint8_t *)p_start, (int)nbytes_rx);
 +	if (rx_only) return;
-         
-     //timestamp("send buffer",0);
- 
+@@ -111,0 +116,4 @@ void runloop()
++    if (tx_raw_iq && !lenfifo) {
++        memset(pidata, 0, sizeof(pidata));
++        lenfifo = sizeof(pidata);
++    }
+@@ -121 +129 @@ void runloop()
+-	    if (nbytes_tx < 0) { printf("Error pushing buf %d\n", (int) nbytes_tx); }
++	    if (nbytes_tx < 0 && keeprunning) { fprintf(stderr,"Error pushing buf %d\n", (int)nbytes_tx); exit(1); }
+@@ -128,0 +137 @@ void runloop()
++    if (tx_raw_iq) sendfifostat();
+@@ -351,0 +361,21 @@ void push_udp_data(uint8_t *buffer, int len)
++    if (tx_raw_iq) {
++        // PTXI: sequence, byte offset, full block size, then interleaved
++        // signed I16/Q16 little endian at the hardware sample rate.
++        static uint8_t block[BUFSIZE*4];
++        static uint32_t current=0, filled=0;
++        static bool have=false, complete=false;
++        if (len<=16 || memcmp(buffer,"PTXI",4)) return;
++        uint32_t fields[3];memcpy(fields,buffer+4,12);
++        const uint32_t id=ntohl(fields[0]), offset=ntohl(fields[1]), total=ntohl(fields[2]);
++        const uint32_t count=len-16;
++        if (total!=sizeof(block) || offset%4 || count%4 || offset>total || count>total-offset) return;
++        if (!have || id!=current) {
++            if (have && (int32_t)(id-current)<=0) return;
++            current=id;filled=0;have=true;complete=false;
++        }
++        if (complete || offset!=filled) return;
++        memcpy(block+offset,buffer+16,count);filled+=count;
++        if (filled==total) { write_fifo(udpRXfifo,block,total);complete=true; }
++        return;
++    }
++
 diff --git a/pluto_setup.cpp b/pluto_setup.cpp
-index c8e1cea..cdaae16 100644
+index c8e1cea..2cd58c2 100644
 --- a/pluto_setup.cpp
 +++ b/pluto_setup.cpp
-@@ -68,7 +68,7 @@ void pluto_setup()
- {
- 	int ret; 
- 
+@@ -56,0 +57,7 @@ void sendfifostat()
++    if (tx_raw_iq) {
++        static uint32_t sequence = 0;
++        uint32_t p[4] = { htonl(0x50545853), htonl(++sequence),
++                         htonl(fifo_usedspace(udpRXfifo)), htonl(8) };
++        sendUDP(myIP, UDP_STATUSPORT, (uint8_t*)p, sizeof(p));
++        return;
++    }
+@@ -71 +78 @@ void pluto_setup()
 -	fifostat = start_timer(50,sendfifostat);
-+	if (!rx_only) fifostat = start_timer(50,sendfifostat);
- 
- 	// set default configuration from pluto.h
- 
-@@ -154,36 +154,45 @@ void pluto_setup()
- 		exit(0);
-     }
- 
++	if (!rx_only && !tx_raw_iq) fifostat = start_timer(50,sendfifostat);
+@@ -156,0 +164 @@ void pluto_setup()
 +	if (!rx_only) {
- 	ret = get_ad9361_stream_dev(ctx, TX, &tx);
- 	if(!ret) {printf("TX streaming device not found. Pluto error\n"); exit(0);}
+@@ -158,0 +167 @@ void pluto_setup()
 +	}
- 	ret = get_ad9361_stream_dev(ctx, RX, &rx);
- 	if(!ret) {printf("TX streaming device not found. Pluto error\n"); exit(0);}
- 
+@@ -162,2 +171,2 @@ void pluto_setup()
 -	cfg_ad9361_streaming_ch(ctx, &rxcfg, RX, 0);
 -	cfg_ad9361_streaming_ch(ctx, &txcfg, TX, 0);
 +	if (!cfg_ad9361_streaming_ch(ctx, &rxcfg, RX, 0)) { fprintf(stderr,"RX configuration failed\n"); exit(1); }
 +	if (!rx_only && !cfg_ad9361_streaming_ch(ctx, &txcfg, TX, 0)) { fprintf(stderr,"TX configuration failed\n"); exit(1); }
- 
- 	get_ad9361_stream_ch(ctx, RX, rx, 0, &rx0_i);
- 	get_ad9361_stream_ch(ctx, RX, rx, 1, &rx0_q);
+@@ -166,0 +176,2 @@ void pluto_setup()
 +	if (!rx0_i || !rx0_q) { fprintf(stderr,"RX channels missing\n"); exit(1); }
 +	if (!rx_only) {
- 	get_ad9361_stream_ch(ctx, TX, tx, 0, &tx0_i);
- 	get_ad9361_stream_ch(ctx, TX, tx, 1, &tx0_q);
+@@ -168,0 +180,2 @@ void pluto_setup()
 +	if (!tx0_i || !tx0_q) { fprintf(stderr,"TX channels missing\n"); exit(1); }
 +	}
- 
- 	if(orig_srate < 2100000)
- 	{
- 		iio_device *dev9 = iio_context_find_device(ctx, "ad9361-phy");
+@@ -173 +186 @@ void pluto_setup()
 -		ad9361_set_bb_rate(dev9,orig_srate);
 +		if (!dev9 || ad9361_set_bb_rate(dev9,orig_srate) < 0) { fprintf(stderr,"Cannot set sample rate\n"); exit(1); }
- 	}
- 
+@@ -175,0 +189 @@ void pluto_setup()
 +
- 	iio_channel_enable(rx0_i);
- 	iio_channel_enable(rx0_q);
+@@ -178,2 +192 @@ void pluto_setup()
 -	iio_channel_enable(tx0_i);
 -	iio_channel_enable(tx0_q);
 +	if (!rx_only) { iio_channel_enable(tx0_i); iio_channel_enable(tx0_q); }
- 
- 	rxbuf = iio_device_create_buffer(rx, RXBUFSIZE, false);
- 	if (!rxbuf) {
+@@ -183 +196 @@ void pluto_setup()
 -		perror("Could not create RX buffer");
 +		perror("Could not create RX buffer"); exit(1);
- 	}
+@@ -184,0 +198 @@ void pluto_setup()
 +	if (!rx_only) {
- 	txbuf = iio_device_create_buffer(tx, BUFSIZE, false);
- 	if (!txbuf) {
+@@ -187 +201,2 @@ void pluto_setup()
 -		perror("Could not create TX buffer");
 +		perror("Could not create TX buffer"); exit(1);
- 	}
 +	}
+@@ -188,0 +204 @@ void pluto_setup()
 +
- }
-\ No newline at end of file
 diff --git a/udp/udp.cpp b/udp/udp.cpp
-index 7521de7..0c38558 100755
+index 7521de7..4235977 100755
 --- a/udp/udp.cpp
 +++ b/udp/udp.cpp
-@@ -58,13 +58,17 @@ void UdpRxInit(int *sock, int port, void (*rxfunc)(uint8_t *, int, struct sockad
- 		exit(0);
- 	}
- 	
+@@ -61 +61,3 @@ void UdpRxInit(int *sock, int port, void (*rxfunc)(uint8_t *, int, struct sockad
 -	char enable = 1;
++    int receive_buffer=4*1024*1024;
++    setsockopt(*sock,SOL_SOCKET,SO_RCVBUF,&receive_buffer,sizeof(receive_buffer));
 +	int enable = 1;
- 	setsockopt(*sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int));
- 
- 	memset(&sin, 0, sizeof(struct sockaddr_in));
- 	sin.sin_family = AF_INET;
- 	sin.sin_port = htons(port);
+@@ -66,0 +69,3 @@ void UdpRxInit(int *sock, int port, void (*rxfunc)(uint8_t *, int, struct sockad
 +#ifdef QO100_LOCAL_ONLY
 +    sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 +#else
-     sin.sin_addr.s_addr = INADDR_ANY;
+@@ -67,0 +73 @@ void UdpRxInit(int *sock, int port, void (*rxfunc)(uint8_t *, int, struct sockad
 +#endif
- 
- 	if (bind(*sock, (struct sockaddr *)&sin, sizeof(struct sockaddr_in)) != 0)
- 	{
-@@ -98,6 +102,9 @@ void* threadfunction(void* param)
-         recvlen = recvfrom(*rxcfg.sock, rxbuf, maxUDPpacketsize, 0, (struct sockaddr *)&fromSock, &fromlen);
- 		if (recvlen > 0)
-         {
+@@ -100,0 +107,3 @@ void* threadfunction(void* param)
 +#ifdef QO100_LOCAL_ONLY
 +            if (ntohl(fromSock.sin_addr.s_addr) != INADDR_LOOPBACK) continue;
 +#endif
-             // data received, send it to callback function
-             (*rxcfg.rxfunc)((uint8_t *)rxbuf,recvlen, &fromSock);
-         }
-@@ -113,6 +120,9 @@ void* threadfunction(void* param)
- // this function can always be used without any initialisation
- void sendUDP(char *destIP, int destPort, uint8_t *pdata, int len)
- {
+@@ -115,0 +125,3 @@ void sendUDP(char *destIP, int destPort, uint8_t *pdata, int len)
 +#ifdef QO100_LOCAL_ONLY
 +    if (strcmp(destIP, "127.0.0.1") != 0) { fprintf(stderr,"Pluto UDP link must use 127.0.0.1\n"); exit(1); }
 +#endif
-     int sockfd; 
-     struct sockaddr_in     servaddr; 
-   
-diff --git a/pluto_config.txt b/pluto_config.txt
---- a/pluto_config.txt
-+++ b/pluto_config.txt
-@@ -18,11 +18,11 @@
- 
- # === TX frequency ===
- # this is the transmission frequency of the Pluto
--TX_FREQ     435.450
-+TX_FREQ     1290.250
- 
- # === RX freuquency ===
- # this is the RX frequency of the Pluto
--RX_FREQ     739.450
-+RX_FREQ     739.750
- 
- # === TX power ===
- # this is the transmission power setting for the Pluto in dBm
-@@ -43,6 +43,8 @@
- # === crossband repeater ===
- # 0 ... normal mode (using an application for sample processing)
- # 1 ... crossband repeater mode, send all data which are received without any change
--CROSSBANDREPEATER 1
-+CROSSBANDREPEATER 0
- 
- 
-+# QO100_TRX2: receive only until TX processing is implemented.
-+RX_ONLY 1

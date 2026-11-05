@@ -9,6 +9,7 @@ import threading
 import time
 import numpy as np
 from protocol import Assembler, subscription, tune, audio_packet, HEADER, STATE, AUDIO
+from protocol import TX_STATE, tx_control, tx_audio
 from decimal import Decimal
 
 
@@ -27,15 +28,24 @@ class AudioReceiveState:
 
 
 class Receiver:
-    def __init__(self, host, port, rx_hz=10489748500, audio_sink=None, rx2_hz=10489600000):
+    def __init__(self, host, port, rx_hz=10489900000, audio_sink=None, rx2_hz=10489600000, tx_hz=2400400000):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
         self.sock.connect((host, port))
-        self.sock.settimeout(0.2)
+        self.sock.settimeout(0.02)
         self.assembler = Assembler()
         self.zoom_assembler = Assembler(1)
         self.zoom_frames = queue.Queue(maxsize=4)
         self.channels = {1: AudioReceiveState(rx_hz, audio_sink), 2: AudioReceiveState(rx2_hz)}
+        self.tx_lock = threading.RLock()
+        self.tx_command = (1, tx_hz, False)
+        self.tx_identity = None
+        self.tx_session = None
+        self.tx_applied_hz = None
+        self.tx_confirmed = False
+        self.tx_index = self.tx_packets = 0
+        self.tx_error = ""
+        self.tx_fill = self.tx_pluto_fill = self.tx_ppm = 0
         self.audio_frames = self.channels[1].frames
         self.audio2_frames = self.channels[2].frames
         self.frames = queue.Queue(maxsize=4)
@@ -65,6 +75,8 @@ class Receiver:
     def run(self):
         next_subscription = 0
         last_commands = None
+        last_tx = None
+        next_tx = 0
         while not self.stop.is_set():
             commands = tuple((stream, state.command) for stream, state in self.channels.items())
             if time.monotonic() >= next_subscription or commands != last_commands:
@@ -76,6 +88,15 @@ class Receiver:
                 except OSError as exc:
                     self.error = str(exc)
                 next_subscription = time.monotonic() + 2
+            with self.tx_lock:
+                command = self.tx_command
+                if self.tx_session is not None and (command != last_tx or time.monotonic() >= next_tx):
+                    try:
+                        self.sock.send(tx_control(*command, self.tx_session))
+                        last_tx = command
+                        next_tx = time.monotonic() + .5
+                    except OSError as exc:
+                        self.tx_error = str(exc)
             try:
                 packet = self.sock.recv(65536)
             except socket.timeout:
@@ -88,9 +109,31 @@ class Receiver:
                 continue
             if len(packet) >= 64 and packet[:4] == b"QTR2" and packet[4] == 1:
                 fields = HEADER.unpack_from(packet)
+                if packet[5] == TX_STATE:
+                    with self.tx_lock:
+                        if (len(packet) == 64 and fields[3] == 64 and fields[4] == 3 and
+                            fields[5] == self.tx_command[0] and fields[15] == self.tx_session):
+                            self.tx_error = "TX frequency outside capture window" if fields[13] else ""
+                            identity = (fields[15], fields[7])
+                            if identity != self.tx_identity:
+                                self.tx_index = 0
+                            self.tx_identity = identity
+                            self.tx_applied_hz = fields[8]
+                            self.tx_confirmed = bool(fields[11]) and not fields[13]
+                            self.tx_fill, self.tx_pluto_fill = fields[10], fields[12]
+                            self.tx_ppm = fields[14] if fields[14] < 2**31 else fields[14]-2**32
+                    continue
                 if packet[5] == STATE:
                     state = self.channels.get(fields[4])
                     if len(packet) == 64 and fields[3] == 64 and state and fields[5] == state.command[0]:
+                        with self.tx_lock:
+                            if self.tx_session != fields[15]:
+                                self.tx_session = fields[15]
+                                # A backend restart always requires a new manual PTT press.
+                                request, hz, _ = self.tx_command
+                                self.tx_command = ((request+1)&0xffffffff, hz, False)
+                                self.tx_confirmed = False
+                                self.tx_identity = None
                         state.tune_error = "RX frequency outside capture window" if fields[13] else ""
                         if not fields[13]:
                             identity = (fields[15], fields[7])
@@ -141,7 +184,32 @@ class Receiver:
         state = self.channels[stream_id]
         state.command = ((state.command[0] + 1) & 0xffffffff, hz)
 
+    def set_tx(self, frequency=None, enabled=None):
+        with self.tx_lock:
+            request, hz, ptt = self.tx_command
+            self.tx_command = ((request+1)&0xffffffff, hz if frequency is None else frequency,
+                               ptt if enabled is None else enabled)
+            self.tx_confirmed = False
+
+    def send_microphone(self, samples):
+        with self.tx_lock:
+            _, hz, enabled = self.tx_command
+            if not enabled or not self.tx_confirmed or self.tx_identity is None or self.tx_applied_hz != hz:
+                return
+            session, epoch = self.tx_identity
+            try:
+                self.sock.send(tx_audio(epoch, self.tx_index, hz, session, samples))
+                self.tx_index += len(samples)
+                self.tx_packets += 1
+            except OSError as exc:
+                self.tx_error = str(exc)
+
     def close(self):
+        self.set_tx(enabled=False)
+        with self.tx_lock:
+            if self.tx_session is not None:
+                try: self.sock.send(tx_control(*self.tx_command, self.tx_session))
+                except OSError: pass
         self.stop.set()
         self.thread.join(timeout=1)
         self.sock.close()
@@ -154,7 +222,7 @@ def save_capture(path, frame):
 
 
 def headless(args):
-    receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), rx2_hz=parse_frequency(args.rx2_frequency))
+    receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), rx2_hz=parse_frequency(args.rx2_frequency), tx_hz=parse_frequency(args.tx_frequency))
     start = time.monotonic()
     received = []
     try:
@@ -244,12 +312,12 @@ def gui(args):
     import tkinter as tk
     from PIL import ImageTk
     root = tk.Tk()
-    root.title("QO100_TRX2 — USB RX Test")
-    root.geometry("1120x950")
+    root.title("QO100_TRX2 — USB RX/TX Test")
+    root.geometry("1120x1030")
     root.configure(bg="#0b1321")
     from audio import AudioPlayer
     player = None if args.no_audio else AudioPlayer()
-    receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), player.add if player else None, rx2_hz=parse_frequency(args.rx2_frequency))
+    receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), player.add if player else None, rx2_hz=parse_frequency(args.rx2_frequency), tx_hz=parse_frequency(args.tx_frequency))
     history, zoom_history = [], []
     title = tk.Label(root, text=f"QO100_TRX2 — {args.host}:{args.port}", bg="#0b1321", fg="#e8edf7", font=("sans", 15))
     title.pack(pady=8)
@@ -293,6 +361,44 @@ def gui(args):
     tk.Button(tuning2, text="Tune RX2", command=apply_tuning2).pack(side="left")
     monitor2 = tk.Label(root, text="RX2: waiting for 12 kHz audio", bg="#0b1321", fg="#a4b5cd", anchor="w")
     monitor2.pack(fill="x", padx=12)
+    from audio import Microphone
+    microphone = None
+    tx_controls = tk.Frame(root, bg="#0b1321")
+    tx_controls.pack(pady=3)
+    tk.Label(tx_controls, text="TX MHz (USB)", bg="#0b1321", fg="#e8edf7").pack(side="left")
+    tx_frequency = tk.StringVar(value=args.tx_frequency)
+    tx_entry = tk.Entry(tx_controls, textvariable=tx_frequency, width=20)
+    tx_entry.pack(side="left", padx=8)
+    def apply_tx():
+        try: receiver.set_tx(frequency=parse_frequency(tx_frequency.get()))
+        except (ValueError, ArithmeticError): receiver.tx_error = "Invalid TX frequency"
+    tx_entry.bind("<Return>", lambda event: apply_tx())
+    tk.Button(tx_controls, text="Tune TX", command=apply_tx).pack(side="left")
+    def release_ptt(event=None):
+        nonlocal microphone
+        receiver.set_tx(enabled=False)
+        if microphone:
+            microphone.close()
+            microphone = None
+        ptt.configure(text="PTT halten — Mikrofon senden", bg="#d9d9d9")
+    def press_ptt(event=None):
+        nonlocal microphone
+        if microphone is not None: return
+        try: hz = parse_frequency(tx_frequency.get())
+        except (ValueError, ArithmeticError):
+            receiver.tx_error = "Invalid TX frequency"
+            return
+        receiver.set_tx(frequency=hz, enabled=True)
+        microphone = Microphone(receiver.send_microphone)
+        ptt.configure(text="SENDEN — zum Stoppen loslassen", bg="#f07060")
+    ptt = tk.Button(tx_controls, text="PTT halten — Mikrofon senden")
+    ptt.pack(side="left", padx=12)
+    ptt.bind("<ButtonPress-1>", press_ptt)
+    root.bind("<ButtonRelease-1>", lambda event: release_ptt() if microphone else None)
+    root.bind("<FocusOut>", lambda event: release_ptt() if event.widget is root and microphone else None)
+    root.bind("<Escape>", release_ptt)
+    tx_monitor = tk.Label(root, text="TX: PTT aus", bg="#0b1321", fg="#a4b5cd", anchor="w")
+    tx_monitor.pack(fill="x", padx=12)
     canvas = tk.Label(root, bg="#0b1321", text="Waiting for spectrum data…", fg="#a4b5cd")
     canvas.pack(fill="both", expand=True)
     zoom_canvas = tk.Label(root, bg="#0b1321", text="Waiting for zoom…", fg="#a4b5cd")
@@ -351,6 +457,10 @@ def gui(args):
                 ImageDraw.Draw(combined).text((20,712),
                     f"RX2 monitor | {rx2.applied_hz} Hz | 12 kHz PCM mono | {rx2.received} packets | {rx2.samples} samples | RMS {rx2.rms:.5f} | no soundcard output", fill="#a4b5cd")
                 combined.save(args.screenshot)
+        if microphone and (microphone.error or not receiver.tx_command[2]):
+            if microphone.error: receiver.tx_error = microphone.error
+            release_ptt()
+        tx_monitor.configure(text=f"TX {'SENDEN' if receiver.tx_confirmed else 'PTT aus / wartet'} | {receiver.tx_applied_hz} Hz | Mic 48 → 12 kHz | UDP {receiver.tx_packets} packets | FIFO {receiver.tx_fill}/2880 | Pluto {receiver.tx_pluto_fill}/8 | {receiver.tx_ppm} ppm | {receiver.tx_error}")
         second = receiver.channels[2]
         # Monitoring only: discard already-counted RX2 test packets; never send to AudioPlayer.
         while True:
@@ -367,6 +477,7 @@ def gui(args):
         root.after(50, tick)
 
     def close():
+        release_ptt()
         receiver.close()
         if player:
             player.close()
@@ -376,7 +487,10 @@ def gui(args):
                       "audio_error":player.error if player else "muted", "underruns":player.underruns if player else 0,
                       "rx2_packets":receiver.channels[2].received,"rx2_samples":receiver.channels[2].samples,
                       "rx2_applied_hz":receiver.channels[2].applied_hz,"rx2_rms":receiver.channels[2].rms,
-                      "invalid_audio":receiver.invalid_audio}
+                      "invalid_audio":receiver.invalid_audio,
+                      "tx_packets":receiver.tx_packets,"tx_applied_hz":receiver.tx_applied_hz,
+                      "tx_audio_fill":receiver.tx_fill,"tx_pluto_fill":receiver.tx_pluto_fill,
+                      "tx_ppm":receiver.tx_ppm,"tx_error":receiver.tx_error}
             args.audio_report.write_text(json.dumps(report,indent=2)+"\n")
         root.destroy()
 
@@ -397,7 +511,8 @@ def parse_frequency(text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rx-frequency", default="10489.748500", help="USB carrier frequency in MHz")
+    parser.add_argument("--rx-frequency", default="10489.900000", help="USB carrier frequency in MHz")
+    parser.add_argument("--tx-frequency", default="2400.400000", help="Independent USB uplink carrier in MHz")
     parser.add_argument("--rx2-frequency", default="10489.600000", help="Independent RX2 USB carrier in MHz (monitor only)")
     parser.add_argument("--no-audio", action="store_true", help="Disable soundcard playback")
     parser.add_argument("--audio-report", type=Path, help="Write playback test statistics on GUI close")

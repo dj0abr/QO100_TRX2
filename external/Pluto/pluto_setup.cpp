@@ -54,6 +54,13 @@ int fifostat;
 
 void sendfifostat()
 {
+    if (tx_raw_iq) {
+        static uint32_t sequence = 0;
+        uint32_t p[4] = { htonl(0x50545853), htonl(++sequence),
+                         htonl(fifo_usedspace(udpRXfifo)), htonl(8) };
+        sendUDP(myIP, UDP_STATUSPORT, (uint8_t*)p, sizeof(p));
+        return;
+    }
 	int fs = fifo_usedspace(udpRXfifo);
 	uint8_t p[4];
 	p[0] = fs >> 24;
@@ -68,7 +75,7 @@ void pluto_setup()
 {
 	int ret; 
 
-	if (!rx_only) fifostat = start_timer(50,sendfifostat);
+	if (!rx_only && !tx_raw_iq) fifostat = start_timer(50,sendfifostat);
 
 	// set default configuration from pluto.h
 

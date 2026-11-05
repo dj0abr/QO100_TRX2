@@ -113,6 +113,10 @@ void runloop()
         }
     }
 
+    if (tx_raw_iq && !lenfifo) {
+        memset(pidata, 0, sizeof(pidata));
+        lenfifo = sizeof(pidata);
+    }
     //timestamp("getFifoData",0);
     if(lenfifo)
     {
@@ -122,7 +126,7 @@ void runloop()
         //timestamp("pushing",0);
         nbytes_tx = iio_buffer_push(txbuf);
         //timestamp("pushed",0);
-	    if (nbytes_tx < 0) { printf("Error pushing buf %d\n", (int) nbytes_tx); }
+	    if (nbytes_tx < 0 && keeprunning) { fprintf(stderr,"Error pushing buf %d\n", (int)nbytes_tx); exit(1); }
     }
     else
     {
@@ -130,6 +134,7 @@ void runloop()
         usleep(100);
     }
   
+    if (tx_raw_iq) sendfifostat();
     /*
     // activate for loop timing check
     static int maxdur = 0;
@@ -353,6 +358,27 @@ liquid_float_complex sampleToComplex(uint8_t *rxb)
 // push data into plutorxbuf until it is filled with BUFSIZE*4
 void push_udp_data(uint8_t *buffer, int len)
 {
+    if (tx_raw_iq) {
+        // PTXI: sequence, byte offset, full block size, then interleaved
+        // signed I16/Q16 little endian at the hardware sample rate.
+        static uint8_t block[BUFSIZE*4];
+        static uint32_t current=0, filled=0;
+        static bool have=false, complete=false;
+        if (len<=16 || memcmp(buffer,"PTXI",4)) return;
+        uint32_t fields[3];memcpy(fields,buffer+4,12);
+        const uint32_t id=ntohl(fields[0]), offset=ntohl(fields[1]), total=ntohl(fields[2]);
+        const uint32_t count=len-16;
+        if (total!=sizeof(block) || offset%4 || count%4 || offset>total || count>total-offset) return;
+        if (!have || id!=current) {
+            if (have && (int32_t)(id-current)<=0) return;
+            current=id;filled=0;have=true;complete=false;
+        }
+        if (complete || offset!=filled) return;
+        memcpy(block+offset,buffer+16,count);filled+=count;
+        if (filled==total) { write_fifo(udpRXfifo,block,total);complete=true; }
+        return;
+    }
+
     for(int i=0; i<len; i+=8)
     {
         liquid_float_complex c = sampleToComplex(buffer+i);

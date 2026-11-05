@@ -19,8 +19,10 @@ struct Config {
     uint16_t gui_port = 40900;
     uint32_t fft_size = 8192;
     uint32_t spectrum_fps = 20;
-    uint64_t initial_rx_hz = 10489748500ULL;
+    uint64_t initial_rx_hz = 10489900000ULL;
     uint64_t initial_rx2_hz = 10489600000ULL;
+    uint64_t initial_tx_hz = 2400400000ULL;
+    double tx_attenuation_db = 30;
     double subscription_seconds = 8;
     uint32_t iq_rate() const { return pluto_sample_rate / 2; }
     void validate() const;

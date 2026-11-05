@@ -3,7 +3,9 @@
 #include "qo100/protocol.hpp"
 #include "qo100/spectrum.hpp"
 #include "qo100/rx_channel.hpp"
+#include "qo100/tx_channel.hpp"
 #include <arpa/inet.h>
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -62,7 +64,7 @@ int main(int argc, char** argv) {
             std::string arg = argv[i];
             if (arg == "--help") {
                 std::cout << "qo100_backend [--config FILE] [--source pluto|synthetic] [--duration SECONDS]\n"
-                          << "Pluto mode automatically starts the local RX-only driver. GUI UDP port: config/backend.conf.\n";
+                          << "Pluto mode automatically starts the local full-duplex driver. GUI UDP port: config/backend.conf.\n";
                 return 0;
             }
             if (i + 1 >= argc) throw std::runtime_error("Missing argument for " + arg);
@@ -78,7 +80,7 @@ int main(int argc, char** argv) {
         sigemptyset(&action.sa_mask);
         sigaction(SIGINT, &action, nullptr); sigaction(SIGTERM, &action, nullptr);
         Socket gui(c.gui_bind, c.gui_port);
-        std::unique_ptr<Socket> iq;
+        std::unique_ptr<Socket> iq, tx_status;
         std::unique_ptr<qo100::PlutoProcess> pluto;
         sockaddr_in peer{};
         bool subscribed = false;
@@ -95,12 +97,50 @@ int main(int argc, char** argv) {
         std::array<ReceiverState,2> receivers;
         receivers[0].frequency=c.initial_rx_hz;
         receivers[1].frequency=c.initial_rx2_hz;
+        qo100::TxChannel tx;
+        uint64_t tx_frequency=c.initial_tx_hz, tx_blocks=0;
+        uint32_t tx_epoch=1,tx_request=0,tx_block_id=0,status_sequence=0;
+        bool tx_enabled=false,tx_have_request=false,have_status=false;
+        int pluto_fill=0;
+        uint16_t tx_command_status=0;
+        auto last_tx_audio=Clock::now()-std::chrono::seconds(10),last_tx_control=last_tx_audio;
+        auto last_tx_feedback=Clock::now(),last_tx_state=last_tx_audio;
+        auto mute_tx=[&] { if(tx_enabled) { tx_enabled=false;++tx_epoch;tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz)); } };
+        tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
         uint32_t zoom_frame_id = 0;
         auto stamp = [] { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); };
         auto active = [&] { return subscribed && std::chrono::duration<double>(Clock::now()-last_subscription).count() <= c.subscription_seconds; };
         auto send_packet = [&](const std::vector<uint8_t>& packet) {
             if (!active()) return;
             if (sendto(gui.fd,packet.data(),packet.size(),0,reinterpret_cast<const sockaddr*>(&peer),sizeof(peer)) != static_cast<ssize_t>(packet.size())) ++send_errors;
+        };
+        auto send_tx_state=[&]() {
+            send_packet(qo100::tx_state_packet(tx_request,tx_frequency,tx_epoch,session_id,tx_command_status,
+                tx_enabled,tx.level(),pluto_fill,int32_t(std::lround(tx.ppm()))));
+            last_tx_state=Clock::now();
+        };
+        sockaddr_in driver{};driver.sin_family=AF_INET;driver.sin_port=htons(qo100::pluto_tx_port);
+        driver.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
+        auto render_tx=[&] {
+            const bool recent=tx_enabled && active() && Clock::now()-last_tx_audio<std::chrono::milliseconds(200);
+            const auto samples=tx.render(recent);
+            if(tx_status) {
+                constexpr size_t chunk=12000;
+                for(size_t start=0;start<samples.size();start+=chunk) {
+                    const size_t count=std::min(chunk,samples.size()-start);
+                    std::vector<uint8_t> p(16+count*4);
+                    const uint32_t h[4]={htonl(0x50545849),htonl(tx_block_id),htonl(start*4),htonl(samples.size()*4)};
+                    std::memcpy(p.data(),h,16);
+                    for(size_t i=0;i<count;++i) {
+                        const auto x=samples[start+i];
+                        const uint16_t v[2]={uint16_t(int16_t(std::lround(std::clamp(x.real(),-1.f,1.f)*32767))),
+                                             uint16_t(int16_t(std::lround(std::clamp(x.imag(),-1.f,1.f)*32767)))};
+                        for(size_t k=0;k<2;++k) { p[16+4*i+2*k]=v[k]&255;p[17+4*i+2*k]=v[k]>>8; }
+                    }
+                    if(sendto(tx_status->fd,p.data(),p.size(),0,reinterpret_cast<sockaddr*>(&driver),sizeof(driver))!=ssize_t(p.size())) ++send_errors;
+                }
+            }
+            ++tx_block_id;++tx_blocks;
         };
         auto make_zoom = [&] {
             return std::make_unique<qo100::Spectrum>(75000,8192,c.spectrum_fps,
@@ -140,22 +180,23 @@ int main(int argc, char** argv) {
         };
         if (source == "pluto") {
             // Bind first, before the child can send its first samples; only localhost.
+            tx_status = std::make_unique<Socket>("127.0.0.1",qo100::pluto_status_port);
             iq = std::make_unique<Socket>("127.0.0.1", qo100::pluto_iq_port);
             const auto binary = std::filesystem::canonical("/proc/self/exe").parent_path() / "pluto";
             pluto = std::make_unique<qo100::PlutoProcess>(c, binary);
-            std::cout << "Started local RX-only Pluto driver; log: " << pluto->log_path() << '\n';
+            std::cout << "Started local full-duplex Pluto driver; log: " << pluto->log_path() << '\n';
         }
         std::cout << "Source=" << source << "; RX Pluto=" << c.pluto_rx_hz << " Hz; RF center=" << c.rx_center_hz
                   << " Hz; IQ=" << c.iq_rate() << " complex samples/s; FFT=" << c.fft_size << '\n'
                   << "GUI subscribes via UDP " << c.gui_bind << ':' << c.gui_port << "\n";
         const auto start = Clock::now();
-        auto next_synthetic = start, last_iq = start, last_stats = start;
+        auto next_synthetic = start, next_tx=start, last_iq = start, last_stats = start;
         bool received_iq = false;
         uint64_t last_samples = 0;
         std::array<uint8_t, 65536> buffer{};
         while (running && (!duration || std::chrono::duration<double>(Clock::now() - start).count() < duration)) {
-            pollfd fds[2]{{gui.fd, POLLIN, 0}, {iq ? iq->fd : -1, POLLIN, 0}};
-            if (poll(fds, 2, 10) < 0 && errno != EINTR) throw std::runtime_error("poll failed");
+            pollfd fds[3]{{gui.fd, POLLIN, 0}, {iq ? iq->fd : -1, POLLIN, 0}, {tx_status ? tx_status->fd : -1,POLLIN,0}};
+            if (poll(fds, 3, 5) < 0 && errno != EINTR) throw std::runtime_error("poll failed");
             if (fds[0].revents & POLLIN) {
                 for (int budget = 0; budget < 64; ++budget) {
                     sockaddr_in from{};
@@ -165,9 +206,35 @@ int main(int argc, char** argv) {
                     if (qo100::is_subscription(buffer.data(), static_cast<size_t>(n))) {
                         if (!subscribed || from.sin_addr.s_addr != peer.sin_addr.s_addr || from.sin_port != peer.sin_port)
                             std::cout << "GUI subscriber " << inet_ntoa(from.sin_addr) << ':' << ntohs(from.sin_port) << '\n';
-                        if (!subscribed || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) for(auto& rx:receivers) rx.have_request=false;
+                        if (!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) {
+                            for(auto& rx:receivers) rx.have_request=false;
+                            mute_tx();tx_have_request=false;
+                        }
                         peer = from; subscribed = true; last_subscription = Clock::now();
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
+                        qo100::TxControl control{};qo100::TxAudio audio{};
+                        if(qo100::parse_tx_control(buffer.data(),size_t(n),control)) {
+                            if(control.session!=session_id || (tx_have_request && control.request!=tx_request && int32_t(control.request-tx_request)<0)) continue;
+                            const bool valid=control.frequency>=c.tx_center_hz-275000 && control.frequency<=c.tx_center_hz+275000;
+                            if(tx_have_request && control.request==tx_request &&
+                               (control.frequency!=tx_frequency || control.enabled!=tx_enabled)) { send_tx_state();continue; }
+                            tx_request=control.request;tx_have_request=true;tx_command_status=valid?0:1;
+                            if(valid) {
+                                if(control.frequency!=tx_frequency || control.enabled!=tx_enabled) {
+                                    tx_frequency=control.frequency;tx_enabled=control.enabled;++tx_epoch;
+                                    tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
+                                    last_tx_audio=Clock::now()-std::chrono::seconds(10);
+                                    std::cout << "TX " << tx_frequency << " Hz; software PTT=" << tx_enabled << '\n';
+                                }
+                                last_tx_control=Clock::now();
+                            }
+                            send_tx_state();continue;
+                        }
+                        if(qo100::parse_tx_audio(buffer.data(),size_t(n),audio)) {
+                            if(tx_enabled && audio.session==session_id && audio.epoch==tx_epoch && audio.frequency==tx_frequency &&
+                               tx.add(audio.index,audio.samples)) last_tx_audio=Clock::now();
+                            continue;
+                        }
                         uint32_t stream_id=0, request=0; uint64_t frequency=0;
                         if(qo100::parse_tune(buffer.data(),static_cast<size_t>(n),stream_id,request,frequency)) {
                             auto& rx=receivers[stream_id-1];
@@ -186,7 +253,7 @@ int main(int argc, char** argv) {
                 }
             }
             if (iq && (fds[1].revents & POLLIN)) {
-                for (int budget = 0; budget < 256; ++budget) {
+                for (int budget = 0; budget < 4; ++budget) {
                     sockaddr_in from{};
                     socklen_t len = sizeof(from);
                     auto n = recvfrom(iq->fd, buffer.data(), buffer.size(), 0, reinterpret_cast<sockaddr*>(&from), &len);
@@ -195,6 +262,27 @@ int main(int argc, char** argv) {
                     else { received_iq = true; last_iq = Clock::now(); }
                 }
             }
+            if(tx_enabled && (!active() || Clock::now()-last_tx_control>std::chrono::milliseconds(1500))) {
+                mute_tx();send_tx_state();
+            }
+            if(tx_status && (fds[2].revents&POLLIN)) {
+                bool update=false;
+                for(int budget=0;budget<128;++budget) {
+                    sockaddr_in from{};socklen_t len=sizeof(from);
+                    const auto n=recvfrom(tx_status->fd,buffer.data(),buffer.size(),0,reinterpret_cast<sockaddr*>(&from),&len);
+                    if(n<0) break;
+                    if(n!=16 || ntohl(from.sin_addr.s_addr)!=INADDR_LOOPBACK || std::memcmp(buffer.data(),"PTXS",4)) continue;
+                    uint32_t h[4];std::memcpy(h,buffer.data(),16);
+                    const auto seq=ntohl(h[1]),fill=ntohl(h[2]),capacity=ntohl(h[3]);
+                    if(capacity!=8 || fill>capacity || (have_status && int32_t(seq-status_sequence)<=0)) continue;
+                    have_status=true;status_sequence=seq;pluto_fill=fill;update=true;last_tx_feedback=Clock::now();
+                }
+                if(update) while(pluto_fill<4) { render_tx();++pluto_fill; }
+            }
+            if(source=="synthetic" && Clock::now()>=next_tx) {
+                render_tx();next_tx+=std::chrono::milliseconds(20);
+            }
+            if(tx_have_request && active() && Clock::now()-last_tx_state>std::chrono::milliseconds(250)) send_tx_state();
             if (source == "synthetic" && Clock::now() >= next_synthetic) {
                 // Exact-bin test tones at -150 kHz (-12.04 dBFS) and +75 kHz (-20 dBFS).
                 for (uint32_t i = 0; i < c.iq_rate() / 100; ++i) {
@@ -211,13 +299,15 @@ int main(int argc, char** argv) {
             }
             if (pluto) {
                 pluto->check();
+                if(Clock::now()-last_tx_feedback>std::chrono::seconds(received_iq?5:20))
+                    throw std::runtime_error("No Pluto TX FIFO feedback");
                 const auto idle = std::chrono::duration<double>(Clock::now() - last_iq).count();
                 if (idle > (received_iq ? 5 : 20)) throw std::runtime_error("No Pluto IQ samples; see " + pluto->log_path().string());
             }
             const double stats_interval = std::chrono::duration<double>(Clock::now() - last_stats).count();
             if (stats_interval >= 2) {
                 std::cout << "IQ samples=" << spectrum.samples() << "; rate=" << (spectrum.samples() - last_samples) / stats_interval
-                          << "/s; spectrum frames sent=" << frames_sent << "; malformed IQ=" << malformed_iq << "; send errors=" << send_errors << '\n';
+                          << "/s; spectrum frames sent=" << frames_sent << "; TX blocks=" << tx_blocks << "; TX audio FIFO=" << tx.level() << "; ASRC=" << tx.ppm() << " ppm; TX underruns=" << tx.underruns << "; malformed IQ=" << malformed_iq << "; send errors=" << send_errors << '\n';
                 last_samples = spectrum.samples(); last_stats = Clock::now();
             }
         }

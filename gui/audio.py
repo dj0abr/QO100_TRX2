@@ -173,3 +173,87 @@ def ctypes_path(name):
     if not path:
         raise RuntimeError(f"Missing system library: {name}")
     return path
+
+
+class Microphone:
+    """Default ALSA capture at 48 kHz, sinc anti-alias downsampling to 12 kHz.
+
+    Open only while software PTT is held. Nonblocking capture permits prompt
+    shutdown even if the default device stops supplying samples.
+    """
+    def __init__(self, sink):
+        self.sink = sink
+        self.stop = threading.Event()
+        self.error = ""
+        self.samples = 0
+        self.rms = 0.
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def run(self):
+        pcm = C.c_void_p()
+        state = None
+        alsa = src = None
+        try:
+            alsa = C.CDLL(ctypes_path("asound"))
+            src = C.CDLL(ctypes_path("samplerate"))
+            alsa.snd_pcm_open.argtypes = [C.POINTER(C.c_void_p), C.c_char_p, C.c_int, C.c_int]
+            alsa.snd_pcm_set_params.argtypes = [C.c_void_p, C.c_int, C.c_int, C.c_uint, C.c_uint, C.c_int, C.c_uint]
+            alsa.snd_pcm_readi.argtypes = [C.c_void_p, C.c_void_p, C.c_ulong]
+            alsa.snd_pcm_readi.restype = C.c_long
+            alsa.snd_pcm_recover.argtypes = [C.c_void_p, C.c_int, C.c_int]
+            alsa.snd_pcm_drop.argtypes = alsa.snd_pcm_close.argtypes = [C.c_void_p]
+            alsa.snd_strerror.argtypes = [C.c_int]; alsa.snd_strerror.restype = C.c_char_p
+            src.src_new.argtypes = [C.c_int, C.c_int, C.POINTER(C.c_int)]; src.src_new.restype = C.c_void_p
+            src.src_process.argtypes = [C.c_void_p, C.POINTER(SrcData)]
+            src.src_delete.argtypes = [C.c_void_p]
+            code = alsa.snd_pcm_open(C.byref(pcm), b"default", 1, 1)  # capture, nonblock
+            if code < 0:
+                raise RuntimeError(alsa.snd_strerror(code).decode())
+            code = alsa.snd_pcm_set_params(pcm, 2, 3, 1, 48000, 1, 80000)
+            if code < 0:
+                raise RuntimeError(alsa.snd_strerror(code).decode())
+            error = C.c_int()
+            state = src.src_new(2, 1, C.byref(error))
+            if not state:
+                raise RuntimeError(f"Microphone resampler error {error.value}")
+            raw = np.empty(960, dtype='<i2')
+            pending = np.empty(0, dtype=np.float32)
+            packets = np.empty(0, dtype=np.float32)
+            output = np.empty(512, dtype=np.float32)
+            while not self.stop.is_set():
+                count = alsa.snd_pcm_readi(pcm, raw.ctypes.data, len(raw))
+                if count == -11:  # EAGAIN
+                    self.stop.wait(.003)
+                    continue
+                if count < 0:
+                    if alsa.snd_pcm_recover(pcm, count, 1) < 0:
+                        raise RuntimeError(alsa.snd_strerror(count).decode())
+                    continue
+                if not count:
+                    self.stop.wait(.003)
+                    continue
+                pending = np.concatenate((pending, raw[:count].astype(np.float32)/32768))
+                d = SrcData(pending.ctypes.data_as(C.POINTER(C.c_float)), output.ctypes.data_as(C.POINTER(C.c_float)),
+                            len(pending), len(output), 0, 0, 0, .25)
+                if src.src_process(state, C.byref(d)):
+                    raise RuntimeError("Microphone downsampling failed")
+                pending = pending[d.input_frames_used:].copy()
+                packets = np.concatenate((packets, output[:d.output_frames_gen]))
+                while len(packets) >= 240 and not self.stop.is_set():
+                    block = packets[:240].copy()
+                    packets = packets[240:].copy()
+                    self.rms = float(np.sqrt(np.mean(block**2)))
+                    self.samples += 240
+                    self.sink(block)
+        except (OSError, RuntimeError) as exc:
+            self.error = str(exc)
+        finally:
+            if pcm.value and alsa:
+                alsa.snd_pcm_drop(pcm); alsa.snd_pcm_close(pcm)
+            if state and src:
+                src.src_delete(state)
+
+    def close(self):
+        self.stop.set()
+        self.thread.join(timeout=2)

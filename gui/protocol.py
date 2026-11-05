@@ -120,3 +120,22 @@ class Assembler:
                 del self.pending[key]
                 self.incomplete_frames += 1
         return Frame(*metadata, values.astype(np.float32) / 100)
+
+
+TX_CONTROL, TX_STATE, TX_AUDIO = 6, 7, 8
+
+
+def tx_control(request, frequency, enabled, session):
+    return HEADER.pack(MAGIC, VERSION, TX_CONTROL, 64, 3, request, 0, 0,
+                       frequency, 0, 0, 0, 0, int(enabled), 0, session)
+
+
+def tx_audio(epoch, index, frequency, session, samples):
+    if len(samples) != 240 or index % 240:
+        raise ValueError("TX audio must contain 240 aligned mono samples")
+    samples = np.asarray(samples, dtype=np.float32)
+    if not np.isfinite(samples).all():
+        raise ValueError("TX audio must contain finite samples")
+    pcm = (np.clip(samples, -1, 1)*32767).astype('>i2').tobytes()
+    return HEADER.pack(MAGIC, VERSION, TX_AUDIO, 64, 3, epoch, 0, index,
+                       frequency, 12000, 0, 0, 240, 2, 240, session) + pcm
