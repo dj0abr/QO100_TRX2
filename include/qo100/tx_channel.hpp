@@ -1,4 +1,5 @@
 #pragma once
+#include "qo100/dsp.hpp"
 #include <complex>
 #include <cstdint>
 #include <map>
@@ -24,13 +25,13 @@ public:
 private:
     void clear_dsp();
     std::map<uint64_t, std::vector<int16_t>> packets_;
-    std::vector<float> pending_, ring_;
-    std::vector<std::complex<float>> taps_;
-    SRC_STATE *clock_ = nullptr, *interpolator_ = nullptr;
+    std::vector<float> pending_;
+    SrcPtr clock_{nullptr, src_delete};
+    LiquidFir usb_filter_;
+    LiquidInterpolator interpolator_;
+    FrequencyShifter mixer_{1200000};
     uint64_t next_ = 0;
     bool have_next_ = false, started_ = false;
-    size_t pos_ = 0;
     double correction_ = 0, integral_ = 0, smoothed_ = 0, clock_buffered_ = 0;
-    std::complex<double> oscillator_{1,0}, step_{1,0};
 };
 }

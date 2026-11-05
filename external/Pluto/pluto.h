@@ -20,7 +20,8 @@
 #include "kmlib/kmfifo.h"
 #include "kmlib/kmtimer.h"
 #include "udp/udp.h"
-#include "liquid.h"
+#include <complex>
+#include <liquid/liquid.h>
 
 // ============ INITIALISATION START ================================
 // here are the values which should be set before using this program

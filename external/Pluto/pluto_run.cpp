@@ -320,8 +320,8 @@ liquid_float_complex getMarker()
     if (tunenco)
     {
         nco_crcf_step(tunenco);
-        m.real = nco_crcf_sin(tunenco);
-        m.imag = nco_crcf_cos(tunenco);
+        m.real(nco_crcf_sin(tunenco));
+        m.imag(nco_crcf_cos(tunenco));
     }
     else
         printf("tunenco not initialized\n");
@@ -350,8 +350,8 @@ liquid_float_complex sampleToComplex(uint8_t *rxb)
 
     // now convert to complex number
     liquid_float_complex c;
-    c.real = re / (float)MAXSIGNED32BIT;
-    c.imag = im / (float)MAXSIGNED32BIT;        
+    c.real(re / (float)MAXSIGNED32BIT);
+    c.imag(im / (float)MAXSIGNED32BIT);
     return c;
 }
 
@@ -393,17 +393,15 @@ void push_udp_data(uint8_t *buffer, int len)
         {
             liquid_float_complex m = getMarker();
 
-            yout[ipol].real += (m.real * 0.07);
-            yout[ipol].imag += (m.imag * 0.07);
+            yout[ipol] += m * 0.07f;
 
-            yout[ipol].real *= 0.5;
-            yout[ipol].imag *= 0.5;
+            yout[ipol] *= 0.5f;
 
-            if (yout[ipol].real > 1.0 || yout[ipol].real < -1.0) printf("real: %f\n", yout[ipol].real);
-            if (yout[ipol].imag > 1.0 || yout[ipol].imag < -1.0) printf("imag: %f\n", yout[ipol].imag);
+            if (yout[ipol].real() > 1.0 || yout[ipol].real() < -1.0) printf("real: %f\n", yout[ipol].real());
+            if (yout[ipol].imag() > 1.0 || yout[ipol].imag() < -1.0) printf("imag: %f\n", yout[ipol].imag());
 
-            int16_t pluto_re = (int16_t)(yout[ipol].real * 32767.0);
-            int16_t pluto_im = (int16_t)(yout[ipol].imag * 32767.0);
+            int16_t pluto_re = (int16_t)(yout[ipol].real() * 32767.0);
+            int16_t pluto_im = (int16_t)(yout[ipol].imag() * 32767.0);
 
             // and fill it to plutorxbuf
             plutorxbuf[plutoidx++] = pluto_re & 0xff;

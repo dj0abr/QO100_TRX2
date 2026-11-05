@@ -1,0 +1,30 @@
+{
+  "version": "1.8.3",
+  "upstream": "https://github.com/jgaeddert/liquid-dsp",
+  "tag": "v1.8.3",
+  "commit": "10041f70cebbe3b97887e75bb41e48b73dda1b23",
+  "source_url": "https://codeload.github.com/jgaeddert/liquid-dsp/tar.gz/refs/tags/v1.8.3",
+  "source_sha256": "18fa83b73db8bb6fe6ea0376e4b5aecf8645970f4604d10d9dadbf609f3f95e2",
+  "platform": "Linux x86_64 GNU libc",
+  "compiler": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "build_flags": [
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DCMAKE_C_FLAGS=-march=x86-64",
+    "-DCMAKE_CXX_FLAGS=-march=x86-64",
+    "-DBUILD_EXAMPLES=OFF",
+    "-DBUILD_AUTOTESTS=OFF",
+    "-DBUILD_BENCHMARKS=OFF",
+    "-DBUILD_SHARED_LIBS=ON",
+    "-DBUILD_STATIC_LIBS=ON",
+    "-DFIND_FFTW=OFF",
+    "-DENABLE_SIMD=ON",
+    "-DENABLE_LOGGING=OFF",
+    "-DENABLE_TIMESTAMPS=OFF"
+  ],
+  "sha256": {
+    "include/liquid/liquid.h": "46504495da2f510404d6c4c2a4d9116e01eaab89e60aed511823268c706f1c1a",
+    "LICENSE": "4703dbad8f2ceb93f4da7bd3b48f6100e9ac01db46cf0ff1bdca6f4f031b99d8",
+    "lib/linux-x86_64/libliquid.a": "fb7e01110c083cef7cdedbc32e1b78be9f5104eb999791aa9bf81cc5f0464b51",
+    "lib/linux-x86_64/libliquid.so.1.8.3": "a5a91d1d5459531c039218850bdac632bf0f93fa84f0050f9bd9e1c288d14dec"
+  }
+}

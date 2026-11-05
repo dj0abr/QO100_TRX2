@@ -10,7 +10,7 @@ Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
 ## Bauen
 
 Benötigt werden Linux, CMake, ein C++17-Compiler, libiio (0.x-API),
-libad9361, liquid-dsp, libsamplerate und FFTW3 mit Float-Unterstützung.
+libad9361, libsamplerate und FFTW3 mit Float-Unterstützung.
 Für das Test-GUI: Python 3, tkinter, numpy und Pillow; zur Audioausgabe die
 Systembibliotheken libasound und libsamplerate. Es ist kein zusätzliches
 Python-Audiopaket nötig. Unter Debian/Ubuntu heißen die zusätzlichen
@@ -30,6 +30,16 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPython3_EXECUTABLE=/usr/
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
+
+**liquid-dsp 1.8.3 ist bereits im Projekt enthalten**: statische und dynamische
+Bibliothek für Linux x86-64, passender Header, MIT-Lizenz und Prüfsummen unter
+[`external/liquid-dsp-1.8.3/`](external/liquid-dsp-1.8.3/README.md).
+Backend und Pluto-Treiber verwenden dieselbe statisch eingebundene Version.
+Eine systemweit installierte liquid-Version wird nicht benutzt; der normale
+Build benötigt dafür weder Download noch Bibliotheksquellcode.
+Beim Umzug auf einen anderen Linux-x86-64-PC dieses Verzeichnis mitkopieren
+und ein neues `build/` konfigurieren. Weitere Plattformen brauchen passende
+Binärdateien; ein optionaler Neuaufbau erfolgt mit `python3 tools/build_liquid.py`.
 
 Der normale Build erzeugt **beide Programme aus Quellcode**:
 `build/bin/qo100_backend` und `build/bin/pluto`.
@@ -133,7 +143,7 @@ Treiberpakete bleiben auf Loopback.
 ## Zoom und USB-Audio
 
 Ein unabhängiger digitaler Mischer verschiebt die gewünschte Frequenz auf null.
-Ein 321-Tap-Kaiser-FIR mit Dezimation 8 erzeugt **75 kS/s komplex** für den Zoom.
+Ein liquid-dsp-321-Tap-Kaiser-FIR mit Dezimation 8 erzeugt **75 kS/s komplex** für den Zoom.
 Die Zoom-FFT hat 8192 Punkte (9,155 Hz/Bin); angezeigt werden die mittleren
 50 kHz. Wegen des 50-%-Hoprasters werden maximal etwa 18,3 Zoomzeilen/s erzeugt.
 Das Gesamtspektrum läuft parallel weiter.
@@ -225,7 +235,8 @@ fehlendem Audio wird der Modulator geleert; ein Neustart wartet erneut auf
 wird die Sendefreigabe gelöscht.
 
 Ein analytischer 513-Tap-FIR erzeugt USB mit +100..4000 Hz Durchlassbereich.
-Danach erfolgen Sinc-Interpolation auf 1,2 MS/s, digitales Mischen auf die
+Danach erfolgen exakte liquid-Polyphasen-Interpolation um Faktor 100 auf
+1,2 MS/s, digitales Mischen auf die
 TX-Frequenz und I16/Q16-Konvertierung mit 6 dB digitaler Pegelreserve.
 Die tatsächliche AD9361-Ausgangsdämpfung steht in `tx_attenuation_db`
 (0..89,75 dB; Projektkonfiguration 0 dB für die getestete Station). Änderungen
@@ -279,6 +290,12 @@ Ausgabe an ALSA default. `audio-playback.json` enthält geschriebene Samples,
 Audiofehler und Underruns; `rx-usb.wav` enthält das empfangene Mono-Audio.
 Ergebnis und Aufnahmen liegen in `build/captures/`. Ohne `--gui` läuft dieser
 Test vollständig ohne Bildschirm. Er gehört ausdrücklich nicht zu `make test`.
+
+Die Umstellung auf liquid-dsp umfasst RX-/TX-Mischer, FIR-Filter und die feste
+TX-Interpolation. FFTW sowie libsamplerate für Audio-Taktkorrektur bleiben im
+Einsatz. Filterkurven, Nebenlinien, Frequenzgenauigkeit und Bibliothekszuordnung
+werden zusätzlich automatisch geprüft. Einzelheiten:
+[`docs/dsp-liquid-migration.md`](docs/dsp-liquid-migration.md).
 
 ## Projektaufteilung
 

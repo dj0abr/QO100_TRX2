@@ -1,4 +1,6 @@
 #pragma once
+#include "qo100/dsp.hpp"
+#include <array>
 #include <complex>
 #include <cstdint>
 #include <functional>
@@ -19,12 +21,12 @@ public:
     void push(std::complex<float> sample);
 private:
     void resample();
-    std::vector<float> lowpass_;
-    std::vector<std::complex<float>> wide_ring_, usb_taps_, usb_ring_;
-    size_t wide_pos_ = 0, usb_pos_ = 0;
+    LiquidDecimator decimator_;
+    LiquidFir usb_filter_;
+    FrequencyShifter mixer_{600000};
+    std::array<std::complex<float>, 8> mixed_{};
     unsigned decimation_ = 0;
-    double phase_ = 0, step_ = 0;
-    SRC_STATE* src_ = nullptr;
+    SrcPtr src_{nullptr, src_delete};
     std::vector<float> input_;
     std::vector<int16_t> audio_packet_;
     uint64_t audio_index_ = 0;

@@ -30,27 +30,31 @@ index 395cc72..b94bddd 100644
 -	destroy_interpolator();
 +	if (!rx_only) destroy_interpolator();
 diff --git a/pluto.h b/pluto.h
-index 6ef26c8..d2dfd42 100644
+index 6ef26c8..eac78dc 100644
 --- a/pluto.h
 +++ b/pluto.h
-@@ -37,0 +38 @@
+@@ -23 +23,2 @@
+-#include "liquid.h"
++#include <complex>
++#include <liquid/liquid.h>
+@@ -37,0 +39 @@
 +#ifndef UDP_TXSAMPLEPORT
-@@ -38,0 +40,2 @@
+@@ -38,0 +41,2 @@
 +#endif
 +#ifndef UDP_RXSAMPLEPORT
-@@ -39,0 +43,2 @@
+@@ -39,0 +44,2 @@
 +#endif
 +#ifndef UDP_STATUSPORT
-@@ -40,0 +46 @@
+@@ -40,0 +47 @@
 +#endif
-@@ -64,0 +71 @@
+@@ -64,0 +72 @@
 +#ifndef RXBUFSIZE
-@@ -65,0 +73,2 @@
+@@ -65,0 +74,2 @@
 +#endif
 +#ifndef BUFSIZE
-@@ -66,0 +76 @@
+@@ -66,0 +77 @@
 +#endif
-@@ -109,0 +120,5 @@ extern int crossbandrepeater;
+@@ -109,0 +121,5 @@ extern int crossbandrepeater;
 +
 +// QO100_TRX2 integration: optional receive-only mode.
 +extern int rx_only;
@@ -73,7 +77,7 @@ index fa60a20..4e9e100 100644
 +# QO100_TRX2: receive only until TX processing is implemented.
 +RX_ONLY 1
 diff --git a/pluto_run.cpp b/pluto_run.cpp
-index 71830b8..6201655 100644
+index 71830b8..3200500 100644
 --- a/pluto_run.cpp
 +++ b/pluto_run.cpp
 @@ -75 +75,4 @@ void runloop()
@@ -96,6 +100,16 @@ index 71830b8..6201655 100644
 +	    if (nbytes_tx < 0 && keeprunning) { fprintf(stderr,"Error pushing buf %d\n", (int)nbytes_tx); exit(1); }
 @@ -128,0 +137 @@ void runloop()
 +    if (tx_raw_iq) sendfifostat();
+@@ -314,2 +323,2 @@ liquid_float_complex getMarker()
+-        m.real = nco_crcf_sin(tunenco);
+-        m.imag = nco_crcf_cos(tunenco);
++        m.real(nco_crcf_sin(tunenco));
++        m.imag(nco_crcf_cos(tunenco));
+@@ -344,2 +353,2 @@ liquid_float_complex sampleToComplex(uint8_t *rxb)
+-    c.real = re / (float)MAXSIGNED32BIT;
+-    c.imag = im / (float)MAXSIGNED32BIT;        
++    c.real(re / (float)MAXSIGNED32BIT);
++    c.imag(im / (float)MAXSIGNED32BIT);
 @@ -351,0 +361,21 @@ void push_udp_data(uint8_t *buffer, int len)
 +    if (tx_raw_iq) {
 +        // PTXI: sequence, byte offset, full block size, then interleaved
@@ -118,6 +132,24 @@ index 71830b8..6201655 100644
 +        return;
 +    }
 +
+@@ -366,2 +396 @@ void push_udp_data(uint8_t *buffer, int len)
+-            yout[ipol].real += (m.real * 0.07);
+-            yout[ipol].imag += (m.imag * 0.07);
++            yout[ipol] += m * 0.07f;
+@@ -369,2 +398 @@ void push_udp_data(uint8_t *buffer, int len)
+-            yout[ipol].real *= 0.5;
+-            yout[ipol].imag *= 0.5;
++            yout[ipol] *= 0.5f;
+@@ -372,2 +400,2 @@ void push_udp_data(uint8_t *buffer, int len)
+-            if (yout[ipol].real > 1.0 || yout[ipol].real < -1.0) printf("real: %f\n", yout[ipol].real);
+-            if (yout[ipol].imag > 1.0 || yout[ipol].imag < -1.0) printf("imag: %f\n", yout[ipol].imag);
++            if (yout[ipol].real() > 1.0 || yout[ipol].real() < -1.0) printf("real: %f\n", yout[ipol].real());
++            if (yout[ipol].imag() > 1.0 || yout[ipol].imag() < -1.0) printf("imag: %f\n", yout[ipol].imag());
+@@ -375,2 +403,2 @@ void push_udp_data(uint8_t *buffer, int len)
+-            int16_t pluto_re = (int16_t)(yout[ipol].real * 32767.0);
+-            int16_t pluto_im = (int16_t)(yout[ipol].imag * 32767.0);
++            int16_t pluto_re = (int16_t)(yout[ipol].real() * 32767.0);
++            int16_t pluto_im = (int16_t)(yout[ipol].imag() * 32767.0);
 diff --git a/pluto_setup.cpp b/pluto_setup.cpp
 index c8e1cea..2cd58c2 100644
 --- a/pluto_setup.cpp

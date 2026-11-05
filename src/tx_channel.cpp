@@ -6,50 +6,35 @@
 
 namespace qo100 {
 namespace {
-constexpr double pi = 3.14159265358979323846;
 void process(SRC_STATE* state, SRC_DATA& data) {
     const int error = src_process(state, &data);
     if (error) throw std::runtime_error(src_strerror(error));
 }
 }
-TxChannel::TxChannel(int64_t offset) : ring_(513), taps_(513) {
-    // Analytic bandpass +100..4000 Hz. Multiplication by two restores the
-    // amplitude of the positive-frequency half of real microphone audio.
-    const double beta=8.6, denom=std::cyl_bessel_i(0.,beta);
-    double sum=0;
-    for(size_t i=0;i<taps_.size();++i) {
-        const double t=double(i)-256, x=t/256;
-        const double h=(t==0?3900./12000:std::sin(pi*3900*t/12000)/(pi*t)) *
-            std::cyl_bessel_i(0.,beta*std::sqrt(std::max(0.,1-x*x)))/denom;
-        taps_[i]=float(h)*std::polar(1.f,float(2*pi*2050*t/12000));
-        sum+=h;
-    }
-    for(auto& h:taps_) h*=float(2/sum);
-    int error=0;
-    clock_=src_new(SRC_SINC_FASTEST,1,&error);
-    if(!clock_) throw std::runtime_error(src_strerror(error));
-    interpolator_=src_new(SRC_SINC_FASTEST,2,&error);
-    if(!interpolator_) { src_delete(clock_); throw std::runtime_error(src_strerror(error)); }
+TxChannel::TxChannel(int64_t offset)
+    : clock_(make_audio_resampler(SRC_SINC_FASTEST, 1)),
+      usb_filter_(make_usb_filter(2)), interpolator_(firinterp_crcf_create_kaiser(100, 16, 100)) {
+    if (!interpolator_) throw std::runtime_error("Cannot create liquid TX interpolator");
     reset(offset);
 }
-TxChannel::~TxChannel() { src_delete(clock_); src_delete(interpolator_); }
+TxChannel::~TxChannel() = default;
 void TxChannel::clear_dsp() {
-    pending_.clear(); std::fill(ring_.begin(),ring_.end(),0.f); pos_=0;
-    src_reset(clock_); src_reset(interpolator_);
-    // Prime both sinc histories so every render returns exactly 20 ms.
-    std::vector<float> zeros(1024), out(120000);
-    SRC_DATA d{}; d.data_in=zeros.data(); d.data_out=out.data();
-    d.input_frames=512;d.output_frames=60000;d.src_ratio=1;
-    process(clock_,d);
-    d={};d.data_in=zeros.data();d.data_out=out.data();
-    d.input_frames=512;d.output_frames=60000;d.src_ratio=100;
-    process(interpolator_,d);
+    pending_.clear();
+    check_liquid(firfilt_cccf_reset(usb_filter_.get()));
+    check_liquid(firinterp_crcf_reset(interpolator_.get()));
+    src_reset(clock_.get());
+    // Prime the adaptive sinc clock history. The exact integer polyphase
+    // interpolator always emits 100 IQs per audio sample, including startup.
+    std::vector<float> zeros(512), out(600);
+    SRC_DATA d{}; d.data_in=zeros.data();d.data_out=out.data();
+    d.input_frames=zeros.size();d.output_frames=out.size();d.src_ratio=1;
+    process(clock_.get(),d);
     started_=false; correction_=integral_=smoothed_=clock_buffered_=0;
 }
 void TxChannel::reset(int64_t offset) {
     if(std::abs(offset)>275000) throw std::runtime_error("TX frequency outside 600 kHz window");
     packets_.clear(); next_=0;have_next_=false;
-    oscillator_={1,0};step_=std::polar(1.,2*pi*double(offset)/1200000);
+    mixer_.tune(offset);
     clear_dsp();
 }
 size_t TxChannel::level() const { return packets_.size()*audio_block+pending_.size()+size_t(std::max(0.,clock_buffered_)); }
@@ -96,7 +81,7 @@ std::vector<float> TxChannel::pull_audio(bool recent) {
     std::vector<float> audio(audio_block);
     SRC_DATA d{};d.data_in=pending_.data();d.data_out=audio.data();
     d.input_frames=static_cast<long>(pending_.size());d.output_frames=audio_block;d.src_ratio=1/(1+correction_);
-    process(clock_,d);
+    process(clock_.get(),d);
     clock_buffered_+=d.input_frames_used-d.output_frames_gen*(1+correction_);
     pending_.erase(pending_.begin(),pending_.begin()+d.input_frames_used);
     if(d.output_frames_gen!=audio_block) { ++underruns;clear_dsp();return result; }
@@ -106,25 +91,12 @@ std::vector<std::complex<float>> TxChannel::render(bool recent) {
     const auto audio=pull_audio(recent);
     std::vector<std::complex<float>> result(iq_block);
     if(audio.empty()) return result;
-    std::vector<float> analytic(audio_block*2), up(iq_block*2);
-    for(size_t i=0;i<audio_block;++i) {
-        ring_[pos_]=audio[i];pos_=(pos_+1)%ring_.size();
-        std::complex<float> value{};size_t p=pos_;
-        for(size_t k=0;k<taps_.size();++k) {
-            p=p?p-1:ring_.size()-1;value+=ring_[p]*taps_[k];
-        }
-        analytic[2*i]=value.real();analytic[2*i+1]=value.imag();
-    }
-    SRC_DATA d{};d.data_in=analytic.data();d.data_out=up.data();
-    d.input_frames=audio_block;d.output_frames=iq_block;d.src_ratio=100;
-    process(interpolator_,d);
-    if(d.output_frames_gen!=iq_block || d.input_frames_used!=audio_block)
-        throw std::runtime_error("TX interpolator did not produce a full block");
-    for(size_t i=0;i<iq_block;++i) {
-        result[i]=std::complex<float>(up[2*i],up[2*i+1])*std::complex<float>(oscillator_)*.5f;
-        oscillator_*=step_;
-        if((i&4095)==4095) oscillator_/=std::abs(oscillator_);
-    }
+    std::vector<std::complex<float>> input(audio_block), analytic(audio_block);
+    for(size_t i=0;i<audio.size();++i) input[i]={audio[i],0};
+    check_liquid(firfilt_cccf_execute_block(usb_filter_.get(),input.data(),audio_block,analytic.data()));
+    check_liquid(firinterp_crcf_execute_block(interpolator_.get(),analytic.data(),audio_block,result.data()));
+    mixer_.execute_block(result.data(),result.size());
+    for(auto& sample:result) sample*=.5f;
     return result;
 }
 }

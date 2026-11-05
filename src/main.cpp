@@ -75,6 +75,8 @@ int main(int argc, char** argv) {
         }
         if (source != "pluto" && source != "synthetic") throw std::runtime_error("source must be pluto or synthetic");
         const auto c = qo100::load_config(config);
+        if (liquid_libversion_number()!=LIQUID_VERSION_NUMBER) throw std::runtime_error("Liquid header/library mismatch");
+        std::cout << "DSP: liquid-dsp " << liquid_libversion() << " (bundled, static)\n";
         struct sigaction action{};
         action.sa_handler = stop;
         sigemptyset(&action.sa_mask);

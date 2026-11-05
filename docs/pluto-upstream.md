@@ -34,5 +34,10 @@ Generated TX bandwidth is 600 kHz. Backend attenuation is mapped to the original
 driver's `TX_GAIN - 10` hardwaregain convention. No PTT command is provided by
 upstream; the GUI gates audio, while backend and driver continue zero IQ.
 
+Both backend and driver now compile against the bundled liquid-dsp 1.8.3
+header and link its local static archive. The copied upstream 1.3.2 header is
+retained but unused. Legacy TX complex sample access uses std::complex getters
+and setters, matching the shared C++ API of the new header.
+
 Copyright/license notices in the imported files remain unchanged, including
 the differing GPL notices already present in upstream helper files.
