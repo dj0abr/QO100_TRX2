@@ -86,9 +86,16 @@ int main(int argc, char** argv) {
         uint32_t frame_id = 0;
         const uint32_t session_id = std::random_device{}();
         uint64_t frames_sent = 0, send_errors = 0, malformed_iq = 0;
-        uint64_t rx_hz = c.initial_rx_hz;
-        uint32_t epoch = 1, last_request = 0, zoom_frame_id = 0;
-        bool have_request = false;
+        struct ReceiverState {
+            uint64_t frequency = 0;
+            uint32_t epoch = 1, last_request = 0;
+            bool have_request = false;
+            std::unique_ptr<qo100::RxChannel> dsp;
+        };
+        std::array<ReceiverState,2> receivers;
+        receivers[0].frequency=c.initial_rx_hz;
+        receivers[1].frequency=c.initial_rx2_hz;
+        uint32_t zoom_frame_id = 0;
         auto stamp = [] { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); };
         auto active = [&] { return subscribed && std::chrono::duration<double>(Clock::now()-last_subscription).count() <= c.subscription_seconds; };
         auto send_packet = [&](const std::vector<uint8_t>& packet) {
@@ -99,18 +106,22 @@ int main(int argc, char** argv) {
             return std::make_unique<qo100::Spectrum>(75000,8192,c.spectrum_fps,
                 [&](const std::vector<int16_t>& bins,uint64_t index) {
                     if (!active()) return;
-                    qo100::FrameInfo f{zoom_frame_id++,stamp(),index,rx_hz,75000,8192,session_id,1};
+                    qo100::FrameInfo f{zoom_frame_id++,stamp(),index,receivers[0].frequency,75000,8192,session_id,1};
                     for(const auto& packet:qo100::spectrum_packets(f,bins)) send_packet(packet);
                 });
         };
         auto zoom = make_zoom();
-        qo100::RxChannel channel(static_cast<int64_t>(rx_hz)-static_cast<int64_t>(c.rx_center_hz),
-            [&](std::complex<float> x) { zoom->push(x); },
-            [&](const std::vector<int16_t>& audio,uint64_t index) {
-                if (!active()) return;
-                qo100::FrameInfo f{epoch,stamp(),index,rx_hz,12000,0,session_id,1};
-                send_packet(qo100::audio_packet(f,audio));
-            });
+        for(size_t i=0;i<receivers.size();++i) {
+            receivers[i].dsp=std::make_unique<qo100::RxChannel>(
+                static_cast<int64_t>(receivers[i].frequency)-static_cast<int64_t>(c.rx_center_hz),
+                [&,i](std::complex<float> x) { if(i==0) zoom->push(x); },
+                [&,i](const std::vector<int16_t>& audio,uint64_t index) {
+                    if(!active()) return;
+                    const auto& rx=receivers[i];
+                    qo100::FrameInfo f{rx.epoch,stamp(),index,rx.frequency,12000,0,session_id,static_cast<uint32_t>(i+1)};
+                    send_packet(qo100::audio_packet(f,audio));
+                });
+        }
         qo100::Spectrum spectrum(c.iq_rate(), c.fft_size, c.spectrum_fps,
             [&](const std::vector<int16_t>& bins, uint64_t sample_index) {
                 if (!active()) return;
@@ -118,7 +129,7 @@ int main(int argc, char** argv) {
                 for (const auto& packet : qo100::spectrum_packets(info,bins)) send_packet(packet);
                 ++frames_sent;
             });
-        auto feed = [&](std::complex<float> x) { spectrum.push(x); channel.push(x); };
+        auto feed = [&](std::complex<float> x) { spectrum.push(x); for(auto& rx:receivers) rx.dsp->push(x); };
         auto feed_iq = [&](const uint8_t* data,size_t size) {
             if (!size || size%4) return false;
             for(size_t i=0;i<size;i+=4) {
@@ -154,21 +165,22 @@ int main(int argc, char** argv) {
                     if (qo100::is_subscription(buffer.data(), static_cast<size_t>(n))) {
                         if (!subscribed || from.sin_addr.s_addr != peer.sin_addr.s_addr || from.sin_port != peer.sin_port)
                             std::cout << "GUI subscriber " << inet_ntoa(from.sin_addr) << ':' << ntohs(from.sin_port) << '\n';
-                        if (!subscribed || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) have_request=false;
+                        if (!subscribed || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) for(auto& rx:receivers) rx.have_request=false;
                         peer = from; subscribed = true; last_subscription = Clock::now();
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
-                        uint32_t request=0; uint64_t frequency=0;
-                        if(qo100::parse_tune(buffer.data(),static_cast<size_t>(n),request,frequency)) {
-                            if(have_request && request!=last_request && static_cast<int32_t>(request-last_request)<0) continue;
+                        uint32_t stream_id=0, request=0; uint64_t frequency=0;
+                        if(qo100::parse_tune(buffer.data(),static_cast<size_t>(n),stream_id,request,frequency)) {
+                            auto& rx=receivers[stream_id-1];
+                            if(rx.have_request && request!=rx.last_request && static_cast<int32_t>(request-rx.last_request)<0) continue;
                             const bool valid=frequency>=c.rx_center_hz-275000 && frequency<=c.rx_center_hz+275000;
-                            if(valid && frequency!=rx_hz) {
-                                rx_hz=frequency; ++epoch;
-                                channel.tune(static_cast<int64_t>(rx_hz)-static_cast<int64_t>(c.rx_center_hz));
-                                zoom=make_zoom();
-                                std::cout << "RX tuned to " << rx_hz << " Hz; USB +100..4000 Hz; epoch=" << epoch << '\n';
+                            if(valid && frequency!=rx.frequency) {
+                                rx.frequency=frequency; ++rx.epoch;
+                                rx.dsp->tune(static_cast<int64_t>(rx.frequency)-static_cast<int64_t>(c.rx_center_hz));
+                                if(stream_id==1) zoom=make_zoom();
+                                std::cout << "RX" << stream_id << " tuned to " << rx.frequency << " Hz; USB +100..4000 Hz; epoch=" << rx.epoch << '\n';
                             }
-                            last_request=request;have_request=true;
-                            send_packet(qo100::state_packet(request,rx_hz,epoch,session_id,valid?0:1));
+                            rx.last_request=request;rx.have_request=true;
+                            send_packet(qo100::state_packet(request,rx.frequency,rx.epoch,session_id,valid?0:1,stream_id));
                         }
                     }
                 }
@@ -191,7 +203,9 @@ int main(int argc, char** argv) {
                     const auto b = std::polar(0.1f, static_cast<float>(std::remainder(2 * std::acos(-1.) * 75000 * t, 2 * std::acos(-1.))));
                     const auto usb = std::polar(0.12f,float(std::remainder(-2*std::acos(-1.)*500*t,2*std::acos(-1.))));
                     const auto lsb = std::polar(0.18f,float(std::remainder(-2*std::acos(-1.)*3500*t,2*std::acos(-1.))));
-                    feed(a + b + usb + lsb);
+                    const auto usb2=std::polar(0.08f,float(std::remainder(-2*std::acos(-1.)*148300*t,2*std::acos(-1.))));
+                    const auto lsb2=std::polar(0.13f,float(std::remainder(-2*std::acos(-1.)*152200*t,2*std::acos(-1.))));
+                    feed(a + b + usb + lsb + usb2 + lsb2);
                 }
                 next_synthetic += std::chrono::milliseconds(10);
             }

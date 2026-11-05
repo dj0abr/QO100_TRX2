@@ -14,8 +14,10 @@ def subscription():
     return HEADER.pack(MAGIC, VERSION, SUBSCRIBE, HEADER.size, *([0] * 12))
 
 
-def tune(request, frequency):
-    return HEADER.pack(MAGIC, VERSION, TUNE, 64, 1, request, 0, 0,
+def tune(request, frequency, stream_id=1):
+    if stream_id not in (1, 2):
+        raise ValueError("Receiver stream must be 1 or 2")
+    return HEADER.pack(MAGIC, VERSION, TUNE, 64, stream_id, request, 0, 0,
                        frequency, 0, 0, 0, 0, 0, 0, 0)
 
 
@@ -26,17 +28,18 @@ class AudioPacket:
     center_hz: int
     session_id: int
     samples: np.ndarray
+    stream_id: int = 1
 
 
 def audio_packet(packet):
     if len(packet) < 64 or len(packet) > MAX_DATAGRAM:
         return None
     f = HEADER.unpack_from(packet)
-    if (f[:4] != (MAGIC, VERSION, AUDIO, 64) or f[4] != 1 or f[9] != 12000
+    if (f[:4] != (MAGIC, VERSION, AUDIO, 64) or f[4] not in (1, 2) or f[9] != 12000
         or f[10] or f[11] or f[13] != 2 or f[12] != f[14]
         or not 0 < f[12] <= 568 or len(packet) != 64 + 2*f[12]):
         return None
-    return AudioPacket(f[5], f[7], f[8], f[15], np.frombuffer(packet, dtype=">i2", offset=64).astype(np.float32)/32768)
+    return AudioPacket(f[5], f[7], f[8], f[15], np.frombuffer(packet, dtype=">i2", offset=64).astype(np.float32)/32768, f[4])
 
 
 @dataclass

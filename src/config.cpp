@@ -49,6 +49,8 @@ void Config::validate() const {
         throw std::runtime_error("rx_bandwidth_hz must be 200000..1200000");
     if (initial_rx_hz + 275000 < rx_center_hz || initial_rx_hz > rx_center_hz + 275000)
         throw std::runtime_error("initial_rx_hz must leave room for the +/-25 kHz zoom");
+    if (initial_rx2_hz + 275000 < rx_center_hz || initial_rx2_hz > rx_center_hz + 275000)
+        throw std::runtime_error("initial_rx2_hz must remain inside the RX channel window");
     if (!std::isfinite(subscription_seconds) || subscription_seconds < 2 || subscription_seconds > 60)
         throw std::runtime_error("subscription_seconds must be 2..60");
 }
@@ -84,6 +86,7 @@ Config load_config(const std::filesystem::path& path) {
         else if (k == "fft_size") c.fft_size = u32(v);
         else if (k == "spectrum_fps") c.spectrum_fps = u32(v);
         else if (k == "initial_rx_hz") c.initial_rx_hz = integer(v);
+        else if (k == "initial_rx2_hz") c.initial_rx2_hz = integer(v);
         else if (k == "subscription_seconds") {
             size_t used = 0;
             c.subscription_seconds = std::stod(v, &used);

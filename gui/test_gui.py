@@ -12,8 +12,22 @@ from protocol import Assembler, subscription, tune, audio_packet, HEADER, STATE,
 from decimal import Decimal
 
 
+class AudioReceiveState:
+    def __init__(self, frequency, sink=None):
+        self.command = (1, frequency)
+        self.applied_hz = None
+        self.identity = None
+        self.tune_error = ""
+        self.frames = queue.Queue(maxsize=30)
+        self.sink = sink
+        self.received = 0
+        self.samples = 0
+        self.rms = self.peak = 0.
+        self.last_audio = 0.
+
+
 class Receiver:
-    def __init__(self, host, port, rx_hz=10489748500, audio_sink=None):
+    def __init__(self, host, port, rx_hz=10489748500, audio_sink=None, rx2_hz=10489600000):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
         self.sock.connect((host, port))
@@ -21,29 +35,44 @@ class Receiver:
         self.assembler = Assembler()
         self.zoom_assembler = Assembler(1)
         self.zoom_frames = queue.Queue(maxsize=4)
-        self.audio_frames = queue.Queue(maxsize=30)
-        self.audio_sink = audio_sink
-        self.audio_received = 0
-        self.command = (1, rx_hz)
-        self.applied_hz = None
-        self.audio_identity = None
-        self.tune_error = ""
+        self.channels = {1: AudioReceiveState(rx_hz, audio_sink), 2: AudioReceiveState(rx2_hz)}
+        self.audio_frames = self.channels[1].frames
+        self.audio2_frames = self.channels[2].frames
         self.frames = queue.Queue(maxsize=4)
         self.received = 0
+        self.invalid_audio = 0
         self.error = "Waiting for backend"
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
+    @property
+    def applied_hz(self):
+        return self.channels[1].applied_hz
+
+    @property
+    def audio_received(self):
+        return self.channels[1].received
+
+    @property
+    def tune_error(self):
+        return self.channels[1].tune_error
+
+    @tune_error.setter
+    def tune_error(self, error):
+        self.channels[1].tune_error = error
+
     def run(self):
         next_subscription = 0
-        last_command = None
+        last_commands = None
         while not self.stop.is_set():
-            if time.monotonic() >= next_subscription or self.command != last_command:
+            commands = tuple((stream, state.command) for stream, state in self.channels.items())
+            if time.monotonic() >= next_subscription or commands != last_commands:
                 try:
                     self.sock.send(subscription())
-                    self.sock.send(tune(*self.command))
-                    last_command = self.command
+                    for stream, command in commands:
+                        self.sock.send(tune(*command, stream_id=stream))
+                    last_commands = commands
                 except OSError as exc:
                     self.error = str(exc)
                 next_subscription = time.monotonic() + 2
@@ -60,20 +89,35 @@ class Receiver:
             if len(packet) >= 64 and packet[:4] == b"QTR2" and packet[4] == 1:
                 fields = HEADER.unpack_from(packet)
                 if packet[5] == STATE:
-                    if fields[5] == self.command[0]:
-                        self.tune_error = "RX frequency outside capture window" if fields[13] else ""
+                    state = self.channels.get(fields[4])
+                    if len(packet) == 64 and fields[3] == 64 and state and fields[5] == state.command[0]:
+                        state.tune_error = "RX frequency outside capture window" if fields[13] else ""
                         if not fields[13]:
-                            self.applied_hz = fields[8]
-                            self.audio_identity = (fields[15], fields[7])
+                            identity = (fields[15], fields[7])
+                            if state.identity != identity:
+                                while True:
+                                    try: state.frames.get_nowait()
+                                    except queue.Empty: break
+                                state.rms = state.peak = state.last_audio = 0.
+                            state.applied_hz = fields[8]
+                            state.identity = identity
                     continue
                 if packet[5] == AUDIO:
                     audio = audio_packet(packet)
-                    if audio is not None and (audio.session_id, audio.epoch) == self.audio_identity:
-                        self.audio_received += 1
-                        if self.audio_sink:
-                            self.audio_sink(audio)
+                    if audio is None:
+                        self.invalid_audio += 1
+                        continue
+                    state = self.channels[audio.stream_id]
+                    if (audio.session_id, audio.epoch) == state.identity:
+                        state.received += 1
+                        state.samples += len(audio.samples)
+                        state.rms = float(np.sqrt(np.mean(audio.samples**2)))
+                        state.peak = float(np.max(np.abs(audio.samples)))
+                        state.last_audio = time.monotonic()
+                        if state.sink:
+                            state.sink(audio)
                         else:
-                            self.offer(self.audio_frames, audio)
+                            self.offer(state.frames, audio)
                     continue
                 if fields[4] == 1:
                     frame = self.zoom_assembler.push(packet)
@@ -89,14 +133,13 @@ class Receiver:
     @staticmethod
     def offer(target, item):
         if target.full():
-            try:
-                target.get_nowait()
-            except queue.Empty:
-                pass
+            try: target.get_nowait()
+            except queue.Empty: pass
         target.put_nowait(item)
 
-    def set_frequency(self, hz):
-        self.command = ((self.command[0] + 1) & 0xffffffff, hz)
+    def set_frequency(self, hz, stream_id=1):
+        state = self.channels[stream_id]
+        state.command = ((state.command[0] + 1) & 0xffffffff, hz)
 
     def close(self):
         self.stop.set()
@@ -111,7 +154,7 @@ def save_capture(path, frame):
 
 
 def headless(args):
-    receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency))
+    receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), rx2_hz=parse_frequency(args.rx2_frequency))
     start = time.monotonic()
     received = []
     try:
@@ -137,6 +180,10 @@ def headless(args):
             "invalid_packets": receiver.assembler.invalid_packets,
             "incomplete_frames": receiver.assembler.incomplete_frames,
             "sample_index": f.sample_index,
+            "rx2_frequency_hz":receiver.channels[2].applied_hz,
+            "rx2_audio_packets":receiver.channels[2].received,
+            "rx2_audio_samples":receiver.channels[2].samples,
+            "rx2_rms":receiver.channels[2].rms,
         }
         if len(received) > 1 and f.timestamp_ns > received[0].timestamp_ns:
             result["observed_iq_rate"] = (f.sample_index - received[0].sample_index) / ((f.timestamp_ns - received[0].timestamp_ns) / 1e9)
@@ -198,11 +245,11 @@ def gui(args):
     from PIL import ImageTk
     root = tk.Tk()
     root.title("QO100_TRX2 — USB RX Test")
-    root.geometry("1120x900")
+    root.geometry("1120x950")
     root.configure(bg="#0b1321")
     from audio import AudioPlayer
     player = None if args.no_audio else AudioPlayer()
-    receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), player.add if player else None)
+    receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), player.add if player else None, rx2_hz=parse_frequency(args.rx2_frequency))
     history, zoom_history = [], []
     title = tk.Label(root, text=f"QO100_TRX2 — {args.host}:{args.port}", bg="#0b1321", fg="#e8edf7", font=("sans", 15))
     title.pack(pady=8)
@@ -214,7 +261,7 @@ def gui(args):
              length=300, bg="#0b1321", fg="#e8edf7", highlightthickness=0).pack(side="left")
     tuning = tk.Frame(root, bg="#0b1321")
     tuning.pack()
-    tk.Label(tuning, text="RX MHz (USB)", bg="#0b1321", fg="#e8edf7").pack(side="left")
+    tk.Label(tuning, text="RX1 MHz (USB / Audio)", bg="#0b1321", fg="#e8edf7").pack(side="left")
     frequency = tk.StringVar(value=args.rx_frequency)
     entry = tk.Entry(tuning, textvariable=frequency, width=20)
     entry.pack(side="left", padx=8)
@@ -231,6 +278,21 @@ def gui(args):
         tk.Label(tuning, text="Audio gain", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=8)
         tk.Scale(tuning, from_=0, to=20, orient="horizontal", variable=gain, length=200,
                  command=lambda value: setattr(player,"volume",float(value)), bg="#0b1321", fg="#e8edf7").pack(side="left")
+    tuning2 = tk.Frame(root, bg="#0b1321")
+    tuning2.pack(pady=3)
+    tk.Label(tuning2, text="RX2 MHz (Digital-Test)", bg="#0b1321", fg="#e8edf7").pack(side="left")
+    frequency2 = tk.StringVar(value=args.rx2_frequency)
+    entry2 = tk.Entry(tuning2, textvariable=frequency2, width=20)
+    entry2.pack(side="left", padx=8)
+    def apply_tuning2():
+        try:
+            receiver.set_frequency(parse_frequency(frequency2.get()), stream_id=2)
+        except (ValueError, ArithmeticError):
+            receiver.channels[2].tune_error = "Invalid RX2 frequency"
+    entry2.bind("<Return>", lambda event: apply_tuning2())
+    tk.Button(tuning2, text="Tune RX2", command=apply_tuning2).pack(side="left")
+    monitor2 = tk.Label(root, text="RX2: waiting for 12 kHz audio", bg="#0b1321", fg="#a4b5cd", anchor="w")
+    monitor2.pack(fill="x", padx=12)
     canvas = tk.Label(root, bg="#0b1321", text="Waiting for spectrum data…", fg="#a4b5cd")
     canvas.pack(fill="both", expand=True)
     zoom_canvas = tk.Label(root, bg="#0b1321", text="Waiting for zoom…", fg="#a4b5cd")
@@ -281,9 +343,23 @@ def gui(args):
             zoom_canvas.image = photo
             if args.screenshot and history:
                 from PIL import Image
-                combined = Image.new("RGB",(1100,700))
+                from PIL import ImageDraw
+                combined = Image.new("RGB",(1100,740),"#0b1321")
                 combined.paste(draw_image(history,height=350,floor=floor.get()),(0,0))
-                combined.paste(zoom_rendered,(0,350)); combined.save(args.screenshot)
+                combined.paste(zoom_rendered,(0,350))
+                rx2 = receiver.channels[2]
+                ImageDraw.Draw(combined).text((20,712),
+                    f"RX2 monitor | {rx2.applied_hz} Hz | 12 kHz PCM mono | {rx2.received} packets | {rx2.samples} samples | RMS {rx2.rms:.5f} | no soundcard output", fill="#a4b5cd")
+                combined.save(args.screenshot)
+        second = receiver.channels[2]
+        # Monitoring only: discard already-counted RX2 test packets; never send to AudioPlayer.
+        while True:
+            try: receiver.audio2_frames.get_nowait()
+            except queue.Empty: break
+        rms_db = 20*np.log10(max(second.rms, 1e-8))
+        age2 = time.monotonic()-second.last_audio
+        state2 = "LIVE" if age2 < 1 else "WAITING"
+        monitor2.configure(text=f"RX2 {state2} | confirmed {second.applied_hz} Hz | 12 kHz mono | packets {second.received} | samples {second.samples} | RMS {rms_db:.1f} dBFS | peak {second.peak:.4f} | {second.tune_error}")
         age = time.monotonic() - last_frame if last_frame else float("inf")
         state = "LIVE" if age < 1 else "WAITING / STALE"
         status.configure(text=f"{state} | Frames {receiver.received} | Incomplete {receiver.assembler.incomplete_frames} | Invalid {receiver.assembler.invalid_packets} | RX {receiver.applied_hz} Hz | Audio {receiver.audio_received} packets | {receiver.error} {receiver.tune_error}" +
@@ -297,7 +373,10 @@ def gui(args):
         if args.audio_report:
             report = {"audio_packets":receiver.audio_received,"applied_hz":receiver.applied_hz,
                       "zoom_frames":len(zoom_history),"played_samples":player.written if player else 0,
-                      "audio_error":player.error if player else "muted", "underruns":player.underruns if player else 0}
+                      "audio_error":player.error if player else "muted", "underruns":player.underruns if player else 0,
+                      "rx2_packets":receiver.channels[2].received,"rx2_samples":receiver.channels[2].samples,
+                      "rx2_applied_hz":receiver.channels[2].applied_hz,"rx2_rms":receiver.channels[2].rms,
+                      "invalid_audio":receiver.invalid_audio}
             args.audio_report.write_text(json.dumps(report,indent=2)+"\n")
         root.destroy()
 
@@ -319,6 +398,7 @@ def parse_frequency(text):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rx-frequency", default="10489.748500", help="USB carrier frequency in MHz")
+    parser.add_argument("--rx2-frequency", default="10489.600000", help="Independent RX2 USB carrier in MHz (monitor only)")
     parser.add_argument("--no-audio", action="store_true", help="Disable soundcard playback")
     parser.add_argument("--audio-report", type=Path, help="Write playback test statistics on GUI close")
     parser.add_argument("--host", default="127.0.0.1")

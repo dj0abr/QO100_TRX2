@@ -43,5 +43,17 @@ class AudioTest(unittest.TestCase):
         self.assertEqual(a.sample_index,240)
         self.assertIsNone(audio_packet(header+values.tobytes()[:-1]))
 
+    def test_second_audio_stream(self):
+        self.assertEqual(HEADER.unpack(tune(9,10489600000,2))[4],2)
+        values=np.arange(240,dtype='>i2')
+        def wire(stream):
+            return HEADER.pack(b'QTR2',1,5,64,stream,3,123,240,10489600000,12000,0,0,240,2,240,99)+values.tobytes()
+        a=audio_packet(wire(2))
+        self.assertEqual(a.stream_id,2)
+        self.assertEqual(a.center_hz,10489600000)
+        np.testing.assert_array_equal(a.samples,np.arange(240)/32768)
+        self.assertIsNone(audio_packet(wire(3)))
+        with self.assertRaises(ValueError): tune(1,10489600000,3)
+
 
 if __name__=='__main__': unittest.main()

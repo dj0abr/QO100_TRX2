@@ -15,7 +15,7 @@ Python reference format: `struct.Struct("!4sBBHIIQQQIIIHHII")`.
 | 4 | 1 | Protocol version, 1 |
 | 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO |
 | 6 | 2 | Header size, 64 |
-| 8 | 4 | Stream ID: 0 = full-band RX spectrum; 1 = RX channel 1 |
+| 8 | 4 | Stream ID: 0 = full-band spectrum; 1 = RX1; 2 = RX2 |
 | 12 | 4 | Frame ID / control request ID / audio tuning epoch, uint32 |
 | 16 | 8 | Backend Unix timestamp in nanoseconds at frame emission |
 | 24 | 8 | FFT exclusive end index / audio start index / STATE tuning epoch |
@@ -84,3 +84,23 @@ Audio counters restart at zero on retune. The new epoch flushes playback
 history and the clock resampler. The GUI's bounded jitter buffer and slow
 sample-rate correction accommodate network jitter and different soundcard
 and Pluto clocks. No retransmission of live audio.
+
+## Two simultaneous USB receivers (v0.3)
+
+Stream 2 adds independent RX2 control and audio. TUNE, STATE and AUDIO retain
+their existing v1 layouts, with stream_id=2. Stream 1 is unchanged. Only RX1
+produces a zoom spectrum in this version; there is no stream-2 SPECTRUM.
+
+A client subscribes once, then sends/retries its latest TUNE for each channel.
+Each channel owns its request sequence, confirmed frequency, audio epoch and
+sample counter. Clients must match STATE by **both stream ID and request ID**,
+and AUDIO by **stream ID, session ID and audio epoch**. Equal request or epoch
+numbers on different channels do not imply shared state. Retuning one channel
+must not flush, retune or restart the other. Unsupported stream IDs are rejected.
+
+Both AUDIO streams use 12000 Hz mono PCM16, 240 samples/20 ms, and share the
+existing GUI UDP socket. RX2 has the same +100..4000 Hz USB selection but no
+AGC, compression or digital decoding. In the test GUI only stream 1 is routed
+to ALSA default. Stream 2 enters a separate bounded queue and is monitored by
+packet/sample counts, RMS and peak level. It is then discarded. Test captures
+can store RX2 audio as a separate 12-kHz WAV file.

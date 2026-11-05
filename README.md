@@ -2,9 +2,9 @@
 
 C++-Backend für einen QO-100-Transceiver mit getrenntem GUI über UDP.
 Der aktuelle Stand empfängt **600 kHz**, berechnet das Gesamtspektrum sowie
-einen abstimmbaren **Zoom von ±25 kHz** und demoduliert **USB-Audio**.
-Das Python-Test-GUI zeigt beide Wasserfälle und spielt das Audio über die
-Default-Soundkartenausgabe ab. TX-Modulation folgt später.
+einen abstimmbaren **Zoom von ±25 kHz** und demoduliert **zwei unabhängig abstimmbare USB-Audiokanäle**.
+Das Python-Test-GUI zeigt beide Wasserfälle und spielt RX1 über die
+Default-Soundkartenausgabe ab. RX2 wird für Tests getrennt empfangen und überwacht. TX-Modulation folgt später.
 
 ## Bauen
 
@@ -72,7 +72,7 @@ In einem zweiten Terminal:
 ```
 
 Die Startfrequenz beträgt **10489,748500 MHz** (USB-Träger, nicht die
-Mitte des Audio-Durchlassbereichs). Im Feld **RX MHz (USB)** kann die Frequenz
+Mitte des Audio-Durchlassbereichs). Im Feld **RX1 MHz (USB / Audio)** kann die Frequenz
 mit Punkt oder Komma eingegeben und mit Enter oder **Tune** übernommen werden.
 Der Zoom ist auf diese Trägerfrequenz zentriert; das Audio kommt aus dem oberen
 Seitenband. Das GUI zeigt die vom Backend bestätigte Frequenz an.
@@ -158,6 +158,38 @@ Bestätigung. Wiederholte Abstimmkommandos setzen den Kanal nicht erneut zurück
 verspätete ältere Befehle werden ignoriert. Ein vollständiger ±25-kHz-Zoom muss
 innerhalb des 600-kHz-Empfangsfensters bleiben.
 
+## Zweiter Empfänger für späteren Digitalbetrieb
+
+RX2 läuft gleichzeitig mit RX1 und erhält denselben breiten I/Q-Strom. Beide
+USB-Demodulatoren besitzen eigene Mischer, Filterzustände, Resampler,
+Abstimmsequenzen, Audiogenerationen und Sample-Zähler. Eine Abstimmung von RX2
+setzt RX1 weder zurück noch unterbricht sie dessen Audio; umgekehrt ebenso.
+Das vorhandene Gesamtspektrum und der Zoom von RX1 laufen gemeinsam weiter.
+
+Im Test-GUI gibt es eine zweite Eingabe **RX2 MHz (Digital-Test)** mit
+**Tune RX2** oder Enter. Der Startwert ist **10489,600000 MHz**; im Backend
+steht er unter `initial_rx2_hz`, im GUI kann er mit `--rx2-frequency` gewählt
+werden. Empfangsstatistik und bestätigte Frequenz werden separat angezeigt:
+Paketanzahl, Sample-Anzahl, RMS und Spitzenpegel. RX2 wird weder auf die
+Soundkarte gemischt noch einer Sprachbearbeitung oder einem Digitaldecoder
+zugeführt. Seine kurze Test-Queue ist begrenzt und wird nach der Auswertung
+verworfen. Ein zusätzlicher RX2-Wasserfall ist in diesem Schritt nicht nötig.
+
+Beide Audioströme sind **12 kHz, Mono, PCM16**, jeweils 240 Samples pro Paket.
+Die Stream-ID 1 kennzeichnet RX1, die Stream-ID 2 RX2. Alle Daten und
+Steuerbefehle verwenden weiterhin denselben GUI-UDP-Port. Reine Audionutzdaten:
+24 kB/s je Kanal, zusammen 48 kB/s. Beim Retune werden nur Filter und Audioepoch
+des angesprochenen Kanals zurückgesetzt. Eine lokale Änderung der
+RX1-Wiedergabelautstärke verändert die übertragenen Samples von RX2 nicht.
+
+```bash
+./start_gui.sh --rx-frequency 10489.748500 --rx2-frequency 10489.600000
+```
+
+Der Hardwaretest speichert zusätzlich `build/captures/rx2-usb.wav`, damit sich
+der zweite Audiostrom prüfen lässt. Es sind weiterhin keine Digitalmodems oder
+externen Audio-Routing-Verbindungen Bestandteil des Backends.
+
 ## Ohne Hardware testen
 
 ```bash
@@ -168,6 +200,7 @@ innerhalb des 600-kHz-Empfangsfensters bleiben.
 Das Gesamtspektrum enthält zwei Referenztöne bei -150 kHz (-12,04 dBFS)
 und +75 kHz (-20 dBFS). Zusätzlich erzeugt die Quelle relativ zur voreingestellten
 USB-Frequenz einen gewünschten +1-kHz-Ton und einen stärkeren -2-kHz-Ton.
+Für RX2 kommen ein +1700-Hz-Nutzton und ein stärkerer -2200-Hz-Ton hinzu.
 Am Audioausgang bleibt der 1-kHz-Ton. Der Pluto-Treiber wird in diesem Modus
 nicht gestartet. Für einen stillen Test kann `--no-audio` verwendet werden.
 
@@ -200,7 +233,7 @@ Test vollständig ohne Bildschirm. Er gehört ausdrücklich nicht zu `make test`
 - `include/qo100/`: Schnittstellen der C++-Bausteine.
 - `gui/`: einfaches Test-GUI und unabhängiger Python-Protokollempfänger.
 - `tests/`: DSP-/Protokoll-/Audiopuffertests und Ende-zu-Ende-Test mit bekannten Testtönen,
-  USB-Seitenbandunterdrückung, Zoom und Abstimmung.
+  USB-Seitenbandunterdrückung, Zoom und unabhängiger Abstimmung beider Empfänger.
 - `external/Pluto/`: eingebundene Kopie des bestehenden Treibers.
 - `docs/pluto-integration.patch`: nachvollziehbare lokale Änderungen am Treiber.
 

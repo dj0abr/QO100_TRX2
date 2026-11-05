@@ -19,7 +19,7 @@ def main():
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         config.write_text(Path(sys.argv[2]).read_text().replace("gui_port = 40900", f"gui_port = {port}"))
-        process = subprocess.Popen([sys.argv[1], "--config", str(config), "--source", "synthetic", "--duration", "8"],
+        process = subprocess.Popen([sys.argv[1], "--config", str(config), "--source", "synthetic", "--duration", "12"],
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         receiver = Receiver("127.0.0.1", port)
         try:
@@ -42,6 +42,40 @@ def main():
             lower=abs(np.sum(samples*np.exp(-2j*np.pi*2000*t)))*2/len(samples)
             assert .115<upper<.125, upper
             assert lower < upper*.003, (upper,lower)
+            def channel_audio(stream, count=40):
+                q=receiver.channels[stream].frames
+                return [q.get(timeout=3) for _ in range(count)]
+
+            def amplitude(packets, hz):
+                x=np.concatenate([p.samples for p in packets])[3000:]
+                return abs(np.sum(x*np.exp(-2j*np.pi*hz*np.arange(len(x))/12000)))*2/len(x)
+
+            def wait_frequency(stream, hz):
+                deadline=time.monotonic()+3
+                while receiver.channels[stream].applied_hz!=hz and time.monotonic()<deadline:
+                    receiver.frames.get(timeout=1)
+                assert receiver.channels[stream].applied_hz==hz
+
+            second=channel_audio(2)
+            assert all(p.stream_id==2 and p.center_hz==10489600000 for p in second)
+            assert .075<amplitude(second,1700)<.085
+            assert amplitude(second,2200)<.0003
+            primary_delivered=[]
+            receiver.channels[1].sink=primary_delivered.append
+            first_identity=receiver.channels[1].identity
+            receiver.set_frequency(10489600700,stream_id=2)
+            wait_frequency(2,10489600700)
+            # An old RX2 request must not tune back or affect RX1's sequence numbers.
+            receiver.sock.send(tune(1,10489600000,stream_id=2))
+            second_tuned=channel_audio(2)
+            assert all(p.stream_id==2 and p.center_hz==10489600700 for p in second_tuned)
+            assert .075<amplitude(second_tuned,1000)<.085
+            assert receiver.applied_hz==10489748500 and receiver.channels[1].identity==first_identity
+            assert len(primary_delivered)>20
+            assert all(p.stream_id==1 for p in primary_delivered), "RX2 routed to soundcard sink"
+            assert all(b.sample_index==a.sample_index+len(a.samples) and b.epoch==a.epoch
+                       for a,b in zip(primary_delivered,primary_delivered[1:])), "RX1 interrupted by RX2 tuning"
+            second_identity=receiver.channels[2].identity
             receiver.set_frequency(10489749500)
             deadline=time.monotonic()+3
             while receiver.applied_hz!=10489749500 and time.monotonic()<deadline:
@@ -57,7 +91,20 @@ def main():
             while not receiver.tune_error and time.monotonic()<deadline:
                 receiver.frames.get(timeout=1)
             assert receiver.tune_error and receiver.applied_hz==10489749500
-            print(f"Wide FFT, zoom, USB audio ({upper:.4f}), LSB suppression, confirmed tuning and invalid/stale commands verified")
+            second_after_primary=channel_audio(2,25)
+            assert receiver.channels[2].identity==second_identity
+            assert all(p.center_hz==10489600700 for p in second_after_primary)
+            assert all(b.sample_index==a.sample_index+len(a.samples)
+                       for a,b in zip(second_after_primary,second_after_primary[1:])), "RX2 interrupted by RX1 tuning"
+            receiver.set_frequency(10490050000,stream_id=2)
+            deadline=time.monotonic()+2
+            while not receiver.channels[2].tune_error and time.monotonic()<deadline:
+                receiver.frames.get(timeout=1)
+            assert receiver.channels[2].tune_error and receiver.channels[2].applied_hz==10489600700
+            assert receiver.applied_hz==10489749500
+            assert receiver.invalid_audio==0
+            print("Two independent USB streams, wanted/LSB tones, per-channel ACKs, stale and rejected tuning, "
+                  "continuity while tuning the other channel, and RX1-only playback routing verified")
         finally:
             receiver.close()
             process.terminate()

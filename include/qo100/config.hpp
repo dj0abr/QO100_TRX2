@@ -20,6 +20,7 @@ struct Config {
     uint32_t fft_size = 8192;
     uint32_t spectrum_fps = 20;
     uint64_t initial_rx_hz = 10489748500ULL;
+    uint64_t initial_rx2_hz = 10489600000ULL;
     double subscription_seconds = 8;
     uint32_t iq_rate() const { return pluto_sample_rate / 2; }
     void validate() const;

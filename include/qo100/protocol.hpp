@@ -15,8 +15,8 @@ struct FrameInfo {
     uint32_t stream_id = 0;
 };
 bool is_subscription(const uint8_t* data, size_t size);
-bool parse_tune(const uint8_t* data, size_t size, uint32_t& request, uint64_t& frequency);
-std::vector<uint8_t> state_packet(uint32_t request, uint64_t frequency, uint32_t epoch, uint32_t session, uint16_t status);
+bool parse_tune(const uint8_t* data, size_t size, uint32_t& stream_id, uint32_t& request, uint64_t& frequency);
+std::vector<uint8_t> state_packet(uint32_t request, uint64_t frequency, uint32_t epoch, uint32_t session, uint16_t status, uint32_t stream_id = 1);
 std::vector<uint8_t> audio_packet(const FrameInfo& info, const std::vector<int16_t>& audio);
 std::vector<std::vector<uint8_t>> spectrum_packets(const FrameInfo& info, const std::vector<int16_t>& bins);
 }

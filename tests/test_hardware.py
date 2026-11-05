@@ -32,7 +32,7 @@ def main():
     captures = PROJECT / "build/captures"
     captures.mkdir(parents=True, exist_ok=True)
     received = []
-    audio_received, zoom_received = [], []
+    audio_received, audio2_received, zoom_received = [], [], []
     driver_pids = []
     receiver = None
     with (captures / "hardware-backend.log").open("w") as log:
@@ -44,7 +44,7 @@ def main():
             while len(received) < args.frames and time.monotonic() - start < 20 + args.frames / 10:
                 try:
                     received.append(receiver.frames.get(timeout=0.3))
-                    for source, target in ((receiver.audio_frames,audio_received),(receiver.zoom_frames,zoom_received)):
+                    for source, target in ((receiver.audio_frames,audio_received),(receiver.audio2_frames,audio2_received),(receiver.zoom_frames,zoom_received)):
                         while True:
                             try: target.append(source.get_nowait())
                             except queue.Empty: break
@@ -53,7 +53,16 @@ def main():
                         raise RuntimeError("Backend exited; see build/captures/hardware-backend.log")
             assert len(received) == args.frames, f"Only {len(received)} frames"
             receiver.close()
-            assert len(zoom_received)>20 and len(audio_received)>100
+            assert len(zoom_received)>20 and len(audio_received)>100 and len(audio2_received)>100
+            assert receiver.channels[2].applied_hz==int(settings['initial_rx2_hz'])
+            assert all(p.stream_id==2 and p.center_hz==int(settings['initial_rx2_hz']) for p in audio2_received)
+            assert all(b.sample_index==a.sample_index+len(a.samples) and b.epoch==a.epoch
+                       for a,b in zip(audio2_received,audio2_received[1:])), "RX2 sample discontinuity"
+            decoded2=np.concatenate([p.samples for p in audio2_received])
+            assert np.isfinite(decoded2).all() and np.std(decoded2)>.00001
+            with wave.open(str(captures/'rx2-usb.wav'),'wb') as wav:
+                wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(12000)
+                wav.writeframes((np.clip(decoded2,-1,1)*32767).astype('<i2').tobytes())
             assert zoom_received[-1].center_hz==int(settings['initial_rx_hz'])
             assert zoom_received[-1].sample_rate==75000
             assert receiver.applied_hz==int(settings['initial_rx_hz'])
@@ -94,6 +103,9 @@ def main():
                 assert playback['played_samples']>24000,playback
                 assert playback['audio_error']=='',playback
                 assert playback['zoom_frames']>20,playback
+                assert playback['rx2_packets']>100 and playback['rx2_samples']>24000,playback
+                assert playback['rx2_applied_hz']==int(settings['initial_rx2_hz']),playback
+                assert playback['invalid_audio']==0,playback
             result = {
                 "source": uri, "frames": len(received), "iq_sample_rate_observed": observed,
                 "center_hz": last.center_hz, "pluto_rx_hz": int(rx_frequency),
@@ -106,6 +118,8 @@ def main():
                 "gui_smoke_test": args.gui, "zoom_frames":len(zoom_received),
                 "audio_packets":len(audio_received), "audio_sample_rate":12000,
                 "usb_carrier_hz":receiver.applied_hz,"audio_rms":float(np.std(decoded)),
+                "rx2_carrier_hz":receiver.channels[2].applied_hz,"rx2_audio_packets":len(audio2_received),
+                "rx2_audio_samples":len(decoded2),"rx2_audio_rms":float(np.std(decoded2)),
             }
         finally:
             if receiver:
