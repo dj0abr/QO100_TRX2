@@ -1,0 +1,198 @@
+/*
+* Adalm Pluto Driver
+* ==================
+* Author: DJ0ABR
+*
+*   (c) DJ0ABR
+*   www.dj0abr.de
+*
+*   This program is free software; you can redistribute it and/or modify
+*   it under the terms of the GNU General Public License as published by
+*   the Free Software Foundation; either version 2 of the License, or
+*   (at your option) any later version.
+*
+*   This program is distributed in the hope that it will be useful,
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+*   GNU General Public License for more details.
+*
+*   You should have received a copy of the GNU General Public License
+*   along with this program; if not, write to the Free Software
+*   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+* 
+* =========================
+* setup pluto for RX and TX
+* =========================
+* 
+*/
+
+#include "pluto.h"
+
+// device context
+struct iio_context *ctx   = NULL;
+
+// Streaming devices
+struct iio_device *tx;
+struct iio_device *rx;
+
+// channels
+struct iio_channel *rx0_i = NULL;
+struct iio_channel *rx0_q = NULL;
+struct iio_channel *tx0_i = NULL;
+struct iio_channel *tx0_q = NULL;
+
+// buffers
+struct iio_buffer  *rxbuf = NULL;
+struct iio_buffer  *txbuf = NULL;
+
+// Stream configurations
+stream_cfg rxcfg;
+stream_cfg txcfg;
+
+// fifo status timer
+int fifostat;
+
+void sendfifostat()
+{
+	int fs = fifo_usedspace(udpRXfifo);
+	uint8_t p[4];
+	p[0] = fs >> 24;
+	p[1] = fs >> 16;
+	p[2] = fs >> 8;
+	p[3] = fs & 0xff;
+
+	sendUDP(myIP, UDP_STATUSPORT, p, 4);
+}
+
+void pluto_setup()
+{
+	int ret; 
+
+	if (!rx_only) fifostat = start_timer(50,sendfifostat);
+
+	// set default configuration from pluto.h
+
+	uint32_t orig_srate = MHZ(SAMPRATE);
+	uint32_t srate = orig_srate;
+	if(srate < 2100000) srate = 3000000;
+
+	// RX stream config
+	rxcfg.bw_hz = MHZ(RX_BW);   	// rx rf bandwidth
+	rxcfg.fs_hz = srate;   			// rx sample rate
+	rxcfg.lo_hz = MHZ(RX_FREQ); 	// rx rf frequency
+	rxcfg.rfport = "A_BALANCED"; 	// port A (select for rf freq.)
+
+	// TX stream config
+	txcfg.bw_hz = MHZ(TX_BW); 		// tx rf bandwidth
+	txcfg.fs_hz = srate;   			// tx sample rate (must be same as RX samp rate)
+	txcfg.lo_hz = MHZ(TX_FREQ); 	// tx rf frequency
+	txcfg.rfport = "A"; 			// port A (select for rf freq.)
+	txcfg.hwgain = TX_GAIN;
+
+	// overwrite with configuration from a config file
+	char *p = getConfigElement("TX_FREQ");
+	if(p)
+	{
+		double v = atof(p);
+		if(v > 0) txcfg.lo_hz = MHZ(v);
+	}
+
+	p = getConfigElement("RX_FREQ");
+	if(p)
+	{
+		double v = atof(p);
+		if(v > 0) rxcfg.lo_hz = MHZ(v);
+	}
+
+	p = getConfigElement("TX_GAIN");
+	if(p)
+	{
+		double v = atof(p);
+		txcfg.hwgain = v;
+	}
+
+	p = getConfigElement("TX_BANDWIDTH");
+	if(p)
+	{
+		double v = atof(p);
+		txcfg.bw_hz = MHZ(v);
+	}
+
+	p = getConfigElement("RX_BANDWIDTH");
+	if(p)
+	{
+		double v = atof(p);
+		rxcfg.bw_hz = MHZ(v);
+	}
+
+	p = getConfigElement("SAMPLERATE");
+	if(p)
+	{
+		double v = atof(p);
+		orig_srate = srate = MHZ(v);
+		if(srate < 2100000) srate = 3000000;
+		txcfg.fs_hz = srate;
+		rxcfg.fs_hz = srate;
+	}
+
+	printf("TX frequency:            %.6g MHz\n",(double)txcfg.lo_hz / 1e6);
+	printf("RX frequency:            %.6g MHz\n",(double)rxcfg.lo_hz / 1e6);
+	printf("TX Bandwidth:            %.6g MHz\n",(double)txcfg.bw_hz / 1e6);
+	printf("RX Bandwidth:            %.6g MHz\n",(double)rxcfg.bw_hz / 1e6);
+	printf("RX/TX Srate :            %.6g MHz\n",(double)orig_srate / 1e6);
+	printf("TX Gain     :            %.6g dBm\n",txcfg.hwgain);
+
+	// Initialize Pluto
+
+	ctx = iio_create_context_from_uri(pluto_context_name);
+	if(!ctx) {printf("Cannot find a pluto at: %s\n", pluto_context_name); exit(0);}
+
+	int devanz = iio_context_get_devices_count(ctx);
+    if(devanz <= 0) 
+    {
+        printf("NO Pluto devices found\n");
+		exit(0);
+    }
+
+	if (!rx_only) {
+	ret = get_ad9361_stream_dev(ctx, TX, &tx);
+	if(!ret) {printf("TX streaming device not found. Pluto error\n"); exit(0);}
+	}
+	ret = get_ad9361_stream_dev(ctx, RX, &rx);
+	if(!ret) {printf("TX streaming device not found. Pluto error\n"); exit(0);}
+
+	if (!cfg_ad9361_streaming_ch(ctx, &rxcfg, RX, 0)) { fprintf(stderr,"RX configuration failed\n"); exit(1); }
+	if (!rx_only && !cfg_ad9361_streaming_ch(ctx, &txcfg, TX, 0)) { fprintf(stderr,"TX configuration failed\n"); exit(1); }
+
+	get_ad9361_stream_ch(ctx, RX, rx, 0, &rx0_i);
+	get_ad9361_stream_ch(ctx, RX, rx, 1, &rx0_q);
+	if (!rx0_i || !rx0_q) { fprintf(stderr,"RX channels missing\n"); exit(1); }
+	if (!rx_only) {
+	get_ad9361_stream_ch(ctx, TX, tx, 0, &tx0_i);
+	get_ad9361_stream_ch(ctx, TX, tx, 1, &tx0_q);
+	if (!tx0_i || !tx0_q) { fprintf(stderr,"TX channels missing\n"); exit(1); }
+	}
+
+	if(orig_srate < 2100000)
+	{
+		iio_device *dev9 = iio_context_find_device(ctx, "ad9361-phy");
+		if (!dev9 || ad9361_set_bb_rate(dev9,orig_srate) < 0) { fprintf(stderr,"Cannot set sample rate\n"); exit(1); }
+	}
+
+
+	iio_channel_enable(rx0_i);
+	iio_channel_enable(rx0_q);
+	if (!rx_only) { iio_channel_enable(tx0_i); iio_channel_enable(tx0_q); }
+
+	rxbuf = iio_device_create_buffer(rx, RXBUFSIZE, false);
+	if (!rxbuf) {
+		perror("Could not create RX buffer"); exit(1);
+	}
+	if (!rx_only) {
+	txbuf = iio_device_create_buffer(tx, BUFSIZE, false);
+	if (!txbuf) {
+		perror("Could not create TX buffer"); exit(1);
+	}
+	}
+
+}
