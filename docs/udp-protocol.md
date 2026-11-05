@@ -13,7 +13,7 @@ Python reference format: `struct.Struct("!4sBBHIIQQQIIIHHII")`.
 |---:|---:|---|
 | 0 | 4 | ASCII magic `QTR2` |
 | 4 | 1 | Protocol version, 1 |
-| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO |
+| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO, 9 FILTER_CONTROL, 10 FILTER_STATE |
 | 6 | 2 | Header size, 64 |
 | 8 | 4 | Stream ID: 0 = full-band spectrum; 1 = RX1; 2 = RX2; 3 = TX |
 | 12 | 4 | Frame ID / control request ID / audio tuning epoch, uint32 |
@@ -139,6 +139,48 @@ wrong-session and wrong-epoch audio is discarded. Clients send only after the
 matching successful ON acknowledgment. No retransmission. Packet gaps are
 silence; after 200 ms without accepted audio the backend clears audio/DSP
 history and emits exact zeros until the FIFO has refilled.
+
+## RX1 variable passband (v0.6)
+
+FILTER_CONTROL (9) and FILTER_STATE (10) use the existing subscribed GUI socket.
+Both are exactly 64 bytes and support **stream 1 only**. There is no RX2/TX
+filter control. Bandwidth and position are audio frequencies relative to the
+USB carrier; they do not change RF tuning or the zoom center.
+
+FILTER_CONTROL: frame_id = monotonic uint32 request, session_id = current
+backend session learned from RX STATE. The format field selects **0=query** or
+**1=set**. For a query, center_hz, sample_rate and fft_size must be zero.
+For a set, center_hz holds the **audio passband center in Hz**, sample_rate is
+12000, and fft_size holds the **bandwidth in Hz**. Timestamp, sample_index,
+first_bin, bin_count and total_count must be zero in both modes.
+
+Allowed bandwidth: 500..3900 Hz, in integer-Hz steps. Both edges
+`center_hz ± bandwidth/2` must remain inside 100..4000 Hz. The center is an
+integer number of Hz; odd bandwidths have half-Hz edges. Defaults are BW 3900,
+center 2050 (full 100..4000 Hz); BW 500, center 700 selects 450..950 Hz.
+
+FILTER_STATE: echoed request and backend session, sample_index = current RX1
+audio epoch, center_hz = accepted target audio center, sample_rate = 12000,
+fft_size = accepted target bandwidth. Format/status is **0=OK** or
+**1=out of range**. Timestamp, first_bin, bin_count and total_count are zero,
+as in RX STATE. An invalid set retains the previous target
+and returns it with status 1. Malformed packets, other streams, wrong sessions
+and older requests are ignored. Duplicate requests acknowledge current state
+and the original request status without applying a changed payload.
+
+The filter has its own request sequence, independent of RX/TX tuning. New
+subscribers or renewed subscriptions after expiry may start a fresh sequence;
+the selected filter itself is retained. Query first to display the current
+backend/configuration state. Repeat the latest command until acknowledged
+(the test GUI repeats it every second). Match ACKs by request and session.
+
+An ACK describes the accepted target; the DSP crossfades over 20 ms without
+resetting RX1 audio indices, epoch, NCO, resampler or zoom. The replacement
+513-tap liquid FIR is initialized with the preceding 512 raw 12-kHz complex
+samples. Rapid updates coalesce to the latest target after the current fade,
+so convergence may take up to about 40 ms plus processing/transport delay.
+RX2 and TX retain their fixed nominal 100..4000-Hz passband. Both RX audio
+streams continue to use 12000-Hz PCM16 regardless of the selected RX1 width.
 
 ## Local Pluto direct TX transport
 

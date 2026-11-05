@@ -109,6 +109,9 @@ int main(int argc, char** argv) {
         auto last_tx_feedback=Clock::now(),last_tx_state=last_tx_audio;
         auto mute_tx=[&] { if(tx_enabled) { tx_enabled=false;++tx_epoch;tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz)); } };
         tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
+        uint32_t filter_request=0;
+        uint16_t filter_status=0;
+        bool have_filter_request=false;
         uint32_t zoom_frame_id = 0;
         auto stamp = [] { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); };
         auto active = [&] { return subscribed && std::chrono::duration<double>(Clock::now()-last_subscription).count() <= c.subscription_seconds; };
@@ -162,7 +165,7 @@ int main(int argc, char** argv) {
                     const auto& rx=receivers[i];
                     qo100::FrameInfo f{rx.epoch,stamp(),index,rx.frequency,12000,0,session_id,static_cast<uint32_t>(i+1)};
                     send_packet(qo100::audio_packet(f,audio));
-                });
+                }, i==0 ? c.rx1_filter : qo100::RxFilterSettings{});
         }
         qo100::Spectrum spectrum(c.iq_rate(), c.fft_size, c.spectrum_fps,
             [&](const std::vector<int16_t>& bins, uint64_t sample_index) {
@@ -210,10 +213,31 @@ int main(int argc, char** argv) {
                             std::cout << "GUI subscriber " << inet_ntoa(from.sin_addr) << ':' << ntohs(from.sin_port) << '\n';
                         if (!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) {
                             for(auto& rx:receivers) rx.have_request=false;
-                            mute_tx();tx_have_request=false;
+                            mute_tx();tx_have_request=false;have_filter_request=false;
                         }
                         peer = from; subscribed = true; last_subscription = Clock::now();
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
+                        qo100::FilterControl filter_control{};
+                        if(qo100::parse_filter_control(buffer.data(),size_t(n),filter_control)) {
+                            if(filter_control.session!=session_id || (have_filter_request &&
+                               filter_control.request!=filter_request && int32_t(filter_control.request-filter_request)<0)) continue;
+                            if(!have_filter_request || filter_control.request!=filter_request) {
+                                filter_request=filter_control.request;have_filter_request=true;filter_status=0;
+                                if(filter_control.set) {
+                                    const qo100::RxFilterSettings requested{filter_control.bandwidth_hz,filter_control.center_hz};
+                                    if(!requested.valid()) filter_status=1;
+                                    else if(requested!=receivers[0].dsp->filter_settings()) {
+                                        receivers[0].dsp->set_filter(requested);
+                                        std::cout << "RX1 filter BW=" << requested.bandwidth_hz << " Hz; center=" << requested.center_hz
+                                                  << " Hz; passband=" << requested.low_hz() << ".." << requested.high_hz() << " Hz\n";
+                                    }
+                                }
+                            }
+                            const auto actual=receivers[0].dsp->filter_settings();
+                            send_packet(qo100::filter_state_packet(filter_request,actual.bandwidth_hz,actual.center_hz,
+                                receivers[0].epoch,session_id,filter_status));
+                            continue;
+                        }
                         qo100::TxControl control{};qo100::TxAudio audio{};
                         if(qo100::parse_tx_control(buffer.data(),size_t(n),control)) {
                             if(control.session!=session_id || (tx_have_request && control.request!=tx_request && int32_t(control.request-tx_request)<0)) continue;
@@ -246,7 +270,7 @@ int main(int argc, char** argv) {
                                 rx.frequency=frequency; ++rx.epoch;
                                 rx.dsp->tune(static_cast<int64_t>(rx.frequency)-static_cast<int64_t>(c.rx_center_hz));
                                 if(stream_id==1) zoom=make_zoom();
-                                std::cout << "RX" << stream_id << " tuned to " << rx.frequency << " Hz; USB +100..4000 Hz; epoch=" << rx.epoch << '\n';
+                                std::cout << "RX" << stream_id << " tuned to " << rx.frequency << " Hz; USB; epoch=" << rx.epoch << '\n';
                             }
                             rx.last_request=request;rx.have_request=true;
                             send_packet(qo100::state_packet(request,rx.frequency,rx.epoch,session_id,valid?0:1,stream_id));

@@ -61,6 +61,11 @@ int main() {
         require(qo100::load_config(path).rx_center_hz == 10489750000ULL, "RF frequency overflow");
         { std::ofstream file(path); file << "fft_size=8192\nfft_size=4096\n"; }
         rejects([&] { qo100::load_config(path); }, "Duplicate config accepted");
+        { std::ofstream file(path); file << "rx1_filter_bandwidth_hz=500\nrx1_filter_center_hz=700\n"; }
+        const auto filtered_config=qo100::load_config(path);
+        require(filtered_config.rx1_filter==qo100::RxFilterSettings{500,700},"RX1 filter config not parsed");
+        { std::ofstream file(path); file << "rx1_filter_bandwidth_hz=3900\nrx1_filter_center_hz=700\n"; }
+        rejects([&] { qo100::load_config(path); }, "Invalid filter config accepted");
         std::filesystem::remove(path);
         std::vector<uint8_t> subscription(64, 0);
         subscription[0]='Q'; subscription[1]='T'; subscription[2]='R'; subscription[3]='2';

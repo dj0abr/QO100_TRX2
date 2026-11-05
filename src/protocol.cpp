@@ -16,6 +16,20 @@ void put(std::vector<uint8_t>& bytes, size_t offset, uint64_t value, size_t widt
     for (size_t i = 0; i < width; ++i) bytes[offset + width - i - 1] = (value >> (i * 8)) & 255;
 }
 }
+bool parse_filter_control(const uint8_t* p, size_t n, FilterControl& c) {
+    if (n!=64 || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=filter_control_type ||
+        get(p,6,2)!=64 || get(p,8,4)!=1 || get(p,54,2)>1 || get(p,32,8)>UINT32_MAX ||
+        get(p,16,8) || get(p,24,8) || get(p,48,6) || get(p,56,4)) return false;
+    const bool set = get(p,54,2)!=0;
+    if (set ? get(p,40,4)!=12000 : (get(p,32,8) || get(p,40,8))) return false;
+    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),uint32_t(get(p,44,4)),uint32_t(get(p,32,8)),set};
+    return true;
+}
+std::vector<uint8_t> filter_state_packet(uint32_t request, uint32_t bandwidth, uint32_t center,
+    uint32_t epoch, uint32_t session, uint16_t status) {
+    auto p=state_packet(request,center,epoch,session,status,1);
+    p[5]=filter_state_type;put(p,44,bandwidth,4);return p;
+}
 bool parse_tx_control(const uint8_t* p,size_t n,TxControl& c) {
     if(n!=64 || !tx_header(p,n,tx_control_type) || get(p,54,2)>1 ||
        get(p,16,8) || get(p,24,8) || get(p,40,8) || get(p,48,6) || get(p,56,4)) return false;

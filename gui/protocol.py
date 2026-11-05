@@ -139,3 +139,33 @@ def tx_audio(epoch, index, frequency, session, samples):
     pcm = (np.clip(samples, -1, 1)*32767).astype('>i2').tobytes()
     return HEADER.pack(MAGIC, VERSION, TX_AUDIO, 64, 3, epoch, 0, index,
                        frequency, 12000, 0, 0, 240, 2, 240, session) + pcm
+
+
+FILTER_CONTROL, FILTER_STATE = 9, 10
+
+
+def valid_filter(bandwidth, center):
+    return (isinstance(bandwidth, int) and isinstance(center, int)
+            and 500 <= bandwidth <= 3900 and 0 <= center <= 4000
+            and 2*center >= 200+bandwidth and 2*center+bandwidth <= 8000)
+
+
+def filter_control(request, session, bandwidth=None, center=None):
+    setting = bandwidth is not None or center is not None
+    if setting and not valid_filter(bandwidth, center):
+        raise ValueError("RX1 filter requires BW 500..3900 Hz with edges inside 100..4000 Hz")
+    return HEADER.pack(MAGIC, VERSION, FILTER_CONTROL, 64, 1, request, 0, 0,
+                       center if setting else 0, 12000 if setting else 0,
+                       bandwidth if setting else 0, 0, 0, int(setting), 0, session)
+
+
+def filter_state(packet):
+    if len(packet) != 64:
+        return None
+    f = HEADER.unpack(packet)
+    if (f[:4] != (MAGIC, VERSION, FILTER_STATE, 64) or f[4] != 1
+        or f[9] != 12000 or f[6] or f[11] or f[12] or f[14] or f[13] not in (0, 1)
+        or not valid_filter(f[10], f[8])):
+        return None
+    # request, backend session, accepted target BW/center, status
+    return f[5], f[15], f[10], f[8], f[13]

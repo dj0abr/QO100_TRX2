@@ -106,6 +106,9 @@ def main():
                 assert playback['rx2_packets']>100 and playback['rx2_samples']>24000,playback
                 assert playback['rx2_applied_hz']==int(settings['initial_rx2_hz']),playback
                 assert playback['invalid_audio']==0,playback
+                assert playback['rx1_filter']==[int(settings['rx1_filter_bandwidth_hz']),
+                                                 int(settings['rx1_filter_center_hz'])],playback
+                assert playback['rx1_filter_error']=='',playback
             result = {
                 "source": uri, "frames": len(received), "iq_sample_rate_observed": observed,
                 "center_hz": last.center_hz, "pluto_rx_hz": int(rx_frequency),

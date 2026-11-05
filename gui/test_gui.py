@@ -10,6 +10,7 @@ import time
 import numpy as np
 from protocol import Assembler, subscription, tune, audio_packet, HEADER, STATE, AUDIO
 from protocol import TX_STATE, tx_control, tx_audio
+from protocol import FILTER_STATE, filter_control, filter_state, valid_filter
 from decimal import Decimal
 
 
@@ -46,6 +47,12 @@ class Receiver:
         self.tx_index = self.tx_packets = 0
         self.tx_error = ""
         self.tx_fill = self.tx_pluto_fill = self.tx_ppm = 0
+        self.filter_lock = threading.RLock()
+        self.filter_command = (1, None, None)  # request, BW, center; None queries backend defaults
+        self.filter_session = None
+        self.filter_applied = None
+        self.filter_acked = None
+        self.filter_error = ""
         self.audio_frames = self.channels[1].frames
         self.audio2_frames = self.channels[2].frames
         self.frames = queue.Queue(maxsize=4)
@@ -77,6 +84,8 @@ class Receiver:
         last_commands = None
         last_tx = None
         next_tx = 0
+        last_filter = None
+        next_filter = 0
         while not self.stop.is_set():
             commands = tuple((stream, state.command) for stream, state in self.channels.items())
             if time.monotonic() >= next_subscription or commands != last_commands:
@@ -97,6 +106,16 @@ class Receiver:
                         next_tx = time.monotonic() + .5
                     except OSError as exc:
                         self.tx_error = str(exc)
+            with self.filter_lock:
+                command = self.filter_command
+                if self.filter_session is not None and (command != last_filter or time.monotonic() >= next_filter):
+                    try:
+                        request, bandwidth, center = command
+                        self.sock.send(filter_control(request, self.filter_session, bandwidth, center))
+                        last_filter = command
+                        next_filter = time.monotonic() + 1
+                    except OSError as exc:
+                        self.filter_error = str(exc)
             try:
                 packet = self.sock.recv(65536)
             except socket.timeout:
@@ -109,6 +128,14 @@ class Receiver:
                 continue
             if len(packet) >= 64 and packet[:4] == b"QTR2" and packet[4] == 1:
                 fields = HEADER.unpack_from(packet)
+                if packet[5] == FILTER_STATE:
+                    result = filter_state(packet)
+                    with self.filter_lock:
+                        if result and result[0] == self.filter_command[0] and result[1] == self.filter_session:
+                            self.filter_applied = (result[2], result[3])
+                            self.filter_acked = result[0]
+                            self.filter_error = "RX1 filter outside 100..4000 Hz or BW outside 500..3900 Hz" if result[4] else ""
+                    continue
                 if packet[5] == TX_STATE:
                     with self.tx_lock:
                         if (len(packet) == 64 and fields[3] == 64 and fields[4] == 3 and
@@ -134,6 +161,13 @@ class Receiver:
                                 self.tx_command = ((request+1)&0xffffffff, hz, False)
                                 self.tx_confirmed = False
                                 self.tx_identity = None
+                        with self.filter_lock:
+                            if self.filter_session != fields[15]:
+                                self.filter_session = fields[15]
+                                request, bandwidth, center = self.filter_command
+                                self.filter_command = ((request+1)&0xffffffff, bandwidth, center)
+                                self.filter_applied = None
+                                self.filter_acked = None
                         state.tune_error = "RX frequency outside capture window" if fields[13] else ""
                         if not fields[13]:
                             identity = (fields[15], fields[7])
@@ -183,6 +217,21 @@ class Receiver:
     def set_frequency(self, hz, stream_id=1):
         state = self.channels[stream_id]
         state.command = ((state.command[0] + 1) & 0xffffffff, hz)
+
+    def set_filter(self, bandwidth, center):
+        if not valid_filter(bandwidth, center):
+            raise ValueError("RX1 filter requires BW 500..3900 Hz with edges inside 100..4000 Hz")
+        with self.filter_lock:
+            self.filter_command = ((self.filter_command[0]+1)&0xffffffff, bandwidth, center)
+            self.filter_acked = None
+            self.filter_error = ""
+            return self.filter_command[0]
+
+    def query_filter(self):
+        with self.filter_lock:
+            self.filter_command = ((self.filter_command[0]+1)&0xffffffff, None, None)
+            self.filter_acked = None
+            return self.filter_command[0]
 
     def set_tx(self, frequency=None, enabled=None):
         with self.tx_lock:
@@ -346,6 +395,56 @@ def gui(args):
         tk.Label(tuning, text="Audio gain", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=8)
         tk.Scale(tuning, from_=0, to=20, orient="horizontal", variable=gain, length=200,
                  command=lambda value: setattr(player,"volume",float(value)), bg="#0b1321", fg="#e8edf7").pack(side="left")
+    filter_controls = tk.Frame(root, bg="#0b1321")
+    filter_controls.pack(pady=3)
+    filter_bw = tk.IntVar(value=3900)
+    filter_center = tk.IntVar(value=2050)
+    filter_syncing = False
+    filter_ready = False
+    filter_after = None
+    last_filter_applied = None
+    def constrain_filter():
+        nonlocal filter_syncing
+        filter_syncing = True
+        width = int(filter_bw.get())
+        minimum = (200+width+1)//2
+        maximum = (8000-width)//2
+        center_scale.configure(from_=minimum, to=maximum, state="normal" if filter_ready and minimum<maximum else "disabled")
+        filter_center.set(max(minimum, min(maximum, int(filter_center.get()))))
+        filter_syncing = False
+    def send_filter():
+        nonlocal filter_after
+        filter_after = None
+        if filter_ready:
+            receiver.set_filter(int(filter_bw.get()), int(filter_center.get()))
+    def filter_changed(value=None):
+        nonlocal filter_after
+        if filter_syncing or not filter_ready: return
+        constrain_filter()
+        # Throttle to at most 20 updates/s while dragging, retaining the latest values.
+        if filter_after is None: filter_after = root.after(50, send_filter)
+    tk.Label(filter_controls, text="RX1 BW (Hz)", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=5)
+    bw_scale = tk.Scale(filter_controls, name="rx1_bandwidth", from_=500, to=3900, resolution=1,
+                        orient="horizontal", variable=filter_bw, command=filter_changed, length=300,
+                        bg="#0b1321", fg="#e8edf7", highlightthickness=0, state="disabled")
+    bw_scale.pack(side="left")
+    tk.Label(filter_controls, text="Mitte / Lage (Audio Hz)", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=5)
+    center_scale = tk.Scale(filter_controls, name="rx1_filter_center", from_=350, to=3750, resolution=1,
+                            orient="horizontal", variable=filter_center, command=filter_changed, length=300,
+                            bg="#0b1321", fg="#e8edf7", highlightthickness=0, state="disabled")
+    center_scale.pack(side="left")
+    presets = tk.Frame(root, bg="#0b1321")
+    presets.pack()
+    def preset_filter(width):
+        filter_bw.set(width)
+        filter_changed()
+    preset_buttons = []
+    for label, width in (("500 Hz",500),("1.2 kHz",1200),("1.8 kHz",1800),("2.7 kHz",2700),("Full BW",3900)):
+        button = tk.Button(presets, text=label, command=lambda width=width: preset_filter(width), state="disabled")
+        button.pack(side="left", padx=3)
+        preset_buttons.append(button)
+    filter_monitor = tk.Label(root, text="RX1 Filter: wartet auf Backend", bg="#0b1321", fg="#a4b5cd", anchor="w")
+    filter_monitor.pack(fill="x", padx=12)
     tuning2 = tk.Frame(root, bg="#0b1321")
     tuning2.pack(pady=3)
     tk.Label(tuning2, text="RX2 MHz (Digital-Test)", bg="#0b1321", fg="#e8edf7").pack(side="left")
@@ -409,7 +508,7 @@ def gui(args):
     last_floor = floor.get()
 
     def tick():
-        nonlocal last_frame, last_floor
+        nonlocal last_frame, last_floor, filter_ready, filter_syncing, last_filter_applied
         changed = False
         try:
             while True:
@@ -424,7 +523,7 @@ def gui(args):
             pass
         if history and (changed or floor.get() != last_floor):
             last_floor = floor.get()
-            rendered = draw_image(history, height=350, floor=last_floor)
+            rendered = draw_image(history, height=300, floor=last_floor)
             photo = ImageTk.PhotoImage(rendered)
             canvas.configure(image=photo, text="")
             canvas.image = photo
@@ -443,20 +542,35 @@ def gui(args):
         except queue.Empty:
             pass
         if zoom_history and (zoom_changed or changed or floor.get() != last_floor):
-            zoom_rendered = draw_image(zoom_history,height=350,floor=floor.get(),span_hz=50000)
+            zoom_rendered = draw_image(zoom_history,height=300,floor=floor.get(),span_hz=50000)
             photo = ImageTk.PhotoImage(zoom_rendered)
             zoom_canvas.configure(image=photo,text="")
             zoom_canvas.image = photo
             if args.screenshot and history:
                 from PIL import Image
                 from PIL import ImageDraw
-                combined = Image.new("RGB",(1100,740),"#0b1321")
-                combined.paste(draw_image(history,height=350,floor=floor.get()),(0,0))
-                combined.paste(zoom_rendered,(0,350))
+                combined = Image.new("RGB",(1100,640),"#0b1321")
+                combined.paste(draw_image(history,height=300,floor=floor.get()),(0,0))
+                combined.paste(zoom_rendered,(0,300))
                 rx2 = receiver.channels[2]
-                ImageDraw.Draw(combined).text((20,712),
+                ImageDraw.Draw(combined).text((20,612),
                     f"RX2 monitor | {rx2.applied_hz} Hz | 12 kHz PCM mono | {rx2.received} packets | {rx2.samples} samples | RMS {rx2.rms:.5f} | no soundcard output", fill="#a4b5cd")
                 combined.save(args.screenshot)
+        applied = receiver.filter_applied
+        if applied is not None and applied != last_filter_applied and filter_after is None and receiver.filter_acked == receiver.filter_command[0]:
+            filter_syncing = True
+            filter_bw.set(applied[0]); filter_center.set(applied[1])
+            filter_syncing = False
+            filter_ready = True
+            bw_scale.configure(state="normal")
+            for button in preset_buttons: button.configure(state="normal")
+            constrain_filter()
+            last_filter_applied = applied
+        if applied is not None:
+            width, center = applied
+            pending = filter_after is not None or receiver.filter_acked != receiver.filter_command[0]
+            filter_monitor.configure(text=f"RX1 Filter: {center-width/2:g}–{center+width/2:g} Hz | BW {width} Hz | Mitte {center} Hz"
+                + (" | wird übernommen…" if pending else " | bestätigt") + (f" | {receiver.filter_error}" if receiver.filter_error else ""))
         if microphone and (microphone.error or not receiver.tx_command[2]):
             if microphone.error: receiver.tx_error = microphone.error
             release_ptt()
@@ -477,6 +591,7 @@ def gui(args):
         root.after(50, tick)
 
     def close():
+        if filter_after is not None: root.after_cancel(filter_after)
         release_ptt()
         receiver.close()
         if player:
@@ -490,7 +605,8 @@ def gui(args):
                       "invalid_audio":receiver.invalid_audio,
                       "tx_packets":receiver.tx_packets,"tx_applied_hz":receiver.tx_applied_hz,
                       "tx_audio_fill":receiver.tx_fill,"tx_pluto_fill":receiver.tx_pluto_fill,
-                      "tx_ppm":receiver.tx_ppm,"tx_error":receiver.tx_error}
+                      "tx_ppm":receiver.tx_ppm,"tx_error":receiver.tx_error,
+                      "rx1_filter":receiver.filter_applied,"rx1_filter_error":receiver.filter_error}
             args.audio_report.write_text(json.dumps(report,indent=2)+"\n")
         root.destroy()
 

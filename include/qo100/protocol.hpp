@@ -8,6 +8,14 @@ constexpr size_t header_size = 64, max_datagram = 1200;
 constexpr uint8_t protocol_version = 1, subscribe_type = 1, spectrum_type = 2;
 constexpr uint8_t tune_type = 3, state_type = 4, audio_type = 5;
 constexpr uint8_t tx_control_type = 6, tx_state_type = 7, tx_audio_type = 8;
+constexpr uint8_t filter_control_type = 9, filter_state_type = 10;
+struct FilterControl {
+    uint32_t request, session, bandwidth_hz, center_hz;
+    bool set;
+};
+bool parse_filter_control(const uint8_t*, size_t, FilterControl&);
+std::vector<uint8_t> filter_state_packet(uint32_t request, uint32_t bandwidth, uint32_t center,
+    uint32_t epoch, uint32_t session, uint16_t status);
 struct TxControl { uint32_t request, session; uint64_t frequency; bool enabled; };
 struct TxAudio { uint32_t epoch, session; uint64_t index, frequency; std::vector<int16_t> samples; };
 bool parse_tx_control(const uint8_t*, size_t, TxControl&);

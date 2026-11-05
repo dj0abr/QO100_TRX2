@@ -149,7 +149,7 @@ Die Zoom-FFT hat 8192 Punkte (9,155 Hz/Bin); angezeigt werden die mittleren
 Das Gesamtspektrum läuft parallel weiter.
 
 Ein zweikanaliger Sinc-Resampler reduziert den Kanal auf 12 kS/s komplex.
-Ein komplexer 513-Tap-FIR wählt das obere Seitenband **+100 bis +4000 Hz**;
+Ein komplexer liquid-dsp-513-Tap-FIR wählt standardmäßig das obere Seitenband **+100 bis +4000 Hz**;
 an den Grenzen liegt der übliche Filterübergang. Anschließend wird der Realteil
 als Mono-Audio ausgegeben. Es gibt keine AGC und keine Sprach-/Rauschbearbeitung.
 
@@ -168,6 +168,45 @@ Audiogeneration zurückgesetzt. Das GUI verwirft alte Audiopakete nach der
 Bestätigung. Wiederholte Abstimmkommandos setzen den Kanal nicht erneut zurück;
 verspätete ältere Befehle werden ignoriert. Ein vollständiger ±25-kHz-Zoom muss
 innerhalb des 600-kHz-Empfangsfensters bleiben.
+
+## RX1: Bandbreite und Lage des Durchlassbereichs
+
+RX1 besitzt im Test-GUI zwei unabhängig einstellbare Regler:
+
+- **BW:** 500 bis 3900 Hz, in 1-Hz-Schritten einstellbar.
+- **Mitte / Lage:** Mittenfrequenz des Audio-Durchlassbereichs in Hz relativ
+  zum eingestellten USB-Träger. Die Grenzen sind `Mitte ± BW/2`.
+
+Beispiel: **BW 500 Hz, Mitte 700 Hz** ergibt einen Durchlassbereich von
+**450–950 Hz**. Bei gleicher Breite lässt sich dieser Bereich entlang des
+Audiospektrums verschieben. Die Abstimmfrequenz und die Mitte des Zooms ändern
+sich dabei nicht. Die Filtergrenzen bleiben innerhalb **100–4000 Hz**; das GUI
+begrenzt den Lageregler passend zur gewählten Breite.
+
+Die Tasten **500 Hz, 1.2 kHz, 1.8 kHz, 2.7 kHz und Full BW** setzen die Breite.
+Die bisherige Mitte bleibt erhalten, soweit sie zur neuen Breite passt.
+**Full BW** bedeutet weiterhin **100–4000 Hz**, also 3900 Hz Breite bei 2050 Hz Mitte.
+Die Grenzen bezeichnen den nominellen Durchlassbereich mit etwa −6 dB an den
+Kanten; der FIR hat endliche Übergangsbereiche.
+
+Beim Start liest das GUI die aktuelle Filtereinstellung aus dem Backend.
+Die Startwerte stehen in `config/backend.conf`:
+
+```ini
+rx1_filter_bandwidth_hz = 3900
+rx1_filter_center_hz = 2050
+```
+
+Ungültige Kombinationen verhindern den Backend-Start bzw. werden bei UDP-Steuerung
+mit Fehlerstatus abgelehnt. Änderungen werden zwischen gleich langen, mit der
+Sample-Historie vorgefüllten Filtern über 20 ms überblendet. Bei schneller
+Bedienung wird die jeweils neueste Einstellung nachgeführt. Audiozähler,
+Audiogeneration und Zoom laufen ohne Rücksetzung weiter. **RX2 und TX behalten
+ihren bisherigen Durchlassbereich 100–4000 Hz.** Die Audioübertragung bleibt
+bei 12 kHz Mono und verwendet denselben GUI-UDP-Port.
+
+Die automatischen Tests prüfen Filterkurven, Übergänge beim Verstellen und die
+UDP-Steuerung einschließlich durchgehender Audioströme beider Empfänger.
 
 ## Zweiter Empfänger für späteren Digitalbetrieb
 

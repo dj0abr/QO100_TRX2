@@ -5,8 +5,8 @@
 #include <utility>
 
 namespace qo100 {
-RxChannel::RxChannel(int64_t offset, Zoom zoom, Audio audio)
-    : decimator_(make_rx_decimator()), usb_filter_(make_usb_filter(1)),
+RxChannel::RxChannel(int64_t offset, Zoom zoom, Audio audio, RxFilterSettings filter)
+    : decimator_(make_rx_decimator()), usb_filter_(filter),
       src_(make_audio_resampler(SRC_SINC_MEDIUM_QUALITY, 2)),
       zoom_(std::move(zoom)), audio_(std::move(audio)) {
     input_.reserve(512); audio_packet_.reserve(240);
@@ -18,7 +18,7 @@ void RxChannel::tune(int64_t offset) {
     mixer_.tune(-offset);
     decimation_ = 0;
     check_liquid(firdecim_crcf_reset(decimator_.get()));
-    check_liquid(firfilt_cccf_reset(usb_filter_.get()));
+    usb_filter_.reset();
     input_.clear(); audio_packet_.clear(); audio_index_ = 0;
     src_reset(src_.get());
 }
@@ -46,8 +46,7 @@ void RxChannel::resample() {
         if (!data.input_frames_used && !data.output_frames_gen) throw std::runtime_error("RX resampler stalled");
         used += data.input_frames_used;
         for (long i = 0; i < data.output_frames_gen; ++i) {
-            std::complex<float> filtered;
-            check_liquid(firfilt_cccf_execute_one(usb_filter_.get(), {output[2*i], output[2*i+1]}, &filtered));
+            const auto filtered = usb_filter_.execute({output[2*i], output[2*i+1]});
             audio_packet_.push_back(static_cast<int16_t>(std::lround(std::clamp(filtered.real(), -1.f, 1.f) * 32767)));
             if (audio_packet_.size() == 240) {
                 audio_(audio_packet_, audio_index_);

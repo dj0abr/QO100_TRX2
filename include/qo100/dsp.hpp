@@ -1,4 +1,5 @@
 #pragma once
+#include "qo100/filter_settings.hpp"
 #include <algorithm>
 #include <complex>
 #include <cstdint>
@@ -23,7 +24,7 @@ using SrcPtr = std::unique_ptr<SRC_STATE, decltype(&src_delete)>;
 
 void check_liquid(int result);
 LiquidDecimator make_rx_decimator();
-LiquidFir make_usb_filter(float gain);
+LiquidFir make_usb_filter(float gain, RxFilterSettings settings = {});
 SrcPtr make_audio_resampler(int quality, int channels);
 
 // Interpolated oscillator: avoid the coarse LIQUID_NCO lookup table. Use a

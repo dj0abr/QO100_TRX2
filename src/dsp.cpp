@@ -6,8 +6,8 @@
 namespace qo100 {
 namespace {
 constexpr double pi = 3.14159265358979323846;
-// Keep the established Kaiser coefficients and passbands. Only filter
-// execution changes to liquid-dsp; there is no filter redesign in this step.
+// Keep the established Kaiser design and default passbands; RX1 can select
+// another audio bandwidth and center without changing the other channels.
 std::vector<float> lowpass(size_t n, double cutoff, double rate) {
     std::vector<float> h(n);
     double sum = 0;
@@ -33,11 +33,12 @@ LiquidDecimator make_rx_decimator() {
     if (!result) throw std::runtime_error("Cannot create liquid RX decimator");
     return result;
 }
-LiquidFir make_usb_filter(float gain) {
-    const auto h = lowpass(513, 1950, 12000);
+LiquidFir make_usb_filter(float gain, RxFilterSettings settings) {
+    if (!settings.valid()) throw std::runtime_error("Invalid USB filter bandwidth/center");
+    const auto h = lowpass(513, settings.bandwidth_hz/2., 12000);
     std::vector<std::complex<float>> taps(h.size());
     for (size_t i = 0; i < h.size(); ++i)
-        taps[i] = gain * h[i] * std::polar(1.f, float(2*pi*2050*(double(i)-256)/12000));
+        taps[i] = gain * h[i] * std::polar(1.f, float(2*pi*settings.center_hz*(double(i)-256)/12000));
     LiquidFir result(firfilt_cccf_create(taps.data(), taps.size()));
     if (!result) throw std::runtime_error("Cannot create liquid USB filter");
     return result;
