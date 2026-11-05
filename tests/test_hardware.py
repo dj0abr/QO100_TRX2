@@ -109,6 +109,8 @@ def main():
                 assert playback['rx1_filter']==[int(settings['rx1_filter_bandwidth_hz']),
                                                  int(settings['rx1_filter_center_hz'])],playback
                 assert playback['rx1_filter_error']=='',playback
+                assert playback['rx1_nr_percent']==int(settings.get('rx1_nr_percent','0')),playback
+                assert playback['rx1_nr_error']=='',playback
                 assert playback['tx1_compressor']==round(float(settings['tx1_compressor_percent'])*10),playback
                 assert playback['tx1_compressor_error']=='',playback
                 assert playback['test_loop']==0 and playback['loop_error']=='',playback

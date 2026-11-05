@@ -26,6 +26,7 @@ struct Config {
     uint64_t initial_tx_hz = 2400400000ULL;
     double tx_attenuation_db = 30;
     RxFilterSettings rx1_filter;
+    uint32_t rx1_nr_percent = 0;
     CompressorSettings tx1_compressor{1000};
     double subscription_seconds = 8;
     uint32_t iq_rate() const { return pluto_sample_rate / 2; }

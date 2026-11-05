@@ -13,6 +13,7 @@ from protocol import TX_STATE, tx_control, tx_audio
 from protocol import FILTER_STATE, filter_control, filter_state, valid_filter
 from protocol import COMPRESSOR_STATE, compressor_control, compressor_state
 from protocol import LOOP_STATE, LOOP_AUDIO, LOOP_RF, loop_control, loop_state
+from protocol import NR_STATE, nr_control, nr_state
 from decimal import Decimal
 from tuning import PlotGeometry, DOWNLINK_UPLINK_HZ, uplink_hz, tx_offset_hz, mhz_text, wheel_steps
 
@@ -56,6 +57,10 @@ class Receiver:
         self.filter_applied = None
         self.filter_acked = None
         self.filter_error = ""
+        self.nr_lock = threading.RLock()
+        self.nr_command = (1,None)
+        self.nr_session = self.nr_applied = self.nr_acked = None
+        self.nr_error = ""
         self.compressor_lock = threading.RLock()
         self.compressor_command = (1, None)  # Query the configured amount first.
         self.compressor_session = self.compressor_applied = self.compressor_acked = None
@@ -104,6 +109,8 @@ class Receiver:
         next_tx = 0
         last_filter = None
         next_filter = 0
+        last_nr = None
+        next_nr = 0
         last_compressor = None
         next_compressor = 0
         last_loop = None
@@ -138,6 +145,14 @@ class Receiver:
                         next_filter = time.monotonic() + 1
                     except OSError as exc:
                         self.filter_error = str(exc)
+            with self.nr_lock:
+                command=self.nr_command
+                if self.nr_session is not None and (command!=last_nr or time.monotonic()>=next_nr):
+                    try:
+                        request,percent=command
+                        self.sock.send(nr_control(request,self.nr_session,percent))
+                        last_nr=command;next_nr=time.monotonic()+.25
+                    except OSError as exc: self.nr_error=str(exc)
             with self.compressor_lock:
                 command = self.compressor_command
                 if self.compressor_session is not None and (command != last_compressor or time.monotonic() >= next_compressor):
@@ -168,6 +183,13 @@ class Receiver:
                 continue
             if len(packet) >= 64 and packet[:4] == b"QTR2" and packet[4] == 1:
                 fields = HEADER.unpack_from(packet)
+                if packet[5]==NR_STATE:
+                    result=nr_state(packet)
+                    with self.nr_lock:
+                        if result and result[0]==self.nr_command[0] and result[1]==self.nr_session:
+                            self.nr_applied=result[2];self.nr_acked=result[0]
+                            self.nr_error="RX1 NR außerhalb 0..100 %" if result[3] else ""
+                    continue
                 if packet[5]==LOOP_STATE:
                     result=loop_state(packet)
                     with self.loop_lock:
@@ -235,6 +257,12 @@ class Receiver:
                                 self.filter_command = ((request+1)&0xffffffff, bandwidth, center)
                                 self.filter_applied = None
                                 self.filter_acked = None
+                        with self.nr_lock:
+                            if self.nr_session!=fields[15]:
+                                self.nr_session=fields[15]
+                                request,percent=self.nr_command
+                                self.nr_command=((request+1)&0xffffffff,percent)
+                                self.nr_applied=self.nr_acked=None
                         with self.compressor_lock:
                             if self.compressor_session != fields[15]:
                                 self.compressor_session = fields[15]
@@ -321,6 +349,14 @@ class Receiver:
             self.filter_command = ((self.filter_command[0]+1)&0xffffffff, None, None)
             self.filter_acked = None
             return self.filter_command[0]
+
+    def set_nr(self, percent=None):
+        if percent is not None and (not isinstance(percent,int) or not 0<=percent<=100):
+            raise ValueError("RX1 NR percent must be 0..100")
+        with self.nr_lock:
+            self.nr_command=((self.nr_command[0]+1)&0xffffffff,percent)
+            self.nr_acked=None;self.nr_error=""
+            return self.nr_command[0]
 
     def set_tx(self, frequency=None, enabled=None):
         with self.tx_lock:
@@ -566,6 +602,29 @@ def gui(args):
         preset_buttons.append(button)
     filter_monitor = tk.Label(root, text="RX1 Filter: wartet auf Backend", bg="#0b1321", fg="#a4b5cd", anchor="w")
     filter_monitor.pack(fill="x", padx=12)
+    # Share the preset row to leave both waterfalls visible on a 1080-line display.
+    nr_enabled=tk.BooleanVar(value=False)
+    nr_strength=tk.IntVar(value=60)
+    nr_ready=nr_syncing=False
+    nr_after=None
+    last_nr_applied=None
+    def send_nr():
+        nonlocal nr_after
+        nr_after=None
+        if nr_ready: receiver.set_nr(nr_strength.get() if nr_enabled.get() else 0)
+    def nr_changed(value=None):
+        nonlocal nr_after
+        if nr_syncing or not nr_ready: return
+        if nr_after is None: nr_after=root.after(50,send_nr)
+    nr_switch=tk.Checkbutton(presets,name="rx1_nr_enabled",text="RX1 NR",variable=nr_enabled,
+                            command=nr_changed,bg="#0b1321",fg="#e8edf7",selectcolor="#243348",state="disabled")
+    nr_switch.pack(side="left",padx=(20,3))
+    nr_scale=tk.Scale(presets,name="rx1_nr_strength",from_=0,to=100,resolution=1,orient="horizontal",
+                      variable=nr_strength,command=nr_changed,length=230,bg="#0b1321",fg="#e8edf7",
+                      highlightthickness=0,state="disabled")
+    nr_scale.pack(side="left")
+    nr_monitor=tk.Label(presets,text="NR wartet…",bg="#0b1321",fg="#a4b5cd")
+    nr_monitor.pack(side="left",padx=5)
     tuning2 = tk.Frame(root, bg="#0b1321")
     tuning2.pack(pady=3)
     tk.Label(tuning2, text="RX2 MHz (Digital-Test)", bg="#0b1321", fg="#e8edf7").pack(side="left")
@@ -742,6 +801,7 @@ def gui(args):
     def tick():
         nonlocal last_frame, last_floor, filter_ready, filter_syncing, last_filter_applied
         nonlocal compressor_ready, compressor_syncing, last_compressor_applied
+        nonlocal nr_ready,nr_syncing,last_nr_applied
         nonlocal loop_previous,loop_previous_generation,loop_saved_gain
         mode=receiver.loop_mode
         if mode is not None and (mode!=loop_previous or receiver.loop_generation!=loop_previous_generation):
@@ -836,6 +896,19 @@ def gui(args):
             pending = filter_after is not None or receiver.filter_acked != receiver.filter_command[0]
             filter_monitor.configure(text=f"RX1 Filter: {center-width/2:g}–{center+width/2:g} Hz | BW {width} Hz | Mitte {center} Hz"
                 + (" | wird übernommen…" if pending else " | bestätigt") + (f" | {receiver.filter_error}" if receiver.filter_error else ""))
+        nr=receiver.nr_applied
+        if nr is not None and nr!=last_nr_applied and nr_after is None and receiver.nr_acked==receiver.nr_command[0]:
+            nr_syncing=True
+            nr_enabled.set(nr>0)
+            if nr: nr_strength.set(nr)
+            nr_syncing=False
+            nr_ready=True
+            nr_switch.configure(state="normal");nr_scale.configure(state="normal")
+            last_nr_applied=nr
+        if nr is not None:
+            pending=nr_after is not None or receiver.nr_acked!=receiver.nr_command[0]
+            nr_monitor.configure(text=receiver.nr_error or ("NR aus" if nr==0 else f"NR {nr} % / bis {int(np.floor(.3*nr+.5))} dB")
+                                 + (" …" if pending else " ✓"))
         amount = receiver.compressor_applied
         if amount is not None and amount != last_compressor_applied and compressor_after is None and receiver.compressor_acked == receiver.compressor_command[0]:
             compressor_syncing = True
@@ -875,6 +948,7 @@ def gui(args):
     def close():
         if filter_after is not None: root.after_cancel(filter_after)
         if compressor_after is not None: root.after_cancel(compressor_after)
+        if nr_after is not None: root.after_cancel(nr_after)
         release_ptt()
         receiver.close()
         if player:
@@ -890,6 +964,7 @@ def gui(args):
                       "tx_audio_fill":receiver.tx_fill,"tx_pluto_fill":receiver.tx_pluto_fill,
                       "tx_ppm":receiver.tx_ppm,"tx_error":receiver.tx_error,
                       "rx1_filter":receiver.filter_applied,"rx1_filter_error":receiver.filter_error,
+                      "rx1_nr_percent":receiver.nr_applied,"rx1_nr_error":receiver.nr_error,
                       "tx1_compressor":receiver.compressor_applied,"tx1_compressor_error":receiver.compressor_error,
                       "compression_db":receiver.compression_db,"limiting_db":receiver.limiting_db}
             report['tx_offset_hz']=tx_offset_hz(receiver.channels[1].command[1],receiver.tx_command[1])

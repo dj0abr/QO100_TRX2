@@ -9,17 +9,23 @@ int main() {
     try {
         constexpr double pi=3.14159265358979323846;
         std::vector<float> audio;
+        std::vector<float> bypass_audio;
         size_t zoom_samples=0;
         qo100::RxChannel rx(-1500,[&](auto){++zoom_samples;},[&](const auto& p,uint64_t index){
             if(index!=audio.size()) throw std::runtime_error("Audio counter discontinuity");
             for(auto x:p) audio.push_back(x/32768.f);
         });
+        qo100::RxChannel nr_bypass(-1500,[](auto){},[&](const auto& p,uint64_t){
+            for(auto x:p) bypass_audio.push_back(x/32768.f);
+        },{},0);
         for(int i=0;i<600000;++i) {
             const double t=i/600000.;
             auto tone=[&](float a,double f){return std::polar(a,float(std::remainder(2*pi*f*t,2*pi)));};
-            rx.push(tone(.25f,-500)+tone(.4f,-3500)+tone(.2f,74500));
+            const auto sample=tone(.25f,-500)+tone(.4f,-3500)+tone(.2f,74500);
+            rx.push(sample);nr_bypass.push(sample);
         }
         if(zoom_samples!=75000 || audio.size()<11000 || audio.size()>12000) throw std::runtime_error("Incorrect zoom/audio rate");
+        if(audio!=bypass_audio) throw std::runtime_error("NR bypass changed demodulated PCM or sample count");
         auto amplitude=[&](double hz) {
             std::complex<double> sum{};
             for(size_t i=3000;i<audio.size();++i) sum+=double(audio[i])*std::polar(1.,-2*pi*hz*i/12000);

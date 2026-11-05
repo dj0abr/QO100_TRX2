@@ -116,6 +116,9 @@ int main(int argc, char** argv) {
         uint32_t filter_request=0;
         uint16_t filter_status=0;
         bool have_filter_request=false;
+        uint32_t nr_request=0;
+        uint16_t nr_status=0;
+        bool have_nr_request=false;
         uint32_t compressor_request=0;
         uint16_t compressor_status=0;
         bool have_compressor_request=false;
@@ -192,8 +195,10 @@ int main(int argc, char** argv) {
                     const auto& rx=receivers[i];
                     qo100::FrameInfo f{rx.epoch,stamp(),index,rx_frequency(i),12000,0,session_id,static_cast<uint32_t>(i+1)};
                     send_packet(qo100::audio_packet(f,audio));
-                }, i==0 ? c.rx1_filter : qo100::RxFilterSettings{});
+                }, i==0 ? c.rx1_filter : qo100::RxFilterSettings{},
+                i==0 ? std::optional<uint32_t>(c.rx1_nr_percent) : std::nullopt);
         }
+        std::cout << "RX1 NR: SpeexDSP 1.2.1 (bundled, static); strength=" << c.rx1_nr_percent << " percent\n";
         qo100::Spectrum spectrum(c.iq_rate(), c.fft_size, c.spectrum_fps,
             [&](const std::vector<int16_t>& bins, uint64_t sample_index) {
                 if (!active()) return;
@@ -281,7 +286,7 @@ int main(int argc, char** argv) {
                             std::cout << "GUI subscriber " << inet_ntoa(from.sin_addr) << ':' << ntohs(from.sin_port) << '\n';
                         if (!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) {
                             for(auto& rx:receivers) rx.have_request=false;
-                            mute_tx();tx_have_request=false;have_filter_request=false;have_compressor_request=false;
+                            mute_tx();tx_have_request=false;have_filter_request=false;have_compressor_request=false;have_nr_request=false;
                         }
                         peer = from; subscribed = true; last_subscription = Clock::now();
                         if(changed_peer) {
@@ -321,6 +326,24 @@ int main(int argc, char** argv) {
                             send_packet(qo100::compressor_state_packet(compressor_request,tx.compressor_settings().amount,
                                 tx_epoch,session_id,compressor_status,uint32_t(std::lround(tx.compression_db()*1000)),
                                 uint32_t(std::lround(tx.limiting_db()*1000))));
+                            continue;
+                        }
+                        qo100::NrControl nr_control{};
+                        if(qo100::parse_nr_control(buffer.data(),size_t(n),nr_control)) {
+                            if(nr_control.session!=session_id || (have_nr_request && nr_control.request!=nr_request &&
+                               int32_t(nr_control.request-nr_request)<0)) continue;
+                            if(!have_nr_request || nr_control.request!=nr_request) {
+                                nr_request=nr_control.request;have_nr_request=true;nr_status=0;
+                                if(nr_control.set) {
+                                    if(nr_control.percent>100) nr_status=1;
+                                    else if(nr_control.percent!=receivers[0].dsp->nr_percent()) {
+                                        receivers[0].dsp->set_nr(nr_control.percent);
+                                        std::cout << "RX1 NR=" << nr_control.percent << " percent\n";
+                                    }
+                                }
+                            }
+                            send_packet(qo100::nr_state_packet(nr_request,receivers[0].dsp->nr_percent(),
+                                receivers[0].epoch,session_id,nr_status));
                             continue;
                         }
                         qo100::FilterControl filter_control{};

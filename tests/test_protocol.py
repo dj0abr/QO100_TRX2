@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gui"))
 from protocol import Assembler, HEADER, subscription, filter_control, filter_state, valid_filter
 from protocol import compressor_control, compressor_state
 from protocol import loop_control,loop_state
+from protocol import nr_control,nr_state
 
 
 def packets(frame=1, stamp=100, session=7):
@@ -20,6 +21,21 @@ def packets(frame=1, stamp=100, session=7):
 
 
 class ProtocolTest(unittest.TestCase):
+    def test_nr_wire(self):
+        query=HEADER.unpack(nr_control(7,99))
+        self.assertEqual((query[2],query[4],query[5],query[9],query[10],query[13],query[15]),(15,1,7,0,0,0,99))
+        for percent in (0,1,60,100):
+            setting=HEADER.unpack(nr_control(8,99,percent))
+            self.assertEqual((setting[9],setting[10],setting[13]),(12000,percent,1))
+        reply=HEADER.pack(b'QTR2',1,16,64,1,8,0,3,0,12000,60,0,0,0,0,99)
+        self.assertEqual(nr_state(reply),(8,99,60,0))
+        self.assertIsNone(nr_state(reply+b'x'))
+        for index,value in ((4,2),(9,48000),(10,101),(13,2)):
+            bad=list(HEADER.unpack(reply));bad[index]=value
+            self.assertIsNone(nr_state(HEADER.pack(*bad)))
+        for bad in (-1,101,1.2,float('nan')):
+            with self.assertRaises(ValueError): nr_control(1,99,bad)
+
     def test_loop_wire(self):
         query=HEADER.unpack(loop_control(7,99))
         self.assertEqual((query[2],query[4],query[5],query[10],query[13],query[15]),(13,0,7,0,0,99))

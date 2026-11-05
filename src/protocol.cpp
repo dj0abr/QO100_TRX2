@@ -16,6 +16,19 @@ void put(std::vector<uint8_t>& bytes, size_t offset, uint64_t value, size_t widt
     for (size_t i = 0; i < width; ++i) bytes[offset + width - i - 1] = (value >> (i * 8)) & 255;
 }
 }
+bool parse_nr_control(const uint8_t* p, size_t n, NrControl& c) {
+    if(n!=64 || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=nr_control_type ||
+       get(p,6,2)!=64 || get(p,8,4)!=1 || get(p,54,2)>1 || get(p,16,8) || get(p,24,8) ||
+       get(p,32,8) || get(p,48,6) || get(p,56,4)) return false;
+    const bool set=get(p,54,2)!=0;
+    if(set ? get(p,40,4)!=12000 : get(p,40,8)!=0) return false;
+    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),uint32_t(get(p,44,4)),set};return true;
+}
+std::vector<uint8_t> nr_state_packet(uint32_t request, uint32_t percent, uint32_t epoch,
+    uint32_t session, uint16_t status) {
+    auto p=state_packet(request,0,epoch,session,status,1);p[5]=nr_state_type;
+    put(p,44,percent,4);return p;
+}
 bool parse_loop_control(const uint8_t* p, size_t n, LoopControl& c) {
     if(n!=64 || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=loop_control_type ||
        get(p,6,2)!=64 || get(p,8,4) || get(p,54,2)>1 || get(p,16,8) || get(p,24,8) ||

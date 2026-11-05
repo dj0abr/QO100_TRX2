@@ -1,10 +1,13 @@
 #pragma once
 #include "qo100/dsp.hpp"
 #include "qo100/rx_filter.hpp"
+#include "qo100/noise_reduction.hpp"
 #include <array>
 #include <complex>
 #include <cstdint>
 #include <functional>
+#include <optional>
+#include <stdexcept>
 #include <samplerate.h>
 #include <vector>
 
@@ -14,7 +17,8 @@ class RxChannel {
 public:
     using Zoom = std::function<void(std::complex<float>)>;
     using Audio = std::function<void(const std::vector<int16_t>&, uint64_t)>;
-    RxChannel(int64_t offset_hz, Zoom zoom, Audio audio, RxFilterSettings filter = {});
+    RxChannel(int64_t offset_hz, Zoom zoom, Audio audio, RxFilterSettings filter = {},
+              std::optional<uint32_t> nr_percent = std::nullopt);
     ~RxChannel();
     RxChannel(const RxChannel&) = delete;
     RxChannel& operator=(const RxChannel&) = delete;
@@ -22,10 +26,13 @@ public:
     void push(std::complex<float> sample);
     void set_filter(RxFilterSettings settings) { usb_filter_.set(settings); }
     RxFilterSettings filter_settings() const { return usb_filter_.target(); }
+    void set_nr(uint32_t percent) { if(!nr_) throw std::logic_error("NR unavailable on this receiver"); nr_->set(percent); }
+    uint32_t nr_percent() const { return nr_ ? nr_->percent() : 0; }
 private:
     void resample();
     LiquidDecimator decimator_;
     RxAudioFilter usb_filter_;
+    std::unique_ptr<NoiseReduction> nr_;
     FrequencyShifter mixer_{600000};
     std::array<std::complex<float>, 8> mixed_{};
     unsigned decimation_ = 0;

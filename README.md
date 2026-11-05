@@ -47,6 +47,43 @@ Auch ein gezielter Build von `qo100_backend` baut den Treiber mit.
 Die Originalkopie unter `external/Pluto/` ist im Projekt enthalten; beim Bauen
 erfolgt kein Download. Das mitkopierte ursprüngliche Binary wird nicht benutzt.
 
+**SpeexDSP 1.2.1 ist ebenfalls lokal enthalten**: statische Bibliothek für Linux
+x86-64, öffentliche Header, BSD-Lizenz und Prüfsummen unter
+[`external/speexdsp-1.2.1/`](external/speexdsp-1.2.1/README.md).
+Das Backend bindet diese Bibliothek statisch ein. Ein Systempaket oder Download
+beim normalen Build ist dafür nicht erforderlich. Für andere Linux-Architekturen
+gibt es den optionalen Helfer `python3 tools/build_speex.py`.
+
+## RX1 Audio-Rauschreduktion (Testversion)
+
+Neben den RX1-Bandbreiten-Presets stehen **RX1 NR** und ein Stärkeregler von
+**0 bis 100 %**. Zum ersten Hörvergleich eine Station einstellen, etwa **60 %**
+wählen und **RX1 NR** abwechselnd ein- und ausschalten. Beim Ausschalten bleibt
+der gewählte Reglerwert für den nächsten Vergleich erhalten. Der Status daneben
+zeigt den vom Backend bestätigten Wert.
+
+Die SpeexDSP-Rauschreduktion sitzt nach USB-Demodulation/Bandbreitenfilter im
+12-kHz-PCM-Pfad von RX1, vor der UDP-Ausgabe. Sie verarbeitet die vorhandenen
+240-Sample-Blöcke. Der Regler setzt die maximal erlaubte Rauschdämpfung auf
+bis zu 30 dB (1-dB-Schritte); das ist keine garantierte Verbesserung des
+Signal-Rausch-Abstands. 50 % entsprechen maximal 15 dB. Starke Einstellungen
+können schwache Sprachanteile beeinträchtigen. Verständlichkeit und angenehmer
+Klang müssen deshalb im Funkbetrieb beurteilt werden.
+
+**0 % bzw. ausgeschaltet = unverändertes PCM** nach einer kurzen Überblendung
+von 20 ms. Die Rauschschätzung läuft auch während der Überbrückung mit, damit
+kein manuelles Einlernen nötig ist. Aktive NR fügt durch die überlappte Analyse
+20 ms Audioverzögerung hinzu. Umschalten setzt weder Samplezähler noch RX-Epoch
+zurück. Bei Frequenzwechsel wird die Rauschschätzung mit den RX-Filtern gelöscht.
+AGC, VAD und Echounterdrückung sind deaktiviert. RX2 für externe Digitalprogramme,
+beide Wasserfälle, TX und der direkte Audio-Loop bleiben unverändert.
+
+Konfigurationswert `rx1_nr_percent = 0` ist der Standard; erlaubt sind ganze
+Prozentwerte 0..100. Die GUI fragt den konfigurierten Wert zunächst ab. Änderungen
+über UDP werden nicht in die Datei zurückgeschrieben. Protokoll: **NR_CONTROL
+(15)** und **NR_STATE (16)** über den vorhandenen GUI-Port, nur Stream 1.
+Details stehen in [`docs/udp-protocol.md`](docs/udp-protocol.md).
+
 ## Starten
 
 Die Konfiguration steht in [`config/backend.conf`](config/backend.conf).

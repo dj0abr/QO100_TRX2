@@ -13,7 +13,7 @@ Python reference format: `struct.Struct("!4sBBHIIQQQIIIHHII")`.
 |---:|---:|---|
 | 0 | 4 | ASCII magic `QTR2` |
 | 4 | 1 | Protocol version, 1 |
-| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO, 9 FILTER_CONTROL, 10 FILTER_STATE, 11 COMPRESSOR_CONTROL, 12 COMPRESSOR_STATE, 13 LOOP_CONTROL, 14 LOOP_STATE |
+| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO, 9 FILTER_CONTROL, 10 FILTER_STATE, 11 COMPRESSOR_CONTROL, 12 COMPRESSOR_STATE, 13 LOOP_CONTROL, 14 LOOP_STATE, 15 NR_CONTROL, 16 NR_STATE |
 | 6 | 2 | Header size, 64 |
 | 8 | 4 | Stream ID: 0 = full-band spectrum/global test control; 1 = RX1; 2 = RX2; 3 = TX; 4 = audio echo |
 | 12 | 4 | Frame ID / control request ID / audio tuning epoch, uint32 |
@@ -310,3 +310,35 @@ uint32 filled FIFO blocks, uint32 usable FIFO capacity (8), all big endian.
 The backend discards stale statuses and fills toward capacity/2. At startup,
 audio absence, or empty FIFO, the driver pushes zeros. Hardware push errors
 terminate the driver and are reported by backend child monitoring.
+
+## RX1 audio noise reduction (v0.9 test version)
+
+NR_CONTROL (15) and NR_STATE (16) use the existing subscribed GUI socket, only
+stream 1. Packets are exactly 64 bytes. NR never applies to RX2, TX, or audio
+loop echo stream 4. It operates after RX1 USB/bandwidth filtering at 12000 Hz;
+AUDIO packet layout/count/index and both FFT streams are unchanged.
+
+NR_CONTROL: frame_id = independent monotonic uint32 request; session_id =
+current backend session. format = 0 query / 1 set. For set, sample_rate = 12000
+and fft_size = integer NR strength in percent, 0..100. For query both fields
+are zero. timestamp, sample_index, center_hz, first_bin, count and total are zero.
+Commands from another subscriber/session, stale request IDs or other streams
+are ignored. A duplicate request re-sends the acknowledgment without reapplying
+its setting. Query and set share the same independent NR sequence.
+
+NR_STATE: echoes request/session; sample_index = current RX1 audio epoch;
+sample_rate = 12000; fft_size = accepted strength 0..100; format/status = 0 OK /
+1 invalid strength. Other fields are zero. Invalid strength retains the previous
+setting. Match both request and session. Python helpers: `nr_control(request,
+session, percent=None)` and `nr_state(packet)` in `gui/protocol.py`. The test GUI
+queries startup configuration before enabling controls, retries latest commands
+at 250 ms intervals, and shows accepted backend state.
+
+0 = PCM bypass, 1..100 = SpeexDSP maximum noise attenuation of approximately
+0.3*percent dB, rounded to an integer (minimum 1 dB, maximum 30 dB). This parameter
+is a ceiling, not a promised SNR improvement. No AGC/VAD/echo processing. The
+noise estimator stays warm during bypass; enabling/disabling fades between raw
+and processed PCM over 240 samples (20 ms), without resetting the audio counter.
+Active processing adds 240 samples of analysis delay. Retuning resets its
+history and noise estimate while retaining strength. The config startup default
+is `rx1_nr_percent = 0`; runtime settings are not persisted automatically.

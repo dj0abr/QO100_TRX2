@@ -11,6 +11,11 @@ constexpr uint8_t tx_control_type = 6, tx_state_type = 7, tx_audio_type = 8;
 constexpr uint8_t filter_control_type = 9, filter_state_type = 10;
 constexpr uint8_t compressor_control_type = 11, compressor_state_type = 12;
 constexpr uint8_t loop_control_type = 13, loop_state_type = 14;
+constexpr uint8_t nr_control_type = 15, nr_state_type = 16;
+struct NrControl { uint32_t request, session, percent; bool set; };
+bool parse_nr_control(const uint8_t*, size_t, NrControl&);
+std::vector<uint8_t> nr_state_packet(uint32_t request, uint32_t percent, uint32_t epoch,
+    uint32_t session, uint16_t status);
 enum class TestLoop : uint32_t { normal=0, audio=1, rf=2 };
 struct LoopControl { uint32_t request, session, mode; bool set; };
 bool parse_loop_control(const uint8_t*, size_t, LoopControl&);

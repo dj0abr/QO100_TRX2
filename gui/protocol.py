@@ -145,6 +145,23 @@ FILTER_CONTROL, FILTER_STATE = 9, 10
 COMPRESSOR_CONTROL, COMPRESSOR_STATE = 11, 12
 LOOP_CONTROL, LOOP_STATE = 13, 14
 LOOP_NORMAL, LOOP_AUDIO, LOOP_RF = 0, 1, 2
+NR_CONTROL, NR_STATE = 15, 16
+
+
+def nr_control(request, session, percent=None):
+    if percent is not None and (not isinstance(percent, int) or not 0 <= percent <= 100):
+        raise ValueError("RX1 NR percent must be 0..100")
+    return HEADER.pack(MAGIC,VERSION,NR_CONTROL,64,1,request,0,0,0,
+                       12000 if percent is not None else 0,percent or 0,0,0,
+                       int(percent is not None),0,session)
+
+
+def nr_state(packet):
+    if len(packet)!=64: return None
+    f=HEADER.unpack(packet)
+    if (f[:4]!=(MAGIC,VERSION,NR_STATE,64) or f[4]!=1 or f[6] or f[8] or f[9]!=12000
+        or f[10]>100 or f[11] or f[12] or f[13]>1 or f[14]): return None
+    return f[5],f[15],f[10],f[13]
 
 
 def loop_control(request, session, mode=None):

@@ -58,6 +58,7 @@ int main() {
         qo100::Config c;
         c.validate();
         require(c.tx1_compressor.amount==1000,"Default speech compressor must be 100 percent");
+        require(c.rx1_nr_percent==0,"NR must start bypassed");
         c.gui_port = qo100::pluto_iq_port;
         rejects([&] { c.validate(); }, "Port conflict accepted");
         c.gui_port = 40900; c.fft_size = 8193;
@@ -79,6 +80,12 @@ int main() {
         for(const char* bad:{"-1","140.1","nan","inf","100percent"}) {
             { std::ofstream file(path); file << "tx1_compressor_percent="<<bad<<'\n'; }
             rejects([&] { qo100::load_config(path); },"Invalid compressor config accepted");
+        }
+        { std::ofstream file(path); file << "rx1_nr_percent=73\n"; }
+        require(qo100::load_config(path).rx1_nr_percent==73,"NR config not parsed");
+        for(const char* bad:{"-1","101","nan","1.5"}) {
+            { std::ofstream file(path); file << "rx1_nr_percent="<<bad<<'\n'; }
+            rejects([&] {qo100::load_config(path);},"Invalid NR config accepted");
         }
         std::filesystem::remove(path);
         std::vector<uint8_t> subscription(64, 0);

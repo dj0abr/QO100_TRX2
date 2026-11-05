@@ -5,11 +5,12 @@
 #include <utility>
 
 namespace qo100 {
-RxChannel::RxChannel(int64_t offset, Zoom zoom, Audio audio, RxFilterSettings filter)
+RxChannel::RxChannel(int64_t offset, Zoom zoom, Audio audio, RxFilterSettings filter, std::optional<uint32_t> nr_percent)
     : decimator_(make_rx_decimator()), usb_filter_(filter),
       src_(make_audio_resampler(SRC_SINC_MEDIUM_QUALITY, 2)),
       zoom_(std::move(zoom)), audio_(std::move(audio)) {
     input_.reserve(512); audio_packet_.reserve(240);
+    if(nr_percent) nr_=std::make_unique<NoiseReduction>(*nr_percent);
     tune(offset);
 }
 RxChannel::~RxChannel() = default;
@@ -19,6 +20,7 @@ void RxChannel::tune(int64_t offset) {
     decimation_ = 0;
     check_liquid(firdecim_crcf_reset(decimator_.get()));
     usb_filter_.reset();
+    if(nr_) nr_->reset();
     input_.clear(); audio_packet_.clear(); audio_index_ = 0;
     src_reset(src_.get());
 }
@@ -49,6 +51,7 @@ void RxChannel::resample() {
             const auto filtered = usb_filter_.execute({output[2*i], output[2*i+1]});
             audio_packet_.push_back(static_cast<int16_t>(std::lround(std::clamp(filtered.real(), -1.f, 1.f) * 32767)));
             if (audio_packet_.size() == 240) {
+                if(nr_) nr_->process(audio_packet_);
                 audio_(audio_packet_, audio_index_);
                 audio_index_ += audio_packet_.size();
                 audio_packet_.clear();

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(QO100_TRX2 VERSION 0.8.0 LANGUAGES CXX)
+project(QO100_TRX2 VERSION 0.9.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -33,6 +33,16 @@ set_target_properties(qo100_liquid PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${LIQUID_BUNDLE}/include"
     INTERFACE_LINK_LIBRARIES "m;Threads::Threads")
 
+set(SPEEX_BUNDLE "${CMAKE_CURRENT_SOURCE_DIR}/external/speexdsp-1.2.1")
+set(SPEEX_ARCHIVE "${SPEEX_BUNDLE}/lib/linux-${LIQUID_ARCH}/libspeexdsp.a")
+if(NOT EXISTS "${SPEEX_ARCHIVE}" OR NOT EXISTS "${SPEEX_BUNDLE}/include/speex/speex_preprocess.h")
+    message(FATAL_ERROR "Missing bundled SpeexDSP 1.2.1 for ${LIQUID_ARCH}; run python3 tools/build_speex.py on the target machine")
+endif()
+add_library(qo100_speex STATIC IMPORTED GLOBAL)
+set_target_properties(qo100_speex PROPERTIES IMPORTED_LOCATION "${SPEEX_ARCHIVE}"
+    INTERFACE_INCLUDE_DIRECTORIES "${SPEEX_BUNDLE}/include" INTERFACE_LINK_LIBRARIES "m")
+message(STATUS "Bundled SpeexDSP 1.2.1: ${SPEEX_ARCHIVE}")
+
 # Compile the vendored driver from source on every normal project build.
 set(PLUTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/Pluto")
 add_executable(pluto
@@ -49,9 +59,9 @@ target_compile_options(pluto PRIVATE -Wno-write-strings -Wno-narrowing)
 target_link_libraries(pluto PRIVATE ${IIO_LIBRARY} ${AD9361_LIBRARY}
     qo100_liquid Threads::Threads rt m)
 
-add_library(qo100_core src/dsp.cpp src/config.cpp src/spectrum.cpp src/protocol.cpp src/rx_channel.cpp src/rx_filter.cpp src/tx_channel.cpp src/speech_compressor.cpp)
+add_library(qo100_core src/dsp.cpp src/config.cpp src/spectrum.cpp src/protocol.cpp src/rx_channel.cpp src/rx_filter.cpp src/tx_channel.cpp src/speech_compressor.cpp src/noise_reduction.cpp)
 target_include_directories(qo100_core PUBLIC include)
-target_link_libraries(qo100_core PUBLIC qo100_liquid PkgConfig::FFTW PkgConfig::SAMPLERATE)
+target_link_libraries(qo100_core PUBLIC qo100_liquid qo100_speex PkgConfig::FFTW PkgConfig::SAMPLERATE)
 target_compile_options(qo100_core PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(qo100_backend src/main.cpp src/pluto_process.cpp)
 target_link_libraries(qo100_backend PRIVATE qo100_core Threads::Threads)
@@ -65,6 +75,9 @@ target_link_libraries(benchmark_dsp PRIVATE qo100_core)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(test_noise_reduction tests/test_noise_reduction.cpp)
+    target_link_libraries(test_noise_reduction PRIVATE qo100_core)
+    add_test(NAME noise_reduction_dsp COMMAND test_noise_reduction)
     add_executable(test_dsp tests/test_dsp.cpp)
     target_link_libraries(test_dsp PRIVATE qo100_core)
     add_test(NAME liquid_dsp_quality COMMAND test_dsp)
@@ -84,6 +97,13 @@ if(BUILD_TESTING)
     target_link_libraries(test_rx_channel PRIVATE qo100_core)
     add_test(NAME usb_dsp COMMAND test_rx_channel)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME bundled_speex COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_speex_bundle.py
+        ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:qo100_backend>)
+    add_test(NAME nr_control_udp COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_nr_control.py
+        $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(nr_control_udp PROPERTIES TIMEOUT 15)
     add_test(NAME bundled_liquid COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_liquid_bundle.py
         ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:qo100_backend> $<TARGET_FILE:pluto>)
