@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
         std::array<ReceiverState,2> receivers;
         receivers[0].frequency=c.initial_rx_hz;
         receivers[1].frequency=c.initial_rx2_hz;
-        qo100::TxChannel tx;
+        qo100::TxChannel tx(150000,c.tx1_compressor);
         uint64_t tx_frequency=c.initial_tx_hz, tx_blocks=0;
         uint32_t tx_epoch=1,tx_request=0,tx_block_id=0,status_sequence=0;
         bool tx_enabled=false,tx_have_request=false,have_status=false;
@@ -112,6 +112,9 @@ int main(int argc, char** argv) {
         uint32_t filter_request=0;
         uint16_t filter_status=0;
         bool have_filter_request=false;
+        uint32_t compressor_request=0;
+        uint16_t compressor_status=0;
+        bool have_compressor_request=false;
         uint32_t zoom_frame_id = 0;
         auto stamp = [] { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); };
         auto active = [&] { return subscribed && std::chrono::duration<double>(Clock::now()-last_subscription).count() <= c.subscription_seconds; };
@@ -213,10 +216,30 @@ int main(int argc, char** argv) {
                             std::cout << "GUI subscriber " << inet_ntoa(from.sin_addr) << ':' << ntohs(from.sin_port) << '\n';
                         if (!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) {
                             for(auto& rx:receivers) rx.have_request=false;
-                            mute_tx();tx_have_request=false;have_filter_request=false;
+                            mute_tx();tx_have_request=false;have_filter_request=false;have_compressor_request=false;
                         }
                         peer = from; subscribed = true; last_subscription = Clock::now();
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
+                        qo100::CompressorControl compressor_control{};
+                        if(qo100::parse_compressor_control(buffer.data(),size_t(n),compressor_control)) {
+                            if(compressor_control.session!=session_id || (have_compressor_request &&
+                               compressor_control.request!=compressor_request && int32_t(compressor_control.request-compressor_request)<0)) continue;
+                            if(!have_compressor_request || compressor_control.request!=compressor_request) {
+                                compressor_request=compressor_control.request;have_compressor_request=true;compressor_status=0;
+                                if(compressor_control.set) {
+                                    const qo100::CompressorSettings requested{compressor_control.amount};
+                                    if(!requested.valid()) compressor_status=1;
+                                    else if(requested.amount!=tx.compressor_settings().amount) {
+                                        tx.set_compressor(requested);
+                                        std::cout << "TX1 compressor=" << requested.amount/10. << " percent\n";
+                                    }
+                                }
+                            }
+                            send_packet(qo100::compressor_state_packet(compressor_request,tx.compressor_settings().amount,
+                                tx_epoch,session_id,compressor_status,uint32_t(std::lround(tx.compression_db()*1000)),
+                                uint32_t(std::lround(tx.limiting_db()*1000))));
+                            continue;
+                        }
                         qo100::FilterControl filter_control{};
                         if(qo100::parse_filter_control(buffer.data(),size_t(n),filter_control)) {
                             if(filter_control.session!=session_id || (have_filter_request &&

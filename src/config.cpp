@@ -56,6 +56,7 @@ void Config::validate() const {
     if (!std::isfinite(tx_attenuation_db) || tx_attenuation_db < 0 || tx_attenuation_db > 89.75)
         throw std::runtime_error("tx_attenuation_db must be 0..89.75");
     if (!rx1_filter.valid()) throw std::runtime_error("RX1 filter requires BW 500..3900 Hz and edges inside 100..4000 Hz");
+    if (!tx1_compressor.valid()) throw std::runtime_error("tx1_compressor_percent must be 0..140");
     if (!std::isfinite(subscription_seconds) || subscription_seconds < 2 || subscription_seconds > 60)
         throw std::runtime_error("subscription_seconds must be 2..60");
 }
@@ -95,6 +96,12 @@ Config load_config(const std::filesystem::path& path) {
         else if (k == "rx1_filter_bandwidth_hz") c.rx1_filter.bandwidth_hz = u32(v);
         else if (k == "rx1_filter_center_hz") c.rx1_filter.center_hz = u32(v);
         else if (k == "initial_tx_hz") c.initial_tx_hz = integer(v);
+        else if (k == "tx1_compressor_percent") {
+            size_t used=0;const double percent=std::stod(v,&used);
+            if (used!=v.size() || !std::isfinite(percent) || percent<0 || percent>140)
+                throw std::runtime_error("tx1_compressor_percent must be 0..140");
+            c.tx1_compressor.amount=uint32_t(std::lround(percent*10));
+        }
         else if (k == "tx_attenuation_db") {
             size_t used=0;c.tx_attenuation_db=std::stod(v,&used);
             if(used!=v.size()) throw std::runtime_error("Invalid tx_attenuation_db");

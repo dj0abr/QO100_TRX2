@@ -109,6 +109,8 @@ def main():
                 assert playback['rx1_filter']==[int(settings['rx1_filter_bandwidth_hz']),
                                                  int(settings['rx1_filter_center_hz'])],playback
                 assert playback['rx1_filter_error']=='',playback
+                assert playback['tx1_compressor']==round(float(settings['tx1_compressor_percent'])*10),playback
+                assert playback['tx1_compressor_error']=='',playback
             result = {
                 "source": uri, "frames": len(received), "iq_sample_rate_observed": observed,
                 "center_hz": last.center_hz, "pluto_rx_hz": int(rx_frequency),

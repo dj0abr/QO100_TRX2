@@ -13,7 +13,7 @@ Python reference format: `struct.Struct("!4sBBHIIQQQIIIHHII")`.
 |---:|---:|---|
 | 0 | 4 | ASCII magic `QTR2` |
 | 4 | 1 | Protocol version, 1 |
-| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO, 9 FILTER_CONTROL, 10 FILTER_STATE |
+| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO, 9 FILTER_CONTROL, 10 FILTER_STATE, 11 COMPRESSOR_CONTROL, 12 COMPRESSOR_STATE |
 | 6 | 2 | Header size, 64 |
 | 8 | 4 | Stream ID: 0 = full-band spectrum; 1 = RX1; 2 = RX2; 3 = TX |
 | 12 | 4 | Frame ID / control request ID / audio tuning epoch, uint32 |
@@ -181,6 +181,44 @@ samples. Rapid updates coalesce to the latest target after the current fade,
 so convergence may take up to about 40 ms plus processing/transport delay.
 RX2 and TX retain their fixed nominal 100..4000-Hz passband. Both RX audio
 streams continue to use 12000-Hz PCM16 regardless of the selected RX1 width.
+
+## TX1 speech compressor (v0.7)
+
+COMPRESSOR_CONTROL (11) and COMPRESSOR_STATE (12) use **stream 3 (modulator 1)**
+on the existing subscribed socket. Both are exactly 64 bytes. They have their
+own monotonic uint32 request sequence, independent of PTT, TX tuning and RX
+filter controls. A compressor command never asserts PTT or renews its lease.
+
+CONTROL: frame_id = request, session_id = current backend session, format =
+**0=query / 1=set**. For a set, sample_rate = 12000 and fft_size = amount
+**0..1400**, representing **0.0..140.0 percent** in 0.1-% steps. Zero is a valid
+set (speech bypass); a query has both fields zero and format 0. All other
+fields, including center_hz, timestamp and sample_index, must be zero.
+
+STATE: echoed request/session, sample_index = current TX epoch, center_hz = 0,
+sample_rate = 12000, fft_size = accepted target amount, format/status =
+**0=OK / 1=out of range**. first_bin = current speech gain reduction in
+**milli-dB**, total_count = current SSB peak-limiter reduction in **milli-dB**
+(both nonnegative uint32). Timestamp and bin_count are zero. The two meter
+values reflect DSP state at acknowledgment time, rather than held maxima.
+
+Query first to honor the configured startup value (`tx1_compressor_percent`,
+default 100). The test GUI exposes 60..140 percent, with a **100% Normal**
+button; lower values remain available through config/API for compatibility and
+bypass. It repeats its latest query/set every 250 ms for ACKs
+and metering. Match request and session. Invalid amounts retain the preceding
+target and acknowledge status 1. Malformed packets, other streams, wrong
+sessions and stale requests are ignored. A duplicate request returns current
+state and its original status without reapplying a modified payload. Subscriber
+changes/expired subscriptions reset request sequencing while retaining amount.
+
+An ACK describes the accepted target. The amount slews at 100 percentage points
+per 20 ms at 12 kHz (16 ms across the GUI range, up to 28 ms for 0..140%);
+TX epoch, audio indices, FIFO and PTT remain unchanged. Retune,
+PTT transitions and missing-audio resets clear compressor/limiter history while
+retaining amount. Amount 0 bypasses speech gain; the final SSB peak limiter
+remains active with the same fixed 5-ms delay at every setting. TX_AUDIO format,
+sample rate and packet size are unchanged. No RX stream is processed here.
 
 ## Local Pluto direct TX transport
 

@@ -104,6 +104,48 @@ Anzeigefrequenzen sind Downlinkfrequenzen; die FFT ist von -300 bis knapp +300 k
 um die konfigurierte Mitte sortiert. Der NB-Transponder liegt damit innerhalb
 der Anzeige, mit jeweils 50 kHz Reserve.
 
+## Abstimmung mit der Maus
+
+Ein **Linksklick in den oberen oder unteren Wasserfall** stimmt RX1 auf die
+Frequenz unter dem Mauszeiger ab. Ein Klick in die zugehörige Spektrumkurve
+funktioniert genauso. TX folgt auf die passende QO-100-Uplinkfrequenz und behält
+den eingestellten TX-Versatz bei. RX2 bleibt unabhängig.
+
+Mit dem **Mausrad über einem der beiden Wasserfälle** wird nur TX verstellt:
+nach oben **+10 Hz**, nach unten **−10 Hz** je Rastung. RX1 und die Mitte seines
+Zooms bleiben dabei stehen. Der aktuelle Versatz steht neben der PTT-Taste.
+Eine andere Schrittweite lässt sich beim Start wählen, beispielsweise:
+
+```bash
+./start_gui.sh --wheel-step-hz 50
+```
+
+Die Zuordnung lautet `TX = RX − 8089,500 MHz + Offset`. Beispielsweise ergeben
+RX **10489,900000 MHz** und Offset **+30 Hz** die TX-Frequenz **2400,400030 MHz**.
+Der nächste Wasserfall-Klick behält diese +30 Hz bei. Manuelle Frequenzeingaben
+mit **Tune/Enter** bleiben unabhängig und setzen den daraus resultierenden
+Versatz für die weitere Mausbedienung.
+
+**Blaue RX1- und orange TX-Markierungen** zeigen die bestätigten Trägerpositionen
+in beiden Darstellungen. Für die TX-Markierung wird die Uplinkfrequenz auf die
+Downlinkskala umgerechnet. Die Maus verwendet die Geometrie des tatsächlich
+angezeigten Bildes, auch nach einer Fenstergrößenänderung oder während eines
+Zoom-Neuaufbaus. Klicks in Beschriftungen und Ränder werden ignoriert; die
+bisherigen Kanalgrenzen mit 25 kHz Randreserve bleiben bestehen. Klick und
+Mausrad schalten PTT nicht ein.
+
+Ein GUI-/UDP-Test mit synthetischen Samples und abgeschalteter Audioausgabe
+prüft beide Wasserfälle, Mausrad, Frequenzzuordnung und RX2-Unabhängigkeit:
+
+```bash
+/usr/bin/python3 tests/test_gui_mouse.py
+```
+
+Dieser Test benötigt einen Bildschirm und gehört nicht zu CTest. Er startet
+sein eigenes synthetisches Backend auf einem freien GUI-Port. Ergebnisbild und
+Protokoll liegen unter `build/captures/mouse-*`. Die Frequenz-/Geometrieprüfung
+ohne Bildschirm ist als `gui_tuning` in CTest enthalten.
+
 ## Die zwei Schnittstellen
 
 1. **Pluto-Anbindung ausschließlich lokal**: `127.0.0.1`,
@@ -273,9 +315,10 @@ fehlendem Audio wird der Modulator geleert; ein Neustart wartet erneut auf
 120 ms Vorfüllung. Ohne gültige PTT-Steuerung für 1,5 s oder bei GUI-Wechsel
 wird die Sendefreigabe gelöscht.
 
-Ein analytischer 513-Tap-FIR erzeugt USB mit +100..4000 Hz Durchlassbereich.
+Der einstellbare Sprachkompressor von TX1 verarbeitet das 12-kHz-Audio nach der
+Taktkorrektur. Ein analytischer 513-Tap-FIR erzeugt USB mit +100..4000 Hz Durchlassbereich.
 Danach erfolgen exakte liquid-Polyphasen-Interpolation um Faktor 100 auf
-1,2 MS/s, digitales Mischen auf die
+1,2 MS/s, Begrenzung der tatsächlichen SSB-Hüllkurvenspitzen und digitales Mischen auf die
 TX-Frequenz und I16/Q16-Konvertierung mit 6 dB digitaler Pegelreserve.
 Die tatsächliche AD9361-Ausgangsdämpfung steht in `tx_attenuation_db`
 (0..89,75 dB; Projektkonfiguration 0 dB für die getestete Station). Änderungen
@@ -292,6 +335,40 @@ kurze Nachlaufzeit. Es wird kein alter IQ-Block wiederholt.
 Die automatischen Tests prüfen USB-Pegel und Seitenbandunterdrückung,
 Taktabweichungen von ±1500 ppm über je fünf simulierte Minuten und die komplette
 UDP-TX-Kette mit einem lokalen Treiber-Doppel. Dabei wird keine Hardware benutzt.
+
+## Sprachkompressor für Modulator 1
+
+Der GUI-Regler **TX1 Sprachkompressor (%)** stellt die Stärke von **60 bis 140 %**
+in 0,1-%-Schritten ein. **100 % Normal** stellt die im Funkbetrieb geprüfte
+Normaleinstellung wieder her. Leise Sprachanteile werden bei 60 % um bis zu
+**10,8 dB**, bei 100 % um bis zu **18 dB**, bei 140 % um bis zu **25,2 dB** angehoben.
+Laute Anteile werden zunehmend verdichtet: bei 100 % mit 4:1, bei 140 % mit
+8,8:1 oberhalb der weichen Kompressionsschwelle. Die Kennlinie bei 100 % bleibt
+gegenüber dem erfolgreichen QSO-Test unverändert.
+Der Startwert ist **100 %** und kann in `config/backend.conf` gewählt werden:
+
+```ini
+tx1_compressor_percent = 100
+```
+
+Das GUI liest den Backend-Wert beim Verbinden aus und zeigt die bestätigte
+Stärke sowie aktuelle Verdichtung und Spitzenbegrenzung in dB an. Änderungen
+werden weich nachgeführt (60–140 % in 16 ms) und unterbrechen weder FIFO noch PTT oder
+Audiogeneration. Derselbe GUI-UDP-Port überträgt Einstellung und Rückmeldung.
+
+Ein eigener Spitzenbegrenzer berücksichtigt auch Überhöhungen durch SSB-Filter
+und Interpolation. Er begrenzt die komplexe Ausgangshüllkurve auf nominell 0,5,
+erhält die bisherige digitale Pegelreserve und bleibt auch bei Sprachkompressor
+0 % aktiv. Der Backend-/UDP-Bereich bleibt 0–140 %, sodass ein Bypass für Tests
+oder externe Digitalanwendungen verfügbar ist. Die Vorausschau des Spitzenbegrenzers
+fügt in allen Einstellungen **5 ms** Verzögerung
+hinzu. Fehlendes UDP-Audio und PTT aus erzeugen weiterhin exakt Nullsamples.
+Die Hardware-TX-Dämpfung bleibt unabhängig davon auf dem konfigurierten Wert.
+
+Die Verarbeitung gehört zur einzelnen TX-Instanz; RX1/RX2 werden nicht verändert.
+Ein weiterer Modulator kann später ohne Sprachverdichtung betrieben werden,
+etwa für externe Digitalprogramme. Einzelheiten und Messprüfungen:
+[`docs/speech-compressor.md`](docs/speech-compressor.md).
 
 ## Ohne Hardware testen
 

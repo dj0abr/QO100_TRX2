@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(QO100_TRX2 VERSION 0.6.0 LANGUAGES CXX)
+project(QO100_TRX2 VERSION 0.7.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -49,7 +49,7 @@ target_compile_options(pluto PRIVATE -Wno-write-strings -Wno-narrowing)
 target_link_libraries(pluto PRIVATE ${IIO_LIBRARY} ${AD9361_LIBRARY}
     qo100_liquid Threads::Threads rt m)
 
-add_library(qo100_core src/dsp.cpp src/config.cpp src/spectrum.cpp src/protocol.cpp src/rx_channel.cpp src/rx_filter.cpp src/tx_channel.cpp)
+add_library(qo100_core src/dsp.cpp src/config.cpp src/spectrum.cpp src/protocol.cpp src/rx_channel.cpp src/rx_filter.cpp src/tx_channel.cpp src/speech_compressor.cpp)
 target_include_directories(qo100_core PUBLIC include)
 target_link_libraries(qo100_core PUBLIC qo100_liquid PkgConfig::FFTW PkgConfig::SAMPLERATE)
 target_compile_options(qo100_core PRIVATE -Wall -Wextra -Wpedantic)
@@ -74,6 +74,9 @@ if(BUILD_TESTING)
     add_executable(test_tx_channel tests/test_tx_channel.cpp)
     target_link_libraries(test_tx_channel PRIVATE qo100_core)
     add_test(NAME tx_usb_dsp COMMAND test_tx_channel)
+    add_executable(test_speech_compressor tests/test_speech_compressor.cpp)
+    target_link_libraries(test_speech_compressor PRIVATE qo100_core)
+    add_test(NAME speech_compressor_dsp COMMAND test_speech_compressor)
     add_executable(test_rx_filter tests/test_rx_filter.cpp)
     target_link_libraries(test_rx_filter PRIVATE qo100_core)
     add_test(NAME rx_filter_dsp COMMAND test_rx_filter)
@@ -86,6 +89,8 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:qo100_backend> $<TARGET_FILE:pluto>)
     add_test(NAME protocol COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_protocol.py)
+    add_test(NAME gui_tuning COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gui_tuning.py)
     add_test(NAME audio_buffer COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_audio.py)
     add_test(NAME synthetic_udp COMMAND ${Python3_EXECUTABLE}
@@ -100,4 +105,8 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_filter_integration.py
         $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
     set_tests_properties(rx_filter_udp PROPERTIES TIMEOUT 20)
+    add_test(NAME compressor_control_udp COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compressor_control.py
+        $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(compressor_control_udp PROPERTIES TIMEOUT 15)
 endif()

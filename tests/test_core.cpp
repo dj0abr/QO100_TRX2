@@ -50,6 +50,7 @@ int main() {
         require(zero_frames > 0, "Zero input produced no FFT frame");
         qo100::Config c;
         c.validate();
+        require(c.tx1_compressor.amount==1000,"Default speech compressor must be 100 percent");
         c.gui_port = qo100::pluto_iq_port;
         rejects([&] { c.validate(); }, "Port conflict accepted");
         c.gui_port = 40900; c.fft_size = 8193;
@@ -66,6 +67,12 @@ int main() {
         require(filtered_config.rx1_filter==qo100::RxFilterSettings{500,700},"RX1 filter config not parsed");
         { std::ofstream file(path); file << "rx1_filter_bandwidth_hz=3900\nrx1_filter_center_hz=700\n"; }
         rejects([&] { qo100::load_config(path); }, "Invalid filter config accepted");
+        { std::ofstream file(path); file << "tx1_compressor_percent=137.5\n"; }
+        require(qo100::load_config(path).tx1_compressor.amount==1375,"Fractional compressor amount not parsed");
+        for(const char* bad:{"-1","140.1","nan","inf","100percent"}) {
+            { std::ofstream file(path); file << "tx1_compressor_percent="<<bad<<'\n'; }
+            rejects([&] { qo100::load_config(path); },"Invalid compressor config accepted");
+        }
         std::filesystem::remove(path);
         std::vector<uint8_t> subscription(64, 0);
         subscription[0]='Q'; subscription[1]='T'; subscription[2]='R'; subscription[3]='2';

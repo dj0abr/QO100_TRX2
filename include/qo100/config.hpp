@@ -1,5 +1,6 @@
 #pragma once
 #include "qo100/filter_settings.hpp"
+#include "qo100/compressor_settings.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -25,6 +26,7 @@ struct Config {
     uint64_t initial_tx_hz = 2400400000ULL;
     double tx_attenuation_db = 30;
     RxFilterSettings rx1_filter;
+    CompressorSettings tx1_compressor{1000};
     double subscription_seconds = 8;
     uint32_t iq_rate() const { return pluto_sample_rate / 2; }
     void validate() const;

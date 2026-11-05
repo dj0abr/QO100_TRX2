@@ -142,6 +142,25 @@ def tx_audio(epoch, index, frequency, session, samples):
 
 
 FILTER_CONTROL, FILTER_STATE = 9, 10
+COMPRESSOR_CONTROL, COMPRESSOR_STATE = 11, 12
+
+
+def compressor_control(request, session, amount=None):
+    if amount is not None and (not isinstance(amount, int) or not 0 <= amount <= 1400):
+        raise ValueError("TX1 compressor amount must be 0..1400")
+    return HEADER.pack(MAGIC, VERSION, COMPRESSOR_CONTROL, 64, 3, request, 0, 0,
+                       0, 12000 if amount is not None else 0, amount or 0,
+                       0, 0, int(amount is not None), 0, session)
+
+
+def compressor_state(packet):
+    if len(packet) != 64:
+        return None
+    f = HEADER.unpack(packet)
+    if (f[:4] != (MAGIC, VERSION, COMPRESSOR_STATE, 64) or f[4] != 3 or f[6] or f[8]
+        or f[9] != 12000 or f[10] > 1400 or f[12] or f[13] not in (0, 1)):
+        return None
+    return f[5], f[15], f[10], f[13], f[11]/1000, f[14]/1000
 
 
 def valid_filter(bandwidth, center):

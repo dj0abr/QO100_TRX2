@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gui"))
 from protocol import Assembler, HEADER, subscription, filter_control, filter_state, valid_filter
+from protocol import compressor_control, compressor_state
 
 
 def packets(frame=1, stamp=100, session=7):
@@ -18,6 +19,24 @@ def packets(frame=1, stamp=100, session=7):
 
 
 class ProtocolTest(unittest.TestCase):
+    def test_compressor_wire(self):
+        query=HEADER.unpack(compressor_control(7,99))
+        self.assertEqual((query[2],query[4],query[5],query[9],query[10],query[13],query[15]),(11,3,7,0,0,0,99))
+        for amount in (0,600,1000,1400):
+            setting=HEADER.unpack(compressor_control(8,99,amount))
+            self.assertEqual((setting[9],setting[10],setting[13]),(12000,amount,1))
+        reply=HEADER.pack(b'QTR2',1,12,64,3,8,0,3,0,12000,500,4250,0,0,1000,99)
+        self.assertEqual(compressor_state(reply),(8,99,500,0,4.25,1.0))
+        self.assertIsNone(compressor_state(reply+b'x'))
+        invalid=list(HEADER.unpack(reply));invalid[4]=2
+        self.assertIsNone(compressor_state(HEADER.pack(*invalid)))
+        for bad in (-1,1401,1.2,float('nan')):
+            with self.assertRaises(ValueError): compressor_control(1,99,bad)
+        extended=list(HEADER.unpack(reply));extended[10]=1400
+        self.assertEqual(compressor_state(HEADER.pack(*extended))[2],1400)
+        extended[10]=1401
+        self.assertIsNone(compressor_state(HEADER.pack(*extended)))
+
     def test_rx_filter_wire(self):
         query = HEADER.unpack(filter_control(7, 99))
         self.assertEqual((query[2], query[4], query[5], query[13], query[15]), (9, 1, 7, 0, 99))

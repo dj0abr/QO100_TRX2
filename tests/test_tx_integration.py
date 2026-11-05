@@ -28,7 +28,11 @@ def stop(*args):
     running=False
 signal.signal(signal.SIGTERM,stop)
 next_tick=time.monotonic()
-reference={f:np.exp(-2j*np.pi*f*np.arange(24000)/1200000) for f in (151000,149000,150000)}
+# The adaptive clock deliberately moves a test tone slightly off its nominal
+# bin. Hann weighting prevents its rectangular-window sidelobes from being
+# misreported as carrier/LSB leakage, especially at the stronger 140% level.
+window=np.hanning(24000);window/=window.mean()
+reference={f:window*np.exp(-2j*np.pi*f*np.arange(24000)/1200000) for f in (151000,149000,150000)}
 try:
     while running:
         for _ in range(64):
@@ -79,6 +83,9 @@ def main():
         try:
             wait(lambda: receiver.tx_identity is not None)
             assert not receiver.tx_confirmed
+            compressor_request=receiver.set_compressor(0)
+            wait(lambda: receiver.compressor_acked==compressor_request)
+            assert receiver.compressor_applied==0
             receiver.set_tx(frequency=2401000000,enabled=True)
             wait(lambda: bool(receiver.tx_error))
             assert not receiver.tx_confirmed
@@ -86,12 +93,20 @@ def main():
             wait(lambda: receiver.tx_confirmed)
             session,epoch=receiver.tx_identity
             on=time.monotonic()
+            compressor_on=None
             index=0
             for number in range(120):
+                if number == 40:
+                    identity=receiver.tx_identity
+                    compressor_request=receiver.set_compressor(1400)
+                    wait(lambda: receiver.compressor_acked==compressor_request)
+                    assert receiver.tx_identity==identity and receiver.tx_confirmed, 'Compressor reset TX/PTT'
+                    compressor_on=time.monotonic()
                 if number == 50:  # A lost UDP audio interval must not stall TX.
                     index += 240
+                    with receiver.tx_lock: receiver.tx_index += 240
                 t=np.arange(240)+index
-                receiver.send_microphone(.4*np.cos(2*np.pi*1000*t/12000))
+                receiver.send_microphone(.04*np.cos(2*np.pi*1000*t/12000))
                 index+=240
                 time.sleep(.02)
             no_audio=time.monotonic()
@@ -129,9 +144,13 @@ def main():
             receiver.close();backend.terminate();backend.wait(timeout=5);log.close()
         assert backend.returncode==0,(root/'backend.log').read_text()
         records=np.array(json.loads(driver.with_suffix('.json').read_text()))
-        active=records[(records[:,0]>on+.7)&(records[:,0]<no_audio-.1)]
+        bypass=records[(records[:,0]>on+.4)&(records[:,0]<compressor_on-.1)]
+        active=records[(records[:,0]>compressor_on+.55)&(records[:,0]<no_audio-.1)]
         assert len(active)>30
-        assert np.median(active[:,2])>.19, (receiver.tx_packets,receiver.tx_error,(root/'backend.log').read_text(),active[:3].tolist())
+        assert len(bypass)>8
+        gain_db=20*np.log10(np.median(active[:,2])/np.median(bypass[:,2]))
+        assert 24.7<gain_db<25.7, (gain_db,(root/'backend.log').read_text())
+        assert np.max(records[:,1])<.501, 'TX IQ clipping after interpolation'
         assert np.median(active[:,3])<.0002
         assert np.median(active[:,4])<.0002
         absent=records[(records[:,0]>no_audio+.4)&(records[:,0]<no_audio+.58)]
@@ -139,6 +158,7 @@ def main():
         assert len(absent)>3 and np.max(absent[:,1])==0,absent
         assert len(released)>3 and np.max(released[:,1])==0,released
         assert 'TX underruns=0' in (root/'backend.log').read_text()
-        print('TX end-to-end: USB +151 kHz, LSB/carrier rejected; missing audio/PTT-off exact zero; stale packets rejected; RX1/RX2 live.')
+        print(f'TX end-to-end: compressor gain {gain_db:.2f} dB, peaks bounded, continuous PTT/epoch; '
+              'USB +151 kHz, LSB/carrier rejected; missing audio/PTT-off exact zero; stale packets rejected; RX1/RX2 live.')
 
 if __name__=='__main__': main()

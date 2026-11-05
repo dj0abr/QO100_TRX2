@@ -11,7 +11,9 @@ import numpy as np
 from protocol import Assembler, subscription, tune, audio_packet, HEADER, STATE, AUDIO
 from protocol import TX_STATE, tx_control, tx_audio
 from protocol import FILTER_STATE, filter_control, filter_state, valid_filter
+from protocol import COMPRESSOR_STATE, compressor_control, compressor_state
 from decimal import Decimal
+from tuning import PlotGeometry, DOWNLINK_UPLINK_HZ, uplink_hz, tx_offset_hz, mhz_text, wheel_steps
 
 
 class AudioReceiveState:
@@ -53,6 +55,11 @@ class Receiver:
         self.filter_applied = None
         self.filter_acked = None
         self.filter_error = ""
+        self.compressor_lock = threading.RLock()
+        self.compressor_command = (1, None)  # Query the configured amount first.
+        self.compressor_session = self.compressor_applied = self.compressor_acked = None
+        self.compressor_error = ""
+        self.compression_db = self.limiting_db = 0.
         self.audio_frames = self.channels[1].frames
         self.audio2_frames = self.channels[2].frames
         self.frames = queue.Queue(maxsize=4)
@@ -86,6 +93,8 @@ class Receiver:
         next_tx = 0
         last_filter = None
         next_filter = 0
+        last_compressor = None
+        next_compressor = 0
         while not self.stop.is_set():
             commands = tuple((stream, state.command) for stream, state in self.channels.items())
             if time.monotonic() >= next_subscription or commands != last_commands:
@@ -116,6 +125,16 @@ class Receiver:
                         next_filter = time.monotonic() + 1
                     except OSError as exc:
                         self.filter_error = str(exc)
+            with self.compressor_lock:
+                command = self.compressor_command
+                if self.compressor_session is not None and (command != last_compressor or time.monotonic() >= next_compressor):
+                    try:
+                        request, amount = command
+                        self.sock.send(compressor_control(request, self.compressor_session, amount))
+                        last_compressor = command
+                        next_compressor = time.monotonic() + .25
+                    except OSError as exc:
+                        self.compressor_error = str(exc)
             try:
                 packet = self.sock.recv(65536)
             except socket.timeout:
@@ -128,6 +147,15 @@ class Receiver:
                 continue
             if len(packet) >= 64 and packet[:4] == b"QTR2" and packet[4] == 1:
                 fields = HEADER.unpack_from(packet)
+                if packet[5] == COMPRESSOR_STATE:
+                    result = compressor_state(packet)
+                    with self.compressor_lock:
+                        if result and result[0] == self.compressor_command[0] and result[1] == self.compressor_session:
+                            self.compressor_applied = result[2]
+                            self.compressor_acked = result[0]
+                            self.compressor_error = "TX1 compressor outside 0..140 percent" if result[3] else ""
+                            self.compression_db, self.limiting_db = result[4:]
+                    continue
                 if packet[5] == FILTER_STATE:
                     result = filter_state(packet)
                     with self.filter_lock:
@@ -168,6 +196,12 @@ class Receiver:
                                 self.filter_command = ((request+1)&0xffffffff, bandwidth, center)
                                 self.filter_applied = None
                                 self.filter_acked = None
+                        with self.compressor_lock:
+                            if self.compressor_session != fields[15]:
+                                self.compressor_session = fields[15]
+                                request, amount = self.compressor_command
+                                self.compressor_command = ((request+1)&0xffffffff, amount)
+                                self.compressor_applied = self.compressor_acked = None
                         state.tune_error = "RX frequency outside capture window" if fields[13] else ""
                         if not fields[13]:
                             identity = (fields[15], fields[7])
@@ -239,6 +273,15 @@ class Receiver:
             self.tx_command = ((request+1)&0xffffffff, hz if frequency is None else frequency,
                                ptt if enabled is None else enabled)
             self.tx_confirmed = False
+
+    def set_compressor(self, amount=None):
+        if amount is not None and (not isinstance(amount, int) or not 0 <= amount <= 1400):
+            raise ValueError("TX1 compressor amount must be 0..1400")
+        with self.compressor_lock:
+            self.compressor_command = ((self.compressor_command[0]+1)&0xffffffff, amount)
+            self.compressor_acked = None
+            self.compressor_error = ""
+            return self.compressor_command[0]
 
     def send_microphone(self, samples):
         with self.tx_lock:
@@ -317,14 +360,15 @@ def palette():
     return np.stack([np.interp(x, np.arange(len(anchors)), anchors[:, i]) for i in range(3)], axis=1).astype(np.uint8)
 
 
-def draw_image(frames, width=1100, height=650, floor=-100, ceiling=0, span_hz=None):
+def draw_image(frames, width=1100, height=650, floor=-100, ceiling=0, span_hz=None, rx_hz=None, tx_downlink_hz=None):
     from PIL import Image, ImageDraw
     image = Image.new("RGB", (width, height), "#0b1321")
     draw = ImageDraw.Draw(image)
     frame = frames[-1]
-    x0, x1, y0, y1 = 70, width - 20, 60, int(height*.45)
-    waterfall_y = int(height*.55)
     span = span_hz or frame.sample_rate
+    geometry = PlotGeometry(frame.center_hz,span,width,height)
+    x0,x1,y0,y1=geometry.left,geometry.right,geometry.spectrum_top,geometry.spectrum_bottom
+    waterfall_y = geometry.waterfall_top
     mask = np.abs(np.arange(frame.fft_size)-frame.fft_size/2) <= span * frame.fft_size / frame.sample_rate / 2
     draw.text((20, 15), ("QO100_TRX2 | USB zoom +/-25 kHz" if frame.stream_id else "QO100_TRX2 | Full RX spectrum / waterfall"), fill="#e8edf7")
     draw.text((20, 35), f"Center {frame.center_hz / 1e6:.6f} MHz | {span / 1000:g} kHz span | FFT {frame.fft_size} | {frame.sample_rate/frame.fft_size:.2f} Hz/bin", fill="#a4b5cd")
@@ -346,6 +390,13 @@ def draw_image(frames, width=1100, height=650, floor=-100, ceiling=0, span_hz=No
     scaled = np.clip((rows - floor) / (ceiling - floor) * 255, 0, 255).astype(np.uint8)
     waterfall = Image.fromarray(palette()[scaled]).resize((x1 - x0, height - waterfall_y - 15), resample=Image.Resampling.NEAREST)
     image.paste(waterfall, (x0, waterfall_y))
+    for label,hz,color,dy in (("RX1",rx_hz,"#7cabff",2),("TX",tx_downlink_hz,"#ffb75c",15)):
+        if hz is None: continue
+        x=geometry.x(hz)
+        if x0<=x<x1:
+            draw.line((x,y0,x,y1),fill=color)
+            draw.line((x,waterfall_y,x,geometry.bottom-1),fill=color)
+            draw.text((min(x+3,x1-30),y0+dy),label,fill=color)
     return image
 
 
@@ -368,6 +419,7 @@ def gui(args):
     player = None if args.no_audio else AudioPlayer()
     receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), player.add if player else None, rx2_hz=parse_frequency(args.rx2_frequency), tx_hz=parse_frequency(args.tx_frequency))
     history, zoom_history = [], []
+    wheel_step_hz=getattr(args,'wheel_step_hz',10)
     title = tk.Label(root, text=f"QO100_TRX2 — {args.host}:{args.port}", bg="#0b1321", fg="#e8edf7", font=("sans", 15))
     title.pack(pady=8)
     controls = tk.Frame(root, bg="#0b1321")
@@ -380,11 +432,12 @@ def gui(args):
     tuning.pack()
     tk.Label(tuning, text="RX1 MHz (USB / Audio)", bg="#0b1321", fg="#e8edf7").pack(side="left")
     frequency = tk.StringVar(value=args.rx_frequency)
-    entry = tk.Entry(tuning, textvariable=frequency, width=20)
+    entry = tk.Entry(tuning, name="rx1_frequency", textvariable=frequency, width=20)
     entry.pack(side="left", padx=8)
     def apply_tuning():
         try:
             receiver.set_frequency(parse_frequency(frequency.get()))
+            update_offset_label()
         except (ValueError, ArithmeticError):
             receiver.tune_error = "Invalid RX frequency"
     entry.bind("<Return>", lambda event: apply_tuning())
@@ -466,10 +519,12 @@ def gui(args):
     tx_controls.pack(pady=3)
     tk.Label(tx_controls, text="TX MHz (USB)", bg="#0b1321", fg="#e8edf7").pack(side="left")
     tx_frequency = tk.StringVar(value=args.tx_frequency)
-    tx_entry = tk.Entry(tx_controls, textvariable=tx_frequency, width=20)
+    tx_entry = tk.Entry(tx_controls, name="tx_frequency", textvariable=tx_frequency, width=20)
     tx_entry.pack(side="left", padx=8)
     def apply_tx():
-        try: receiver.set_tx(frequency=parse_frequency(tx_frequency.get()))
+        try:
+            receiver.set_tx(frequency=parse_frequency(tx_frequency.get()))
+            update_offset_label()
         except (ValueError, ArithmeticError): receiver.tx_error = "Invalid TX frequency"
     tx_entry.bind("<Return>", lambda event: apply_tx())
     tk.Button(tx_controls, text="Tune TX", command=apply_tx).pack(side="left")
@@ -488,20 +543,106 @@ def gui(args):
             receiver.tx_error = "Invalid TX frequency"
             return
         receiver.set_tx(frequency=hz, enabled=True)
+        update_offset_label()
         microphone = Microphone(receiver.send_microphone)
         ptt.configure(text="SENDEN — zum Stoppen loslassen", bg="#f07060")
     ptt = tk.Button(tx_controls, text="PTT halten — Mikrofon senden")
     ptt.pack(side="left", padx=12)
     ptt.bind("<ButtonPress-1>", press_ptt)
+    offset_label = tk.Label(tx_controls, name="tx_offset", text="", bg="#0b1321", fg="#ffb75c")
+    offset_label.pack(side="left",padx=5)
+    def update_offset_label():
+        try:
+            offset=tx_offset_hz(receiver.channels[1].command[1],receiver.tx_command[1])
+            offset_label.configure(text=f"TX-Offset {offset:+d} Hz | Rad {wheel_step_hz} Hz")
+        except (ValueError,ArithmeticError):
+            offset_label.configure(text="TX-Offset: Frequenzeingabe prüfen")
+    update_offset_label()
     root.bind("<ButtonRelease-1>", lambda event: release_ptt() if microphone else None)
     root.bind("<FocusOut>", lambda event: release_ptt() if event.widget is root and microphone else None)
     root.bind("<Escape>", release_ptt)
     tx_monitor = tk.Label(root, text="TX: PTT aus", bg="#0b1321", fg="#a4b5cd", anchor="w")
     tx_monitor.pack(fill="x", padx=12)
-    canvas = tk.Label(root, bg="#0b1321", text="Waiting for spectrum data…", fg="#a4b5cd")
+    compressor_controls = tk.Frame(root, bg="#0b1321")
+    compressor_controls.pack()
+    compressor_amount = tk.DoubleVar(value=100)
+    compressor_ready = compressor_syncing = False
+    compressor_after = None
+    last_compressor_applied = None
+    def send_compressor():
+        nonlocal compressor_after
+        compressor_after = None
+        if compressor_ready:
+            receiver.set_compressor(round(compressor_amount.get()*10))
+    def compressor_changed(value=None):
+        nonlocal compressor_after
+        if compressor_syncing or not compressor_ready: return
+        # Programmatic display of an API setting below the slider range must
+        # not silently overwrite that setting with the nearest slider value.
+        if (receiver.compressor_applied is not None and receiver.compressor_acked==receiver.compressor_command[0]
+            and round(compressor_amount.get()*10)==max(600,min(1400,receiver.compressor_applied))): return
+        if compressor_after is None: compressor_after = root.after(50, send_compressor)
+    def normal_compressor():
+        compressor_amount.set(100)
+        compressor_changed()
+    tk.Label(compressor_controls, text="TX1 Sprachkompressor (%)", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=5)
+    compressor_scale = tk.Scale(compressor_controls, name="tx1_compressor", from_=60, to=140, resolution=.1,
+                               orient="horizontal", variable=compressor_amount, command=compressor_changed,
+                               length=350, bg="#0b1321", fg="#e8edf7", highlightthickness=0, state="disabled")
+    compressor_scale.pack(side="left")
+    compressor_normal = tk.Button(compressor_controls, text="100 % Normal", command=normal_compressor, state="disabled")
+    compressor_normal.pack(side="left", padx=8)
+    compressor_monitor = tk.Label(root, text="TX1 Kompressor: wartet auf Backend", bg="#0b1321", fg="#a4b5cd", anchor="w")
+    compressor_monitor.pack(fill="x", padx=12)
+    canvas = tk.Label(root, name="wide_waterfall", bg="#0b1321", text="Waiting for spectrum data…", fg="#a4b5cd", cursor="crosshair")
     canvas.pack(fill="both", expand=True)
-    zoom_canvas = tk.Label(root, bg="#0b1321", text="Waiting for zoom…", fg="#a4b5cd")
+    zoom_canvas = tk.Label(root, name="zoom_waterfall", bg="#0b1321", text="Waiting for zoom…", fg="#a4b5cd", cursor="crosshair")
     zoom_canvas.pack(fill="both", expand=True)
+    def valid_mouse_tuning(rx_hz,tx_hz):
+        if not history: return False
+        center=history[-1].center_hz
+        if abs(rx_hz-center)>275000 or abs(tx_hz-uplink_hz(center))>275000:
+            receiver.tune_error="Abstimmung außerhalb des Fensters: 25 kHz Randreserve erforderlich"
+            return False
+        return True
+    def waterfall_click(event):
+        geometry=getattr(event.widget,'plot_geometry',None)
+        if geometry is None: return
+        hz=geometry.widget_frequency_at(event.x,event.y,event.widget.winfo_width(),event.widget.winfo_height())
+        if hz is None: return
+        try:
+            offset=tx_offset_hz(receiver.channels[1].command[1],receiver.tx_command[1])
+            tx_hz=uplink_hz(hz,offset)
+        except (ValueError,ArithmeticError):
+            receiver.tune_error="Frequenzeingaben vor der Mausabstimmung prüfen"
+            return
+        if not valid_mouse_tuning(hz,tx_hz): return
+        frequency.set(mhz_text(hz));tx_frequency.set(mhz_text(tx_hz))
+        receiver.set_frequency(hz)
+        receiver.set_tx(frequency=tx_hz)
+        update_offset_label()
+    def waterfall_wheel(event):
+        geometry=getattr(event.widget,'plot_geometry',None)
+        if geometry is None: return "break"
+        if geometry.widget_frequency_at(event.x,event.y,event.widget.winfo_width(),event.widget.winfo_height()) is None:
+            return "break"
+        steps=wheel_steps(event)
+        if not steps: return "break"
+        try:
+            rx_hz=receiver.channels[1].command[1]
+            tx_hz=receiver.tx_command[1]+wheel_step_hz*steps
+        except (ValueError,ArithmeticError):
+            receiver.tx_error="Frequenzeingaben vor der Mausabstimmung prüfen"
+            return "break"
+        if valid_mouse_tuning(rx_hz,tx_hz):
+            tx_frequency.set(mhz_text(tx_hz))
+            receiver.set_tx(frequency=tx_hz)
+            update_offset_label()
+        return "break"
+    for widget in (canvas,zoom_canvas):
+        widget.bind("<Button-1>",waterfall_click)
+        for event in ("<Button-4>","<Button-5>","<MouseWheel>"):
+            widget.bind(event,waterfall_wheel)
     status = tk.Label(root, text="", bg="#0b1321", fg="#a4b5cd", anchor="w")
     status.pack(fill="x", padx=12, pady=6)
     last_frame = 0
@@ -509,6 +650,7 @@ def gui(args):
 
     def tick():
         nonlocal last_frame, last_floor, filter_ready, filter_syncing, last_filter_applied
+        nonlocal compressor_ready, compressor_syncing, last_compressor_applied
         changed = False
         try:
             while True:
@@ -523,10 +665,12 @@ def gui(args):
             pass
         if history and (changed or floor.get() != last_floor):
             last_floor = floor.get()
-            rendered = draw_image(history, height=300, floor=last_floor)
+            rendered = draw_image(history, height=265, floor=last_floor,rx_hz=receiver.applied_hz,
+                                  tx_downlink_hz=receiver.tx_applied_hz+DOWNLINK_UPLINK_HZ if receiver.tx_applied_hz is not None else None)
             photo = ImageTk.PhotoImage(rendered)
             canvas.configure(image=photo, text="")
             canvas.image = photo
+            canvas.plot_geometry=PlotGeometry(history[-1].center_hz,history[-1].sample_rate,rendered.width,rendered.height)
             if args.screenshot:
                 rendered.save(args.screenshot)
         zoom_changed = False
@@ -542,18 +686,20 @@ def gui(args):
         except queue.Empty:
             pass
         if zoom_history and (zoom_changed or changed or floor.get() != last_floor):
-            zoom_rendered = draw_image(zoom_history,height=300,floor=floor.get(),span_hz=50000)
+            zoom_rendered = draw_image(zoom_history,height=265,floor=floor.get(),span_hz=50000,rx_hz=receiver.applied_hz,
+                                      tx_downlink_hz=receiver.tx_applied_hz+DOWNLINK_UPLINK_HZ if receiver.tx_applied_hz is not None else None)
             photo = ImageTk.PhotoImage(zoom_rendered)
             zoom_canvas.configure(image=photo,text="")
             zoom_canvas.image = photo
+            zoom_canvas.plot_geometry=PlotGeometry(zoom_history[-1].center_hz,50000,zoom_rendered.width,zoom_rendered.height)
             if args.screenshot and history:
                 from PIL import Image
                 from PIL import ImageDraw
-                combined = Image.new("RGB",(1100,640),"#0b1321")
-                combined.paste(draw_image(history,height=300,floor=floor.get()),(0,0))
-                combined.paste(zoom_rendered,(0,300))
+                combined = Image.new("RGB",(1100,570),"#0b1321")
+                combined.paste(draw_image(history,height=265,floor=floor.get()),(0,0))
+                combined.paste(zoom_rendered,(0,265))
                 rx2 = receiver.channels[2]
-                ImageDraw.Draw(combined).text((20,612),
+                ImageDraw.Draw(combined).text((20,542),
                     f"RX2 monitor | {rx2.applied_hz} Hz | 12 kHz PCM mono | {rx2.received} packets | {rx2.samples} samples | RMS {rx2.rms:.5f} | no soundcard output", fill="#a4b5cd")
                 combined.save(args.screenshot)
         applied = receiver.filter_applied
@@ -571,6 +717,22 @@ def gui(args):
             pending = filter_after is not None or receiver.filter_acked != receiver.filter_command[0]
             filter_monitor.configure(text=f"RX1 Filter: {center-width/2:g}–{center+width/2:g} Hz | BW {width} Hz | Mitte {center} Hz"
                 + (" | wird übernommen…" if pending else " | bestätigt") + (f" | {receiver.filter_error}" if receiver.filter_error else ""))
+        amount = receiver.compressor_applied
+        if amount is not None and amount != last_compressor_applied and compressor_after is None and receiver.compressor_acked == receiver.compressor_command[0]:
+            compressor_syncing = True
+            compressor_amount.set(max(60,min(140,amount/10)))
+            compressor_syncing = False
+            compressor_ready = True
+            compressor_scale.configure(state="normal")
+            compressor_normal.configure(state="normal")
+            last_compressor_applied = amount
+        if amount is not None:
+            pending = compressor_after is not None or receiver.compressor_acked != receiver.compressor_command[0]
+            label = f"{amount/10:g} %" if amount else "aus"
+            compressor_monitor.configure(text=f"TX1 Kompressor: {label} | Anhebung bis {18*amount/1000:.1f} dB"
+                + f" | Verdichtung {receiver.compression_db:.1f} dB | Spitzenbegrenzung {receiver.limiting_db:.1f} dB"
+                + (" | wird übernommen…" if pending else " | bestätigt")
+                + (f" | {receiver.compressor_error}" if receiver.compressor_error else ""))
         if microphone and (microphone.error or not receiver.tx_command[2]):
             if microphone.error: receiver.tx_error = microphone.error
             release_ptt()
@@ -592,6 +754,7 @@ def gui(args):
 
     def close():
         if filter_after is not None: root.after_cancel(filter_after)
+        if compressor_after is not None: root.after_cancel(compressor_after)
         release_ptt()
         receiver.close()
         if player:
@@ -606,7 +769,10 @@ def gui(args):
                       "tx_packets":receiver.tx_packets,"tx_applied_hz":receiver.tx_applied_hz,
                       "tx_audio_fill":receiver.tx_fill,"tx_pluto_fill":receiver.tx_pluto_fill,
                       "tx_ppm":receiver.tx_ppm,"tx_error":receiver.tx_error,
-                      "rx1_filter":receiver.filter_applied,"rx1_filter_error":receiver.filter_error}
+                      "rx1_filter":receiver.filter_applied,"rx1_filter_error":receiver.filter_error,
+                      "tx1_compressor":receiver.compressor_applied,"tx1_compressor_error":receiver.compressor_error,
+                      "compression_db":receiver.compression_db,"limiting_db":receiver.limiting_db}
+            report['tx_offset_hz']=tx_offset_hz(receiver.channels[1].command[1],receiver.tx_command[1])
             args.audio_report.write_text(json.dumps(report,indent=2)+"\n")
         root.destroy()
 
@@ -631,6 +797,7 @@ def main():
     parser.add_argument("--tx-frequency", default="2400.400000", help="Independent USB uplink carrier in MHz")
     parser.add_argument("--rx2-frequency", default="10489.600000", help="Independent RX2 USB carrier in MHz (monitor only)")
     parser.add_argument("--no-audio", action="store_true", help="Disable soundcard playback")
+    parser.add_argument("--wheel-step-hz",type=int,default=10,help="TX offset change per wheel notch over either waterfall (Hz)")
     parser.add_argument("--audio-report", type=Path, help="Write playback test statistics on GUI close")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=40900)
@@ -643,6 +810,8 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.port <= 65535 or args.frames < 1 or args.timeout <= 0:
         parser.error("Invalid port, frame count or timeout")
+    if not 1<=args.wheel_step_hz<=1000:
+        parser.error("wheel-step-hz must be 1..1000")
     try:
         return headless(args) if args.headless else gui(args)
     except (OSError, RuntimeError, ValueError, ArithmeticError) as exc:
