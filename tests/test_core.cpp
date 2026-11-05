@@ -48,6 +48,13 @@ int main() {
         });
         for (int i = 0; i < 40000; ++i) zero.push({0, 0});
         require(zero_frames > 0, "Zero input produced no FFT frame");
+        qo100::Spectrum reset_spectrum(600000,n,20,[&](const auto& db,uint64_t) {
+            require(std::all_of(db.begin(),db.end(),[](auto x){return x==-16000;}),"Spectrum reset leaked preceding RF band");
+        });
+        for(int i=0;i<10000;++i) reset_spectrum.push({.5f,0});
+        reset_spectrum.reset();
+        for(int i=0;i<40000;++i) reset_spectrum.push({});
+        require(reset_spectrum.samples()==50000,"Spectrum reset restarted sample clock");
         qo100::Config c;
         c.validate();
         require(c.tx1_compressor.amount==1000,"Default speech compressor must be 100 percent");

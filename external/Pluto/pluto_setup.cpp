@@ -170,6 +170,16 @@ void pluto_setup()
 
 	if (!cfg_ad9361_streaming_ch(ctx, &rxcfg, RX, 0)) { fprintf(stderr,"RX configuration failed\n"); exit(1); }
 	if (!rx_only && !cfg_ad9361_streaming_ch(ctx, &txcfg, TX, 0)) { fprintf(stderr,"TX configuration failed\n"); exit(1); }
+	// A loop-mode restart is acknowledged by fresh IQ. Verify both LO values
+	// before streaming so a failed hardware write cannot acknowledge a wrong band.
+	iio_device *loop_phy=iio_context_find_device(ctx,"ad9361-phy");
+	for(int direction=0;direction<(rx_only?1:2);++direction) {
+		iio_channel *lo=loop_phy?iio_device_find_channel(loop_phy,direction?"altvoltage1":"altvoltage0",true):NULL;
+		long long actual=0,expected=direction?txcfg.lo_hz:rxcfg.lo_hz;
+		if(!lo || iio_channel_attr_read_longlong(lo,"frequency",&actual)<0 || actual!=expected) {
+			fprintf(stderr,"LO frequency verification failed (%s)\n",direction?"TX":"RX");exit(1);
+		}
+	}
 
 	get_ad9361_stream_ch(ctx, RX, rx, 0, &rx0_i);
 	get_ad9361_stream_ch(ctx, RX, rx, 1, &rx0_q);

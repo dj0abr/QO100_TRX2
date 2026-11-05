@@ -16,6 +16,7 @@ public:
     Spectrum& operator=(const Spectrum&) = delete;
     bool push_iq(const uint8_t* data, size_t size);
     void push(std::complex<float> sample);
+    void reset(); // Discard spectral history after hardware retuning; retain sample clock.
     uint64_t samples() const { return samples_; }
 private:
     void transform();

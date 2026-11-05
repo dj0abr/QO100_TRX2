@@ -111,6 +111,8 @@ def main():
                 assert playback['rx1_filter_error']=='',playback
                 assert playback['tx1_compressor']==round(float(settings['tx1_compressor_percent'])*10),playback
                 assert playback['tx1_compressor_error']=='',playback
+                assert playback['test_loop']==0 and playback['loop_error']=='',playback
+                assert playback['loop_rx_lo']==int(settings['pluto_rx_hz']),playback
             result = {
                 "source": uri, "frames": len(received), "iq_sample_rate_observed": observed,
                 "center_hz": last.center_hz, "pluto_rx_hz": int(rx_frequency),

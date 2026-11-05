@@ -370,6 +370,54 @@ Ein weiterer Modulator kann später ohne Sprachverdichtung betrieben werden,
 etwa für externe Digitalprogramme. Einzelheiten und Messprüfungen:
 [`docs/speech-compressor.md`](docs/speech-compressor.md).
 
+## Testschleifen: Audio-Loop und HF-Loop
+
+Oben im Test-GUI kann zwischen **Normal**, **Audio-Loop** und **HF-Loop** gewählt
+werden. Dieselben Modi sind über UDP steuerbar; die Einstellungen gelten jeweils
+bis zum Ausschalten oder zum Ende der GUI-Verbindung. Ein Moduswechsel beendet
+eine laufende Mikrofonfreigabe. Danach die Mikrofon-/PTT-Taste neu drücken.
+
+**Audio-Loop:** Die Taste **Audio testen halten** gedrückt halten und sprechen.
+Das GUI sendet weiterhin 12-kHz-Mono-Audio. Das Backend schickt die empfangenen
+PCM-Samples sofort und unverändert auf Audiostream **4** zurück, ohne FIFO,
+Kompressor oder Modulator zu durchlaufen. Das GUI spielt diesen Rückkanal auf
+ALSA default ab und unterdrückt währenddessen die RX1-Wiedergabe. Die
+Wiedergabeverstärkung startet im Audio-Loop mit Faktor 1 und wird beim Verlassen
+auf den vorherigen Wert zurückgesetzt. Der HF-TX-Datenstrom besteht in diesem
+Modus immer aus Nullsamples, auch bei gedrückter Mikrofontaste. RX-Spektren und
+beide normalen RX-Audioströme laufen parallel weiter.
+
+**HF-Loop:** Der lokale Pluto-Treiber wird kurz neu gestartet, wobei sein RX-LO
+auf denselben Wert wie der TX-LO gesetzt wird: mit der Projektkonfiguration
+**1290,250 MHz**. RX1 folgt zusätzlich dem digitalen TX-Frequenzversatz. Damit
+empfängt und demoduliert er genau die tatsächlich erzeugte Pluto-Sendefrequenz,
+auch nach weiterer TX-Abstimmung. Über die normale PTT-Taste kann man senden
+und sich zurückhören. Dieser Hörtest benötigt eine HF-Einkopplung vom TX zum RX;
+die passende Kopplung/Dämpfung gehört zum HF-Aufbau.
+
+Im HF-Loop bekommt auch RX2 den auf das TX-Band umgestellten Hardwarestrom.
+RX1-Abstimmung und Wasserfall-Klick sind gesperrt; TX-Abstimmung und Mausrad
+funktionieren weiter. Die Frequenzanzeige bleibt auf die zugehörige
+QO-100-Downlinkskala umgerechnet. **Normal** stellt den RX-LO wieder auf
+**739,750 MHz** und die zuvor gewählten RX-Frequenzen zurück. Filter- und
+Kompressoreinstellungen bleiben erhalten. Die Umschaltung wird erst nach
+verifizierten LO-Einstellungen und frischen I/Q-Daten bestätigt.
+
+Beide Testmodi benutzen den vorhandenen GUI-UDP-Port. Die neuen Befehle heißen
+`LOOP_CONTROL` (Typ 13) und `LOOP_STATE` (Typ 14); Moduswerte sind 0 Normal,
+1 Audio-Loop und 2 HF-Loop. Audio-Echo ist `AUDIO`, Stream 4, 12 kHz Mono PCM16.
+Details: [`docs/udp-protocol.md`](docs/udp-protocol.md).
+
+Die automatische Prüfung `test_loops_udp` verwendet einen lokalen Treiberersatz
+und prüft bitgenauen Echo-Inhalt, Paketumsortierung, HF-Stummschaltung,
+TX-IQ-Rückempfang, Frequenznachführung und Rückkehr zum Normalbetrieb. Ein
+zusätzlicher Hardwaretest prüft beide echten Pluto-LOs und die Rückkehr zur
+Empfangsfrequenz **mit ausgeschalteter PTT**; dafür darf kein anderes Backend laufen:
+
+```bash
+/usr/bin/python3 tests/test_loop_hardware.py
+```
+
 ## Ohne Hardware testen
 
 ```bash

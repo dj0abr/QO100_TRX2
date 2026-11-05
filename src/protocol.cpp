@@ -16,6 +16,19 @@ void put(std::vector<uint8_t>& bytes, size_t offset, uint64_t value, size_t widt
     for (size_t i = 0; i < width; ++i) bytes[offset + width - i - 1] = (value >> (i * 8)) & 255;
 }
 }
+bool parse_loop_control(const uint8_t* p, size_t n, LoopControl& c) {
+    if(n!=64 || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=loop_control_type ||
+       get(p,6,2)!=64 || get(p,8,4) || get(p,54,2)>1 || get(p,16,8) || get(p,24,8) ||
+       get(p,32,8) || get(p,40,4) || get(p,48,6) || get(p,56,4)) return false;
+    const bool set=get(p,54,2)!=0;
+    if(!set && get(p,44,4)) return false;
+    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),uint32_t(get(p,44,4)),set};return true;
+}
+std::vector<uint8_t> loop_state_packet(uint32_t request, TestLoop mode, TestLoop target,
+    uint64_t rx_lo, uint32_t generation, uint32_t session, uint16_t status, uint64_t timestamp_ns) {
+    auto p=state_packet(request,rx_lo,generation,session,status,0);p[5]=loop_state_type;
+    put(p,16,timestamp_ns,8);put(p,40,600000,4);put(p,44,uint32_t(mode),4);put(p,48,uint32_t(target),4);return p;
+}
 bool parse_compressor_control(const uint8_t* p, size_t n, CompressorControl& c) {
     if (!tx_header(p,n,compressor_control_type) || n!=64 || get(p,54,2)>1 ||
         get(p,16,8) || get(p,24,8) || get(p,32,8) || get(p,48,6) || get(p,56,4)) return false;
@@ -113,7 +126,7 @@ std::vector<uint8_t> state_packet(uint32_t request, uint64_t frequency, uint32_t
 }
 std::vector<uint8_t> audio_packet(const FrameInfo& f, const std::vector<int16_t>& audio) {
     if (audio.empty() || audio.size()>568) throw std::runtime_error("Invalid audio packet size");
-    if (f.stream_id!=1 && f.stream_id!=2) throw std::runtime_error("Invalid audio stream ID");
+    if (f.stream_id!=1 && f.stream_id!=2 && f.stream_id!=4) throw std::runtime_error("Invalid audio stream ID");
     auto p=state_packet(f.frame_id,f.center_hz,0,f.session_id,2,f.stream_id);
     p[5]=audio_type;put(p,16,f.timestamp_ns,8);put(p,24,f.sample_index,8);
     put(p,52,audio.size(),2);put(p,56,audio.size(),4);p.resize(64+2*audio.size());

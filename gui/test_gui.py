@@ -12,6 +12,7 @@ from protocol import Assembler, subscription, tune, audio_packet, HEADER, STATE,
 from protocol import TX_STATE, tx_control, tx_audio
 from protocol import FILTER_STATE, filter_control, filter_state, valid_filter
 from protocol import COMPRESSOR_STATE, compressor_control, compressor_state
+from protocol import LOOP_STATE, LOOP_AUDIO, LOOP_RF, loop_control, loop_state
 from decimal import Decimal
 from tuning import PlotGeometry, DOWNLINK_UPLINK_HZ, uplink_hz, tx_offset_hz, mhz_text, wheel_steps
 
@@ -60,6 +61,16 @@ class Receiver:
         self.compressor_session = self.compressor_applied = self.compressor_acked = None
         self.compressor_error = ""
         self.compression_db = self.limiting_db = 0.
+        self.loop_lock = threading.RLock()
+        self.loop_command = (1,None)
+        self.loop_session = self.loop_mode = self.loop_acked = self.loop_generation = None
+        self.loop_target = 0
+        self.loop_status = 0
+        self.loop_rx_lo = None
+        self.loop_last_stamp = 0
+        self.loop_error = ""
+        self.echo_frames = queue.Queue(maxsize=30)
+        self.echo_received = self.echo_samples = 0
         self.audio_frames = self.channels[1].frames
         self.audio2_frames = self.channels[2].frames
         self.frames = queue.Queue(maxsize=4)
@@ -95,6 +106,8 @@ class Receiver:
         next_filter = 0
         last_compressor = None
         next_compressor = 0
+        last_loop = None
+        next_loop = 0
         while not self.stop.is_set():
             commands = tuple((stream, state.command) for stream, state in self.channels.items())
             if time.monotonic() >= next_subscription or commands != last_commands:
@@ -135,6 +148,14 @@ class Receiver:
                         next_compressor = time.monotonic() + .25
                     except OSError as exc:
                         self.compressor_error = str(exc)
+            with self.loop_lock:
+                command=self.loop_command
+                if self.loop_session is not None and (command!=last_loop or time.monotonic()>=next_loop):
+                    try:
+                        request,mode=command
+                        self.sock.send(loop_control(request,self.loop_session,mode))
+                        last_loop=command;next_loop=time.monotonic()+.25
+                    except OSError as exc: self.loop_error=str(exc)
             try:
                 packet = self.sock.recv(65536)
             except socket.timeout:
@@ -147,6 +168,24 @@ class Receiver:
                 continue
             if len(packet) >= 64 and packet[:4] == b"QTR2" and packet[4] == 1:
                 fields = HEADER.unpack_from(packet)
+                if packet[5]==LOOP_STATE:
+                    result=loop_state(packet)
+                    with self.loop_lock:
+                        if (result and result[0]==self.loop_command[0] and result[1]==self.loop_session
+                            and fields[6]>=self.loop_last_stamp):
+                            self.loop_last_stamp=fields[6]
+                            previous_generation=self.loop_generation
+                            _,_,self.loop_mode,self.loop_target,self.loop_rx_lo,self.loop_generation,self.loop_status=result
+                            self.loop_acked=result[0] if self.loop_status!=3 else None
+                            self.loop_error={0:"",1:"Ungültiger Testmodus",2:"HF-Loop benötigt Pluto-Betrieb",3:""}.get(self.loop_status,"Loop-Fehler")
+                            if previous_generation is not None and previous_generation!=self.loop_generation:
+                                self.assembler=Assembler();self.zoom_assembler=Assembler(1)
+                                self.assembler.last_timestamp=self.zoom_assembler.last_timestamp=fields[6]
+                                for source in (self.frames,self.zoom_frames):
+                                    while True:
+                                        try: source.get_nowait()
+                                        except queue.Empty: break
+                    continue
                 if packet[5] == COMPRESSOR_STATE:
                     result = compressor_state(packet)
                     with self.compressor_lock:
@@ -168,7 +207,7 @@ class Receiver:
                     with self.tx_lock:
                         if (len(packet) == 64 and fields[3] == 64 and fields[4] == 3 and
                             fields[5] == self.tx_command[0] and fields[15] == self.tx_session):
-                            self.tx_error = "TX frequency outside capture window" if fields[13] else ""
+                            self.tx_error = {0:"",1:"TX frequency outside capture window",2:"Testmodus wird umgeschaltet"}.get(fields[13],"TX error")
                             identity = (fields[15], fields[7])
                             if identity != self.tx_identity:
                                 self.tx_index = 0
@@ -202,6 +241,13 @@ class Receiver:
                                 request, amount = self.compressor_command
                                 self.compressor_command = ((request+1)&0xffffffff, amount)
                                 self.compressor_applied = self.compressor_acked = None
+                        with self.loop_lock:
+                            if self.loop_session!=fields[15]:
+                                request,mode=self.loop_command
+                                self.loop_command=((request+1)&0xffffffff,0 if self.loop_session is not None else None)
+                                self.loop_session=fields[15]
+                                self.loop_mode=self.loop_acked=self.loop_generation=None
+                                self.loop_last_stamp=0
                         state.tune_error = "RX frequency outside capture window" if fields[13] else ""
                         if not fields[13]:
                             identity = (fields[15], fields[7])
@@ -218,6 +264,15 @@ class Receiver:
                     if audio is None:
                         self.invalid_audio += 1
                         continue
+                    if audio.stream_id==4:
+                        if (self.loop_mode==LOOP_AUDIO and self.tx_command[2] and
+                            (audio.session_id,audio.epoch)==self.tx_identity and
+                            audio.center_hz==self.tx_applied_hz and len(audio.samples)==240):
+                            self.echo_received+=1;self.echo_samples+=len(audio.samples)
+                            self.offer(self.echo_frames,audio)
+                            sink=self.channels[1].sink
+                            if sink: sink(audio)
+                        continue
                     state = self.channels[audio.stream_id]
                     if (audio.session_id, audio.epoch) == state.identity:
                         state.received += 1
@@ -225,9 +280,9 @@ class Receiver:
                         state.rms = float(np.sqrt(np.mean(audio.samples**2)))
                         state.peak = float(np.max(np.abs(audio.samples)))
                         state.last_audio = time.monotonic()
-                        if state.sink:
+                        if state.sink and self.loop_mode!=LOOP_AUDIO:
                             state.sink(audio)
-                        else:
+                        elif not state.sink:
                             self.offer(state.frames, audio)
                     continue
                 if fields[4] == 1:
@@ -283,6 +338,14 @@ class Receiver:
             self.compressor_error = ""
             return self.compressor_command[0]
 
+    def set_loop(self, mode):
+        if mode not in (0,1,2): raise ValueError("Test loop must be 0 normal, 1 audio, or 2 RF")
+        self.set_tx(enabled=False)
+        with self.loop_lock:
+            self.loop_command=((self.loop_command[0]+1)&0xffffffff,mode)
+            self.loop_acked=None;self.loop_error=""
+            return self.loop_command[0]
+
     def send_microphone(self, samples):
         with self.tx_lock:
             _, hz, enabled = self.tx_command
@@ -297,10 +360,14 @@ class Receiver:
                 self.tx_error = str(exc)
 
     def close(self):
-        self.set_tx(enabled=False)
+        self.set_loop(0)
         with self.tx_lock:
             if self.tx_session is not None:
                 try: self.sock.send(tx_control(*self.tx_command, self.tx_session))
+                except OSError: pass
+        with self.loop_lock:
+            if self.loop_session is not None:
+                try: self.sock.send(loop_control(self.loop_command[0],self.loop_session,0))
                 except OSError: pass
         self.stop.set()
         self.thread.join(timeout=1)
@@ -441,7 +508,8 @@ def gui(args):
         except (ValueError, ArithmeticError):
             receiver.tune_error = "Invalid RX frequency"
     entry.bind("<Return>", lambda event: apply_tuning())
-    tk.Button(tuning, text="Tune", command=apply_tuning).pack(side="left")
+    rx1_button=tk.Button(tuning, text="Tune", command=apply_tuning)
+    rx1_button.pack(side="left")
     if player:
         gain = tk.DoubleVar(value=4)
         player.volume = 4
@@ -534,10 +602,12 @@ def gui(args):
         if microphone:
             microphone.close()
             microphone = None
-        ptt.configure(text="PTT halten — Mikrofon senden", bg="#d9d9d9")
+        if player and receiver.loop_mode==LOOP_AUDIO: player.reset()
+        ptt.configure(text="Audio testen halten" if receiver.loop_mode==LOOP_AUDIO else "PTT halten — Mikrofon senden", bg="#d9d9d9")
     def press_ptt(event=None):
         nonlocal microphone
         if microphone is not None: return
+        if receiver.loop_status==3 or receiver.loop_mode is None: return
         try: hz = parse_frequency(tx_frequency.get())
         except (ValueError, ArithmeticError):
             receiver.tx_error = "Invalid TX frequency"
@@ -545,19 +615,39 @@ def gui(args):
         receiver.set_tx(frequency=hz, enabled=True)
         update_offset_label()
         microphone = Microphone(receiver.send_microphone)
-        ptt.configure(text="SENDEN — zum Stoppen loslassen", bg="#f07060")
-    ptt = tk.Button(tx_controls, text="PTT halten — Mikrofon senden")
+        ptt.configure(text="AUDIO-LOOP — zum Stoppen loslassen" if receiver.loop_mode==LOOP_AUDIO else "SENDEN — zum Stoppen loslassen",
+                      bg="#54b9b0" if receiver.loop_mode==LOOP_AUDIO else "#f07060")
+    ptt = tk.Button(tx_controls, name="ptt", text="PTT halten — Mikrofon senden")
     ptt.pack(side="left", padx=12)
     ptt.bind("<ButtonPress-1>", press_ptt)
     offset_label = tk.Label(tx_controls, name="tx_offset", text="", bg="#0b1321", fg="#ffb75c")
     offset_label.pack(side="left",padx=5)
     def update_offset_label():
+        if receiver.loop_mode==LOOP_RF:
+            offset_label.configure(text="HF-Loop: RX1 folgt TX")
+            return
         try:
             offset=tx_offset_hz(receiver.channels[1].command[1],receiver.tx_command[1])
             offset_label.configure(text=f"TX-Offset {offset:+d} Hz | Rad {wheel_step_hz} Hz")
         except (ValueError,ArithmeticError):
             offset_label.configure(text="TX-Offset: Frequenzeingabe prüfen")
     update_offset_label()
+    loop_choice=tk.IntVar(value=0)
+    loop_previous=None
+    loop_previous_generation=None
+    loop_saved_gain=None
+    def select_loop():
+        release_ptt()
+        if player: player.reset()
+        receiver.set_loop(loop_choice.get())
+    tk.Label(controls,text="Test:",bg="#0b1321",fg="#e8edf7").pack(side="left",padx=6)
+    loop_buttons=[]
+    for text,mode in (("Normal",0),("Audio-Loop",1),("HF-Loop",2)):
+        button=tk.Radiobutton(controls,name=f"test_loop_{mode}",text=text,variable=loop_choice,value=mode,
+                              command=select_loop,bg="#0b1321",fg="#e8edf7",selectcolor="#243348",state="disabled")
+        button.pack(side="left");loop_buttons.append(button)
+    loop_monitor=tk.Label(controls,text="",bg="#0b1321",fg="#ffb75c")
+    loop_monitor.pack(side="left",padx=5)
     root.bind("<ButtonRelease-1>", lambda event: release_ptt() if microphone else None)
     root.bind("<FocusOut>", lambda event: release_ptt() if event.widget is root and microphone else None)
     root.bind("<Escape>", release_ptt)
@@ -606,6 +696,7 @@ def gui(args):
             return False
         return True
     def waterfall_click(event):
+        if receiver.loop_mode==LOOP_RF or receiver.loop_status==3: return
         geometry=getattr(event.widget,'plot_geometry',None)
         if geometry is None: return
         hz=geometry.widget_frequency_at(event.x,event.y,event.widget.winfo_width(),event.widget.winfo_height())
@@ -651,6 +742,34 @@ def gui(args):
     def tick():
         nonlocal last_frame, last_floor, filter_ready, filter_syncing, last_filter_applied
         nonlocal compressor_ready, compressor_syncing, last_compressor_applied
+        nonlocal loop_previous,loop_previous_generation,loop_saved_gain
+        mode=receiver.loop_mode
+        if mode is not None and (mode!=loop_previous or receiver.loop_generation!=loop_previous_generation):
+            if player:
+                player.reset()
+                if mode==LOOP_AUDIO and loop_previous!=LOOP_AUDIO:
+                    loop_saved_gain=gain.get();gain.set(1);player.volume=1
+                elif mode!=LOOP_AUDIO and loop_previous==LOOP_AUDIO and loop_saved_gain is not None:
+                    gain.set(loop_saved_gain);player.volume=loop_saved_gain;loop_saved_gain=None
+            if loop_previous_generation is not None and receiver.loop_generation!=loop_previous_generation:
+                history.clear();zoom_history.clear()
+            loop_previous=mode
+            loop_previous_generation=receiver.loop_generation
+            if mode!=LOOP_RF: frequency.set(mhz_text(receiver.channels[1].command[1]))
+            update_offset_label()
+        if mode==LOOP_RF and receiver.applied_hz is not None: frequency.set(mhz_text(receiver.applied_hz))
+        pending=receiver.loop_acked!=receiver.loop_command[0]
+        if mode is not None:
+            if not pending: loop_choice.set(mode)
+            for value,button in enumerate(loop_buttons): button.configure(state="normal" if not pending or value==0 else "disabled")
+            lo=f"RX-LO {receiver.loop_rx_lo/1e6:.3f} MHz" if receiver.loop_rx_lo is not None else ""
+            loop_monitor.configure(text=("Umschaltung…" if receiver.loop_status==3 else receiver.loop_error or lo))
+        locked=mode==LOOP_RF or receiver.loop_status==3
+        entry.configure(state="disabled" if locked else "normal")
+        rx1_button.configure(state="disabled" if locked else "normal")
+        ptt.configure(state="disabled" if mode is None or pending else "normal")
+        if microphone is None:
+            ptt.configure(text="Audio testen halten" if mode==LOOP_AUDIO else "PTT halten — Mikrofon senden")
         changed = False
         try:
             while True:
@@ -736,7 +855,8 @@ def gui(args):
         if microphone and (microphone.error or not receiver.tx_command[2]):
             if microphone.error: receiver.tx_error = microphone.error
             release_ptt()
-        tx_monitor.configure(text=f"TX {'SENDEN' if receiver.tx_confirmed else 'PTT aus / wartet'} | {receiver.tx_applied_hz} Hz | Mic 48 → 12 kHz | UDP {receiver.tx_packets} packets | FIFO {receiver.tx_fill}/2880 | Pluto {receiver.tx_pluto_fill}/8 | {receiver.tx_ppm} ppm | {receiver.tx_error}")
+        tx_label="Audio-Test" if mode==LOOP_AUDIO else "TX"
+        tx_monitor.configure(text=f"{tx_label} {'AKTIV' if receiver.tx_confirmed else 'PTT aus / wartet'} | {receiver.tx_applied_hz} Hz | Mic 48 → 12 kHz | UDP {receiver.tx_packets} packets | Echo {receiver.echo_received} | FIFO {receiver.tx_fill}/2880 | Pluto {receiver.tx_pluto_fill}/8 | {receiver.tx_ppm} ppm | {receiver.tx_error}")
         second = receiver.channels[2]
         # Monitoring only: discard already-counted RX2 test packets; never send to AudioPlayer.
         while True:
@@ -773,6 +893,8 @@ def gui(args):
                       "tx1_compressor":receiver.compressor_applied,"tx1_compressor_error":receiver.compressor_error,
                       "compression_db":receiver.compression_db,"limiting_db":receiver.limiting_db}
             report['tx_offset_hz']=tx_offset_hz(receiver.channels[1].command[1],receiver.tx_command[1])
+            report.update(test_loop=receiver.loop_mode,loop_error=receiver.loop_error,loop_rx_lo=receiver.loop_rx_lo,
+                          echo_packets=receiver.echo_received,echo_samples=receiver.echo_samples)
             args.audio_report.write_text(json.dumps(report,indent=2)+"\n")
         root.destroy()
 

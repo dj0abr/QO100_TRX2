@@ -20,7 +20,7 @@ class JitterBuffer:
 
     def add(self, packet):
         with self.lock:
-            identity = (packet.session_id, packet.epoch)
+            identity = (packet.stream_id, packet.session_id, packet.epoch)
             if identity != self.identity:
                 self.identity = identity
                 self.packets.clear()
@@ -38,6 +38,10 @@ class JitterBuffer:
     def level(self):
         with self.lock:
             return sum(map(len, self.packets.values()))
+
+    def clear(self):
+        with self.lock:
+            self.identity=None;self.packets.clear();self.next_index=None
 
     def take(self):
         with self.lock:
@@ -77,6 +81,9 @@ class AudioPlayer:
 
     def add(self, packet):
         self.buffer.add(packet)
+
+    def reset(self):
+        self.buffer.clear()
 
     def run(self):
         pcm = C.c_void_p()

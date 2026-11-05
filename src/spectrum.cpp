@@ -28,6 +28,11 @@ Spectrum::~Spectrum() {
     fftwf_destroy_plan(plan_);
     fftwf_free(input_); fftwf_free(output_);
 }
+void Spectrum::reset() {
+    write_=count_=since_fft_=averages_=0;
+    last_frame_=samples_;
+    std::fill(powers_.begin(),powers_.end(),0.f);
+}
 bool Spectrum::push_iq(const uint8_t* data, size_t size) {
     if (!size || size % 4) return false;
     for (size_t i = 0; i < size; i += 4) {

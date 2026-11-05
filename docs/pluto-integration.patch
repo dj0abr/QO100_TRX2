@@ -151,7 +151,7 @@ index 71830b8..3200500 100644
 +            int16_t pluto_re = (int16_t)(yout[ipol].real() * 32767.0);
 +            int16_t pluto_im = (int16_t)(yout[ipol].imag() * 32767.0);
 diff --git a/pluto_setup.cpp b/pluto_setup.cpp
-index c8e1cea..2cd58c2 100644
+index c8e1cea..b997a2e 100644
 --- a/pluto_setup.cpp
 +++ b/pluto_setup.cpp
 @@ -56,0 +57,7 @@ void sendfifostat()
@@ -169,37 +169,50 @@ index c8e1cea..2cd58c2 100644
 +	if (!rx_only) {
 @@ -158,0 +167 @@ void pluto_setup()
 +	}
-@@ -162,2 +171,2 @@ void pluto_setup()
+@@ -162,2 +171,12 @@ void pluto_setup()
 -	cfg_ad9361_streaming_ch(ctx, &rxcfg, RX, 0);
 -	cfg_ad9361_streaming_ch(ctx, &txcfg, TX, 0);
 +	if (!cfg_ad9361_streaming_ch(ctx, &rxcfg, RX, 0)) { fprintf(stderr,"RX configuration failed\n"); exit(1); }
 +	if (!rx_only && !cfg_ad9361_streaming_ch(ctx, &txcfg, TX, 0)) { fprintf(stderr,"TX configuration failed\n"); exit(1); }
-@@ -166,0 +176,2 @@ void pluto_setup()
++	// A loop-mode restart is acknowledged by fresh IQ. Verify both LO values
++	// before streaming so a failed hardware write cannot acknowledge a wrong band.
++	iio_device *loop_phy=iio_context_find_device(ctx,"ad9361-phy");
++	for(int direction=0;direction<(rx_only?1:2);++direction) {
++		iio_channel *lo=loop_phy?iio_device_find_channel(loop_phy,direction?"altvoltage1":"altvoltage0",true):NULL;
++		long long actual=0,expected=direction?txcfg.lo_hz:rxcfg.lo_hz;
++		if(!lo || iio_channel_attr_read_longlong(lo,"frequency",&actual)<0 || actual!=expected) {
++			fprintf(stderr,"LO frequency verification failed (%s)\n",direction?"TX":"RX");exit(1);
++		}
++	}
+@@ -166,0 +186,2 @@ void pluto_setup()
 +	if (!rx0_i || !rx0_q) { fprintf(stderr,"RX channels missing\n"); exit(1); }
 +	if (!rx_only) {
-@@ -168,0 +180,2 @@ void pluto_setup()
+@@ -168,0 +190,2 @@ void pluto_setup()
 +	if (!tx0_i || !tx0_q) { fprintf(stderr,"TX channels missing\n"); exit(1); }
 +	}
-@@ -173 +186 @@ void pluto_setup()
+@@ -173 +196 @@ void pluto_setup()
 -		ad9361_set_bb_rate(dev9,orig_srate);
 +		if (!dev9 || ad9361_set_bb_rate(dev9,orig_srate) < 0) { fprintf(stderr,"Cannot set sample rate\n"); exit(1); }
-@@ -175,0 +189 @@ void pluto_setup()
+@@ -175,0 +199 @@ void pluto_setup()
 +
-@@ -178,2 +192 @@ void pluto_setup()
+@@ -178,2 +202 @@ void pluto_setup()
 -	iio_channel_enable(tx0_i);
 -	iio_channel_enable(tx0_q);
 +	if (!rx_only) { iio_channel_enable(tx0_i); iio_channel_enable(tx0_q); }
-@@ -183 +196 @@ void pluto_setup()
+@@ -183 +206 @@ void pluto_setup()
 -		perror("Could not create RX buffer");
 +		perror("Could not create RX buffer"); exit(1);
-@@ -184,0 +198 @@ void pluto_setup()
+@@ -184,0 +208 @@ void pluto_setup()
 +	if (!rx_only) {
-@@ -187 +201,2 @@ void pluto_setup()
+@@ -187 +211,2 @@ void pluto_setup()
 -		perror("Could not create TX buffer");
 +		perror("Could not create TX buffer"); exit(1);
 +	}
-@@ -188,0 +204 @@ void pluto_setup()
+@@ -189 +214,2 @@ void pluto_setup()
+-}
+\ No newline at end of file
 +
++}
 diff --git a/udp/udp.cpp b/udp/udp.cpp
 index 7521de7..4235977 100755
 --- a/udp/udp.cpp

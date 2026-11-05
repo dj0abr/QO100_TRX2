@@ -5,6 +5,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gui"))
 from protocol import Assembler, HEADER, subscription, filter_control, filter_state, valid_filter
 from protocol import compressor_control, compressor_state
+from protocol import loop_control,loop_state
 
 
 def packets(frame=1, stamp=100, session=7):
@@ -19,6 +20,18 @@ def packets(frame=1, stamp=100, session=7):
 
 
 class ProtocolTest(unittest.TestCase):
+    def test_loop_wire(self):
+        query=HEADER.unpack(loop_control(7,99))
+        self.assertEqual((query[2],query[4],query[5],query[10],query[13],query[15]),(13,0,7,0,0,99))
+        for mode in (0,1,2):
+            setting=HEADER.unpack(loop_control(8,99,mode))
+            self.assertEqual((setting[10],setting[13]),(mode,1))
+        reply=HEADER.pack(b'QTR2',1,14,64,0,8,0,3,1290250000,600000,2,2,0,0,0,99)
+        self.assertEqual(loop_state(reply),(8,99,2,2,1290250000,3,0))
+        self.assertIsNone(loop_state(reply+b'x'))
+        for bad in (-1,3,1.2):
+            with self.assertRaises(ValueError): loop_control(1,99,bad)
+
     def test_compressor_wire(self):
         query=HEADER.unpack(compressor_control(7,99))
         self.assertEqual((query[2],query[4],query[5],query[9],query[10],query[13],query[15]),(11,3,7,0,0,0,99))

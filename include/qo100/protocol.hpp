@@ -10,6 +10,12 @@ constexpr uint8_t tune_type = 3, state_type = 4, audio_type = 5;
 constexpr uint8_t tx_control_type = 6, tx_state_type = 7, tx_audio_type = 8;
 constexpr uint8_t filter_control_type = 9, filter_state_type = 10;
 constexpr uint8_t compressor_control_type = 11, compressor_state_type = 12;
+constexpr uint8_t loop_control_type = 13, loop_state_type = 14;
+enum class TestLoop : uint32_t { normal=0, audio=1, rf=2 };
+struct LoopControl { uint32_t request, session, mode; bool set; };
+bool parse_loop_control(const uint8_t*, size_t, LoopControl&);
+std::vector<uint8_t> loop_state_packet(uint32_t request, TestLoop mode, TestLoop target,
+    uint64_t rx_lo, uint32_t generation, uint32_t session, uint16_t status, uint64_t timestamp_ns=0);
 struct CompressorControl { uint32_t request, session, amount; bool set; };
 bool parse_compressor_control(const uint8_t*, size_t, CompressorControl&);
 std::vector<uint8_t> compressor_state_packet(uint32_t request, uint32_t amount, uint32_t epoch,

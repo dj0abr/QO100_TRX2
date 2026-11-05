@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(QO100_TRX2 VERSION 0.7.0 LANGUAGES CXX)
+project(QO100_TRX2 VERSION 0.8.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -109,4 +109,8 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compressor_control.py
         $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
     set_tests_properties(compressor_control_udp PROPERTIES TIMEOUT 15)
+    add_test(NAME test_loops_udp COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_loops_integration.py
+        $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(test_loops_udp PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 endif()

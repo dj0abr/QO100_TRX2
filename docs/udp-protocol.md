@@ -13,9 +13,9 @@ Python reference format: `struct.Struct("!4sBBHIIQQQIIIHHII")`.
 |---:|---:|---|
 | 0 | 4 | ASCII magic `QTR2` |
 | 4 | 1 | Protocol version, 1 |
-| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO, 9 FILTER_CONTROL, 10 FILTER_STATE, 11 COMPRESSOR_CONTROL, 12 COMPRESSOR_STATE |
+| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO, 9 FILTER_CONTROL, 10 FILTER_STATE, 11 COMPRESSOR_CONTROL, 12 COMPRESSOR_STATE, 13 LOOP_CONTROL, 14 LOOP_STATE |
 | 6 | 2 | Header size, 64 |
-| 8 | 4 | Stream ID: 0 = full-band spectrum; 1 = RX1; 2 = RX2; 3 = TX |
+| 8 | 4 | Stream ID: 0 = full-band spectrum/global test control; 1 = RX1; 2 = RX2; 3 = TX; 4 = audio echo |
 | 12 | 4 | Frame ID / control request ID / audio tuning epoch, uint32 |
 | 16 | 8 | Backend Unix timestamp in nanoseconds at frame emission |
 | 24 | 8 | FFT exclusive end index / audio start index / STATE tuning epoch |
@@ -219,6 +219,77 @@ PTT transitions and missing-audio resets clear compressor/limiter history while
 retaining amount. Amount 0 bypasses speech gain; the final SSB peak limiter
 remains active with the same fixed 5-ms delay at every setting. TX_AUDIO format,
 sample rate and packet size are unchanged. No RX stream is processed here.
+
+## Test loops (v0.8)
+
+LOOP_CONTROL (13) is a 64-byte header, **stream 0**, request ID in frame_id,
+backend session in session_id. Format **0=query / 1=set**. fft_size carries
+the mode for a set: **0=normal, 1=audio loop, 2=RF loop**; a query has fft_size
+zero. Every remaining field is zero. Modes are mutually exclusive.
+
+LOOP_STATE (14), 64 bytes, stream 0, echoed request/session: fft_size = actual
+mode, first_bin = target mode, center_hz = actual Pluto RX **LO** in Hz,
+sample_index = mode generation, sample_rate = 600000. Timestamp is the backend
+emission time in Unix nanoseconds. bin_count and total_count are zero.
+Format/status: **0=OK, 1=invalid mode, 2=RF loop unavailable in synthetic mode,
+3=switching hardware**. During switching the actual mode/LO remain the last
+confirmed values; wait for status 0 before using the new path.
+
+Only the current subscriber and backend session may control loops. The request
+sequence is independent of other controls; stale requests are ignored, duplicate
+requests return current state without repeating the action. Invalid commands
+retain state. The GUI repeats its latest command/query every 250 ms. No extra
+lease is required beyond ordinary SUBSCRIBE renewal. New subscribers and an
+expired subscription restore normal mode. Closing the test GUI also explicitly
+requests normal. Backend restart always begins in normal mode.
+
+A changed mode clears PTT, increments TX epoch and flushes TX history. A fresh
+manual PTT request is required. Test commands never key TX. TX_CONTROL while a
+hardware switch is pending returns status **2=busy**, with PTT off. The GUI
+disables PTT during switching. Mode 0 or 1 requests require no driver restart
+unless they leave RF mode.
+
+### Audio loop, mode 1
+
+Use ordinary TX_CONTROL to open the microphone gate, then send TX_AUDIO with
+the confirmed TX session/epoch/frequency. The backend immediately returns its
+PCM payload unchanged as **AUDIO (5), stream 4**: sample rate 12000, PCM16,
+240 samples, frame_id = TX epoch, sample_index = the original TX audio index,
+center_hz = confirmed **uplink** frequency. Timestamp is the echo emission time.
+No backend resampling, compression, modulation or audio FIFO is applied here.
+The TX IQ stream remains exact zeros even while the microphone gate is on.
+
+Wrong sessions/epochs/frequencies, invalid alignment and duplicate input packets
+are rejected. A bounded 64-packet index window permits reordered input; the echo
+keeps arrival order and the client jitter buffer reorders playback. Missing
+input packets are not retransmitted. Receiver streams 1/2 and spectra continue
+normally; clients select stream 4 instead of RX1 for speaker playback. Playback
+identity must include **stream, session and epoch**, so equal epoch numbers on
+RX1 and the echo cannot mix audio. Flush playback on a mode change and on
+releasing the audio-test button. The test GUI uses unity gain for this raw test.
+
+### RF loop, mode 2
+
+The backend restarts its owned local driver with `RX_FREQ = configured TX_FREQ`.
+All traffic to that driver remains loopback-only on the existing ports. Before
+streaming, the driver reads back and verifies RX/TX LO values. Mode completion
+is acknowledged only after fresh IQ from the new process. FIFO feedback sequence
+state and spectral histories are reset. Both RX audio epochs change because
+the shared hardware capture band has changed.
+
+RX1 automatically tunes to the digital TX offset, independently of its stored
+normal TUNE request. Its STATE/AUDIO/zoom frequency is the equivalent downlink
+`rx_center_hz + tx_frequency - tx_center_hz`. Further TX tuning updates RX1's
+DSP/epoch and zoom; the physical RX LO stays equal to the TX LO. RX2 uses the
+same test-band IQ. Normal TUNE requests are retained for restoration; the test
+GUI disables RX1 tuning/clicks in RF mode and permits TX wheel tuning.
+
+Leaving RF mode restarts the driver with configured normal `pluto_rx_hz` and
+restores the stored RX tuning. Mode and LO changes are temporary; normal config,
+filters and compressor settings remain unchanged. Use the mode-switch timestamp
+as a lower bound for accepting spectrum frames after a hardware band change;
+late spectra from the preceding band must be discarded. RF self-listening needs
+the actual coupled RF signal at the RX input.
 
 ## Local Pluto direct TX transport
 

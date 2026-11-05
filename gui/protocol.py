@@ -35,7 +35,7 @@ def audio_packet(packet):
     if len(packet) < 64 or len(packet) > MAX_DATAGRAM:
         return None
     f = HEADER.unpack_from(packet)
-    if (f[:4] != (MAGIC, VERSION, AUDIO, 64) or f[4] not in (1, 2) or f[9] != 12000
+    if (f[:4] != (MAGIC, VERSION, AUDIO, 64) or f[4] not in (1, 2, 4) or f[9] != 12000
         or f[10] or f[11] or f[13] != 2 or f[12] != f[14]
         or not 0 < f[12] <= 568 or len(packet) != 64 + 2*f[12]):
         return None
@@ -143,6 +143,23 @@ def tx_audio(epoch, index, frequency, session, samples):
 
 FILTER_CONTROL, FILTER_STATE = 9, 10
 COMPRESSOR_CONTROL, COMPRESSOR_STATE = 11, 12
+LOOP_CONTROL, LOOP_STATE = 13, 14
+LOOP_NORMAL, LOOP_AUDIO, LOOP_RF = 0, 1, 2
+
+
+def loop_control(request, session, mode=None):
+    if mode is not None and mode not in (0,1,2):
+        raise ValueError("Test loop must be 0 normal, 1 audio, or 2 RF")
+    return HEADER.pack(MAGIC,VERSION,LOOP_CONTROL,64,0,request,0,0,0,0,
+                       mode or 0,0,0,int(mode is not None),0,session)
+
+
+def loop_state(packet):
+    if len(packet)!=64: return None
+    f=HEADER.unpack(packet)
+    if (f[:4]!=(MAGIC,VERSION,LOOP_STATE,64) or f[4] or f[9]!=600000
+        or f[10]>2 or f[11]>2 or f[12] or f[13]>3 or f[14]): return None
+    return f[5],f[15],f[10],f[11],f[8],f[7],f[13]
 
 
 def compressor_control(request, session, amount=None):

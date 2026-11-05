@@ -31,7 +31,16 @@ class AudioTest(unittest.TestCase):
         self.assertGreater(b.overruns,0)
         b.add(packet(0,epoch=2))
         self.assertEqual(b.level(),240)
-        self.assertEqual(b.identity,(99,2))
+        self.assertEqual(b.identity,(1,99,2))
+
+    def test_echo_source_flushes_same_epoch(self):
+        b=JitterBuffer();b.add(packet(0))
+        echo=packet(0);echo.stream_id=4
+        b.add(echo)
+        self.assertEqual(b.level(),240)
+        self.assertEqual(b.identity,(4,99,1))
+        b.clear()
+        self.assertEqual(b.level(),0)
 
     def test_wire_and_frequency(self):
         self.assertEqual(parse_frequency("10489,748500"),10489748500)

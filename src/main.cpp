@@ -15,8 +15,10 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <limits>
 #include <poll.h>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <sys/socket.h>
 #include <thread>
@@ -103,11 +105,13 @@ int main(int argc, char** argv) {
         uint64_t tx_frequency=c.initial_tx_hz, tx_blocks=0;
         uint32_t tx_epoch=1,tx_request=0,tx_block_id=0,status_sequence=0;
         bool tx_enabled=false,tx_have_request=false,have_status=false;
+        std::set<uint64_t> echo_seen;
+        uint64_t echo_next=0;
         int pluto_fill=0;
         uint16_t tx_command_status=0;
         auto last_tx_audio=Clock::now()-std::chrono::seconds(10),last_tx_control=last_tx_audio;
         auto last_tx_feedback=Clock::now(),last_tx_state=last_tx_audio;
-        auto mute_tx=[&] { if(tx_enabled) { tx_enabled=false;++tx_epoch;tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz)); } };
+        auto mute_tx=[&] { if(tx_enabled) { tx_enabled=false;++tx_epoch;echo_seen.clear();echo_next=0;tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz)); } };
         tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
         uint32_t filter_request=0;
         uint16_t filter_status=0;
@@ -115,6 +119,17 @@ int main(int argc, char** argv) {
         uint32_t compressor_request=0;
         uint16_t compressor_status=0;
         bool have_compressor_request=false;
+        using TestLoop=qo100::TestLoop;
+        TestLoop loop_mode=TestLoop::normal,loop_target=TestLoop::normal;
+        uint32_t loop_request=0,loop_generation=0;
+        uint16_t loop_status=0;
+        bool have_loop_request=false,loop_pending=false;
+        uint64_t current_rx_lo=c.pluto_rx_hz,rx_lo_target=c.pluto_rx_hz;
+        auto rx_frequency=[&](size_t i) {
+            return i==0 && loop_mode==TestLoop::rf
+                ? uint64_t(int64_t(c.rx_center_hz)+int64_t(tx_frequency)-int64_t(c.tx_center_hz))
+                : receivers[i].frequency;
+        };
         uint32_t zoom_frame_id = 0;
         auto stamp = [] { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); };
         auto active = [&] { return subscribed && std::chrono::duration<double>(Clock::now()-last_subscription).count() <= c.subscription_seconds; };
@@ -127,10 +142,19 @@ int main(int argc, char** argv) {
                 tx_enabled,tx.level(),pluto_fill,int32_t(std::lround(tx.ppm()))));
             last_tx_state=Clock::now();
         };
+        auto send_rx_state=[&](size_t i,uint16_t status=0) {
+            const auto& rx=receivers[i];
+            if(rx.have_request) send_packet(qo100::state_packet(rx.last_request,rx_frequency(i),rx.epoch,session_id,status,i+1));
+        };
+        auto send_loop_state=[&]() {
+            send_packet(qo100::loop_state_packet(loop_request,loop_mode,loop_target,current_rx_lo,
+                loop_generation,session_id,loop_status,stamp()));
+        };
         sockaddr_in driver{};driver.sin_family=AF_INET;driver.sin_port=htons(qo100::pluto_tx_port);
         driver.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
         auto render_tx=[&] {
-            const bool recent=tx_enabled && active() && Clock::now()-last_tx_audio<std::chrono::milliseconds(200);
+            const bool recent=tx_enabled && active() && loop_mode!=TestLoop::audio && !loop_pending
+                && Clock::now()-last_tx_audio<std::chrono::milliseconds(200);
             const auto samples=tx.render(recent);
             if(tx_status) {
                 constexpr size_t chunk=12000;
@@ -154,7 +178,7 @@ int main(int argc, char** argv) {
             return std::make_unique<qo100::Spectrum>(75000,8192,c.spectrum_fps,
                 [&](const std::vector<int16_t>& bins,uint64_t index) {
                     if (!active()) return;
-                    qo100::FrameInfo f{zoom_frame_id++,stamp(),index,receivers[0].frequency,75000,8192,session_id,1};
+                    qo100::FrameInfo f{zoom_frame_id++,stamp(),index,rx_frequency(0),75000,8192,session_id,1};
                     for(const auto& packet:qo100::spectrum_packets(f,bins)) send_packet(packet);
                 });
         };
@@ -166,7 +190,7 @@ int main(int argc, char** argv) {
                 [&,i](const std::vector<int16_t>& audio,uint64_t index) {
                     if(!active()) return;
                     const auto& rx=receivers[i];
-                    qo100::FrameInfo f{rx.epoch,stamp(),index,rx.frequency,12000,0,session_id,static_cast<uint32_t>(i+1)};
+                    qo100::FrameInfo f{rx.epoch,stamp(),index,rx_frequency(i),12000,0,session_id,static_cast<uint32_t>(i+1)};
                     send_packet(qo100::audio_packet(f,audio));
                 }, i==0 ? c.rx1_filter : qo100::RxFilterSettings{});
         }
@@ -202,6 +226,46 @@ int main(int argc, char** argv) {
         bool received_iq = false;
         uint64_t last_samples = 0;
         std::array<uint8_t, 65536> buffer{};
+        auto reset_rx=[&](size_t i) {
+            auto& rx=receivers[i];++rx.epoch;
+            rx.dsp->tune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
+            if(i==0) zoom=make_zoom();
+            send_rx_state(i);
+        };
+        auto commit_loop=[&]() {
+            const bool restarted=loop_pending;
+            const bool routing_changed=(loop_mode==TestLoop::rf)!=(loop_target==TestLoop::rf);
+            loop_mode=loop_target;loop_pending=false;if(loop_status==3) loop_status=0;++loop_generation;
+            const bool hardware_changed=restarted || current_rx_lo!=rx_lo_target;
+            current_rx_lo=rx_lo_target;
+            send_loop_state();
+            if(hardware_changed) {
+                spectrum.reset();
+                for(size_t i=0;i<receivers.size();++i) reset_rx(i);
+            } else if(routing_changed) reset_rx(0);
+            std::cout << "Test loop=" << uint32_t(loop_mode) << "; Pluto RX LO=" << current_rx_lo << " Hz\n";
+        };
+        auto change_loop=[&](TestLoop target) {
+            if(loop_target==target && (loop_pending || loop_mode==target)) return;
+            loop_target=target;
+            // Changing a test path always requires a fresh manual PTT press.
+            tx_enabled=false;++tx_epoch;echo_seen.clear();echo_next=0;tx_command_status=0;
+            tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));send_tx_state();
+            const uint64_t wanted_lo=target==TestLoop::rf ? c.pluto_tx_hz : c.pluto_rx_hz;
+            if(wanted_lo!=rx_lo_target) {
+                loop_pending=true;loop_status=3;send_loop_state();
+                pluto.reset(); // Driver has startup-only LO configuration.
+                // Remove old IQ and FIFO reports before starting the new child.
+                while(recv(iq->fd,buffer.data(),buffer.size(),0)>=0) {}
+                while(recv(tx_status->fd,buffer.data(),buffer.size(),0)>=0) {}
+                auto settings=c;settings.pluto_rx_hz=wanted_lo;
+                const auto binary=std::filesystem::canonical("/proc/self/exe").parent_path()/"pluto";
+                pluto=std::make_unique<qo100::PlutoProcess>(settings,binary);
+                rx_lo_target=wanted_lo;have_status=false;pluto_fill=0;
+                last_iq=last_tx_feedback=Clock::now();received_iq=false;
+                // Commit only after fresh IQ proves the restarted driver is streaming.
+            } else if(!loop_pending) commit_loop();
+        };
         while (running && (!duration || std::chrono::duration<double>(Clock::now() - start).count() < duration)) {
             pollfd fds[3]{{gui.fd, POLLIN, 0}, {iq ? iq->fd : -1, POLLIN, 0}, {tx_status ? tx_status->fd : -1,POLLIN,0}};
             if (poll(fds, 3, 5) < 0 && errno != EINTR) throw std::runtime_error("poll failed");
@@ -212,6 +276,7 @@ int main(int argc, char** argv) {
                     auto n = recvfrom(gui.fd, buffer.data(), buffer.size(), 0, reinterpret_cast<sockaddr*>(&from), &len);
                     if (n < 0) break;
                     if (qo100::is_subscription(buffer.data(), static_cast<size_t>(n))) {
+                        const bool changed_peer=!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port;
                         if (!subscribed || from.sin_addr.s_addr != peer.sin_addr.s_addr || from.sin_port != peer.sin_port)
                             std::cout << "GUI subscriber " << inet_ntoa(from.sin_addr) << ':' << ntohs(from.sin_port) << '\n';
                         if (!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) {
@@ -219,7 +284,25 @@ int main(int argc, char** argv) {
                             mute_tx();tx_have_request=false;have_filter_request=false;have_compressor_request=false;
                         }
                         peer = from; subscribed = true; last_subscription = Clock::now();
+                        if(changed_peer) {
+                            have_loop_request=false;
+                            change_loop(TestLoop::normal);
+                        }
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
+                        qo100::LoopControl control_loop{};
+                        if(qo100::parse_loop_control(buffer.data(),size_t(n),control_loop)) {
+                            if(control_loop.session!=session_id || (have_loop_request && control_loop.request!=loop_request &&
+                               int32_t(control_loop.request-loop_request)<0)) continue;
+                            if(!have_loop_request || control_loop.request!=loop_request) {
+                                loop_request=control_loop.request;have_loop_request=true;loop_status=loop_pending?3:0;
+                                if(control_loop.set) {
+                                    if(control_loop.mode>2) loop_status=1;
+                                    else if(control_loop.mode==2 && source!="pluto") loop_status=2;
+                                    else change_loop(TestLoop(control_loop.mode));
+                                }
+                            }
+                            send_loop_state();continue;
+                        }
                         qo100::CompressorControl compressor_control{};
                         if(qo100::parse_compressor_control(buffer.data(),size_t(n),compressor_control)) {
                             if(compressor_control.session!=session_id || (have_compressor_request &&
@@ -268,10 +351,13 @@ int main(int argc, char** argv) {
                             if(tx_have_request && control.request==tx_request &&
                                (control.frequency!=tx_frequency || control.enabled!=tx_enabled)) { send_tx_state();continue; }
                             tx_request=control.request;tx_have_request=true;tx_command_status=valid?0:1;
+                            if(loop_pending && control.enabled) { tx_command_status=2;send_tx_state();continue; }
                             if(valid) {
                                 if(control.frequency!=tx_frequency || control.enabled!=tx_enabled) {
-                                    tx_frequency=control.frequency;tx_enabled=control.enabled;++tx_epoch;
+                                    const bool retuned=control.frequency!=tx_frequency;
+                                    tx_frequency=control.frequency;tx_enabled=control.enabled;++tx_epoch;echo_seen.clear();echo_next=0;
                                     tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
+                                    if(retuned && loop_mode==TestLoop::rf && !loop_pending) reset_rx(0);
                                     last_tx_audio=Clock::now()-std::chrono::seconds(10);
                                     std::cout << "TX " << tx_frequency << " Hz; software PTT=" << tx_enabled << '\n';
                                 }
@@ -280,8 +366,15 @@ int main(int argc, char** argv) {
                             send_tx_state();continue;
                         }
                         if(qo100::parse_tx_audio(buffer.data(),size_t(n),audio)) {
-                            if(tx_enabled && audio.session==session_id && audio.epoch==tx_epoch && audio.frequency==tx_frequency &&
-                               tx.add(audio.index,audio.samples)) last_tx_audio=Clock::now();
+                            if(!tx_enabled || loop_pending || audio.session!=session_id || audio.epoch!=tx_epoch || audio.frequency!=tx_frequency) continue;
+                            if(loop_mode==TestLoop::audio) {
+                                if(audio.index%240 || audio.index>std::numeric_limits<uint64_t>::max()-240 ||
+                                   (audio.index<echo_next && echo_next-audio.index>64*240) || !echo_seen.insert(audio.index).second) continue;
+                                echo_next=std::max(echo_next,audio.index+240);
+                                while(!echo_seen.empty() && echo_next-*echo_seen.begin()>64*240) echo_seen.erase(echo_seen.begin());
+                                qo100::FrameInfo f{tx_epoch,stamp(),audio.index,tx_frequency,12000,0,session_id,4};
+                                send_packet(qo100::audio_packet(f,audio.samples));
+                            } else if(tx.add(audio.index,audio.samples)) last_tx_audio=Clock::now();
                             continue;
                         }
                         uint32_t stream_id=0, request=0; uint64_t frequency=0;
@@ -291,12 +384,12 @@ int main(int argc, char** argv) {
                             const bool valid=frequency>=c.rx_center_hz-275000 && frequency<=c.rx_center_hz+275000;
                             if(valid && frequency!=rx.frequency) {
                                 rx.frequency=frequency; ++rx.epoch;
-                                rx.dsp->tune(static_cast<int64_t>(rx.frequency)-static_cast<int64_t>(c.rx_center_hz));
+                                rx.dsp->tune(static_cast<int64_t>(rx_frequency(stream_id-1))-static_cast<int64_t>(c.rx_center_hz));
                                 if(stream_id==1) zoom=make_zoom();
                                 std::cout << "RX" << stream_id << " tuned to " << rx.frequency << " Hz; USB; epoch=" << rx.epoch << '\n';
                             }
                             rx.last_request=request;rx.have_request=true;
-                            send_packet(qo100::state_packet(request,rx.frequency,rx.epoch,session_id,valid?0:1,stream_id));
+                            send_rx_state(stream_id-1,valid?0:1);
                         }
                     }
                 }
@@ -307,13 +400,17 @@ int main(int argc, char** argv) {
                     socklen_t len = sizeof(from);
                     auto n = recvfrom(iq->fd, buffer.data(), buffer.size(), 0, reinterpret_cast<sockaddr*>(&from), &len);
                     if (n < 0) break;
-                    if (ntohl(from.sin_addr.s_addr) != INADDR_LOOPBACK || !feed_iq(buffer.data(), static_cast<size_t>(n))) ++malformed_iq;
-                    else { received_iq = true; last_iq = Clock::now(); }
+                    if (ntohl(from.sin_addr.s_addr) != INADDR_LOOPBACK || !n || n%4) ++malformed_iq;
+                    else {
+                        if(loop_pending) commit_loop();
+                        feed_iq(buffer.data(),size_t(n));received_iq=true;last_iq=Clock::now();
+                    }
                 }
             }
             if(tx_enabled && (!active() || Clock::now()-last_tx_control>std::chrono::milliseconds(1500))) {
                 mute_tx();send_tx_state();
             }
+            if(!active()) change_loop(TestLoop::normal);
             if(tx_status && (fds[2].revents&POLLIN)) {
                 bool update=false;
                 for(int budget=0;budget<128;++budget) {

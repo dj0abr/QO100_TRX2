@@ -39,5 +39,10 @@ header and link its local static archive. The copied upstream 1.3.2 header is
 retained but unused. Legacy TX complex sample access uses std::complex getters
 and setters, matching the shared C++ API of the new header.
 
+Test-loop integration verifies RX and TX LO readback before starting streaming.
+The driver retains startup-only frequency configuration. The backend implements
+the RF loop by restarting its owned child with RX LO equal to TX LO, and restores
+normal RX LO on leaving the mode. No driver/network control port was added.
+
 Copyright/license notices in the imported files remain unchanged, including
 the differing GPL notices already present in upstream helper files.
