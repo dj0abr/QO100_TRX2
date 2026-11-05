@@ -175,12 +175,22 @@ void pluto_setup()
 	iio_device *loop_phy=iio_context_find_device(ctx,"ad9361-phy");
 	for(int direction=0;direction<(rx_only?1:2);++direction) {
 		iio_channel *lo=loop_phy?iio_device_find_channel(loop_phy,direction?"altvoltage1":"altvoltage0",true):NULL;
+		// AD9361 PLL/driver granularity can round a request by a few Hz.
 		long long actual=0,expected=direction?txcfg.lo_hz:rxcfg.lo_hz;
-		if(!lo || iio_channel_attr_read_longlong(lo,"frequency",&actual)<0 || actual!=expected) {
-			fprintf(stderr,"LO frequency verification failed (%s)\n",direction?"TX":"RX");exit(1);
+		if(!lo || iio_channel_attr_read_longlong(lo,"frequency",&actual)<0 || llabs(actual-expected)>5) {
+			fprintf(stderr,"LO verification failed (%s): requested=%lld actual=%lld Hz\n",direction?"TX":"RX",expected,actual);exit(1);
 		}
+		printf("%s LO requested=%lld actual=%lld Hz\n",direction?"TX":"RX",expected,actual);
 	}
 
+	if(!rx_only) {
+		iio_channel *gain_channel=iio_device_find_channel(loop_phy,"voltage0",true);
+		double actual_gain=0;
+		if(!gain_channel || iio_channel_attr_read_double(gain_channel,"hardwaregain",&actual_gain)<0 ||
+		   fabs(actual_gain-(txcfg.hwgain-10))>.001) {
+			fprintf(stderr,"TX attenuation verification failed\n");exit(1);
+		}
+	}
 	get_ad9361_stream_ch(ctx, RX, rx, 0, &rx0_i);
 	get_ad9361_stream_ch(ctx, RX, rx, 1, &rx0_q);
 	if (!rx0_i || !rx0_q) { fprintf(stderr,"RX channels missing\n"); exit(1); }

@@ -46,3 +46,14 @@ normal RX LO on leaving the mode. No driver/network control port was added.
 
 Copyright/license notices in the imported files remain unchanged, including
 the differing GPL notices already present in upstream helper files.
+
+Persistent settings integration adds `PLUTO_ID usb:` for automatic USB discovery
+using libiio's USB scan API. This removes the former dependency on parsing the
+`iio_info -s` command's text output. Network `ip:IPv4` connections remain supported.
+The driver verifies TX hardware gain as well as both LOs before streaming, so
+the backend can acknowledge new connection/calibration/attenuation settings only
+after successful startup and fresh IQ. All driver links remain local UDP.
+
+LO readback accepts up to 5 Hz PLL/driver rounding (observed -3 Hz on the test
+Pluto for an odd-Hz RX request) and logs requested/actual values. Larger
+differences fail startup. TX attenuation readback tolerance is 0.001 dB.

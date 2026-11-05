@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import tempfile
 
 PROJECT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(PROJECT/'gui'))
@@ -29,8 +30,9 @@ def main():
         if line:
             k,v=line.split('=',1);settings[k.strip()]=v.strip()
     captures=PROJECT/'build/captures';captures.mkdir(parents=True,exist_ok=True)
+    settings_dir=tempfile.TemporaryDirectory(prefix="qo100-loop-settings-")
     log=(captures/'loop-hardware-backend.log').open('w')
-    backend=subprocess.Popen([str(PROJECT/'build/bin/qo100_backend'),'--config',str(config)],stdout=log,stderr=log)
+    backend=subprocess.Popen([str(PROJECT/'build/bin/qo100_backend'),'--config',str(config),'--settings',str(Path(settings_dir.name)/'backend.settings')],stdout=log,stderr=log)
     receiver=Receiver('127.0.0.1',int(settings['gui_port']),rx_hz=int(settings['initial_rx_hz']),
                       rx2_hz=int(settings['initial_rx2_hz']),tx_hz=int(settings['initial_tx_hz']))
     def frequency(channel):
@@ -64,7 +66,7 @@ def main():
         receiver.close();backend.terminate()
         try: backend.wait(timeout=7)
         except subprocess.TimeoutExpired: backend.kill();backend.wait()
-        log.close()
+        log.close();settings_dir.cleanup()
     assert backend.returncode==0,'See loop-hardware-backend.log'
 
 

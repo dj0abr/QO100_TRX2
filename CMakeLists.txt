@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(QO100_TRX2 VERSION 0.9.0 LANGUAGES CXX)
+project(QO100_TRX2 VERSION 0.10.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -59,7 +59,7 @@ target_compile_options(pluto PRIVATE -Wno-write-strings -Wno-narrowing)
 target_link_libraries(pluto PRIVATE ${IIO_LIBRARY} ${AD9361_LIBRARY}
     qo100_liquid Threads::Threads rt m)
 
-add_library(qo100_core src/dsp.cpp src/config.cpp src/spectrum.cpp src/protocol.cpp src/rx_channel.cpp src/rx_filter.cpp src/tx_channel.cpp src/speech_compressor.cpp src/noise_reduction.cpp)
+add_library(qo100_core src/dsp.cpp src/config.cpp src/spectrum.cpp src/protocol.cpp src/rx_channel.cpp src/rx_filter.cpp src/tx_channel.cpp src/speech_compressor.cpp src/noise_reduction.cpp src/settings.cpp)
 target_include_directories(qo100_core PUBLIC include)
 target_link_libraries(qo100_core PUBLIC qo100_liquid qo100_speex PkgConfig::FFTW PkgConfig::SAMPLERATE)
 target_compile_options(qo100_core PRIVATE -Wall -Wextra -Wpedantic)
@@ -75,6 +75,11 @@ target_link_libraries(benchmark_dsp PRIVATE qo100_core)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(gui_udp_example examples/gui_udp.cpp)
+    target_compile_options(gui_udp_example PRIVATE -Wall -Wextra -Wpedantic)
+    add_executable(test_settings tests/test_settings.cpp)
+    target_link_libraries(test_settings PRIVATE qo100_core)
+    add_test(NAME settings_store COMMAND test_settings)
     add_executable(test_noise_reduction tests/test_noise_reduction.cpp)
     target_link_libraries(test_noise_reduction PRIVATE qo100_core)
     add_test(NAME noise_reduction_dsp COMMAND test_noise_reduction)
@@ -97,6 +102,19 @@ if(BUILD_TESTING)
     target_link_libraries(test_rx_channel PRIVATE qo100_core)
     add_test(NAME usb_dsp COMMAND test_rx_channel)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME cpp_gui_udp COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpp_gui.py
+        $<TARGET_FILE:gui_udp_example> $<TARGET_FILE:qo100_backend>
+        ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(cpp_gui_udp PROPERTIES TIMEOUT 20)
+    add_test(NAME settings_udp COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_settings_udp.py
+        $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(settings_udp PROPERTIES TIMEOUT 20)
+    add_test(NAME settings_hardware_udp COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_settings_hardware.py
+        $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(settings_hardware_udp PROPERTIES TIMEOUT 35 RUN_SERIAL TRUE)
     add_test(NAME bundled_speex COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_speex_bundle.py
         ${CMAKE_CURRENT_SOURCE_DIR} $<TARGET_FILE:qo100_backend>)

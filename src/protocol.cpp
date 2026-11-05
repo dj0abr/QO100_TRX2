@@ -16,6 +16,22 @@ void put(std::vector<uint8_t>& bytes, size_t offset, uint64_t value, size_t widt
     for (size_t i = 0; i < width; ++i) bytes[offset + width - i - 1] = (value >> (i * 8)) & 255;
 }
 }
+bool parse_settings_control(const uint8_t* p,size_t n,SettingsControl& c) {
+    if(n<64 || n>max_datagram || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=settings_control_type ||
+       get(p,6,2)!=64 || get(p,8,4) || get(p,16,8) || get(p,32,8) || get(p,40,4) ||
+       get(p,48,4) || get(p,54,2)>1 || get(p,44,4)!=n-64 || get(p,52,2)!=n-64 || get(p,56,4)!=n-64) return false;
+    const bool set=get(p,54,2)!=0;
+    if(set ? n==64 : (n!=64 || get(p,24,8))) return false;
+    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),get(p,24,8),set,
+        std::string(reinterpret_cast<const char*>(p+64),n-64)};return true;
+}
+std::vector<uint8_t> settings_state_packet(uint32_t request,uint32_t session,uint64_t revision,
+    uint16_t status,uint32_t flags,const std::string& payload) {
+    if(payload.size()>max_datagram-64) throw std::runtime_error("Settings snapshot too large");
+    auto p=state_packet(request,0,revision,session,status,0);p[5]=settings_state_type;
+    put(p,40,0,4);put(p,44,payload.size(),4);put(p,48,flags,4);put(p,52,payload.size(),2);put(p,56,payload.size(),4);
+    p.insert(p.end(),payload.begin(),payload.end());return p;
+}
 bool parse_nr_control(const uint8_t* p, size_t n, NrControl& c) {
     if(n!=64 || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=nr_control_type ||
        get(p,6,2)!=64 || get(p,8,4)!=1 || get(p,54,2)>1 || get(p,16,8) || get(p,24,8) ||
@@ -120,13 +136,14 @@ std::vector<std::vector<uint8_t>> spectrum_packets(const FrameInfo& f, const std
     }
     return packets;
 }
-bool parse_tune(const uint8_t* p, size_t n, uint32_t& stream_id, uint32_t& request, uint64_t& frequency) {
+bool parse_tune(const uint8_t* p, size_t n, uint32_t& stream_id, uint32_t& request, uint64_t& frequency, uint32_t* session) {
     if (n != 64 || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=tune_type || p[6]!=0 || p[7]!=64) return false;
     auto get = [&](size_t off, size_t width) {
         uint64_t value = 0; for (size_t i=0;i<width;++i) value = (value<<8) | p[off+i]; return value;
     };
     const auto stream=get(8,4);
     if (stream!=1 && stream!=2) return false;
+    if(session) *session=uint32_t(get(60,4));
     stream_id=static_cast<uint32_t>(stream);
     request=static_cast<uint32_t>(get(12,4)); frequency=get(32,8);
     return true;

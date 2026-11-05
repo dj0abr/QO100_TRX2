@@ -14,6 +14,8 @@ from protocol import FILTER_STATE, filter_control, filter_state, valid_filter
 from protocol import COMPRESSOR_STATE, compressor_control, compressor_state
 from protocol import LOOP_STATE, LOOP_AUDIO, LOOP_RF, loop_control, loop_state
 from protocol import NR_STATE, nr_control, nr_state
+from protocol import SETTINGS_STATE
+from settings import SettingsClient
 from decimal import Decimal
 from tuning import PlotGeometry, DOWNLINK_UPLINK_HZ, uplink_hz, tx_offset_hz, mhz_text, wheel_steps
 
@@ -33,7 +35,10 @@ class AudioReceiveState:
 
 
 class Receiver:
-    def __init__(self, host, port, rx_hz=10489900000, audio_sink=None, rx2_hz=10489600000, tx_hz=2400400000):
+    def __init__(self, host, port, rx_hz=None, audio_sink=None, rx2_hz=None, tx_hz=None):
+        self.settings=SettingsClient()
+        self.initial_overrides=(rx_hz,rx2_hz,tx_hz)
+        self.settings_generation=0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
         self.sock.connect((host, port))
@@ -121,11 +126,14 @@ class Receiver:
                 try:
                     self.sock.send(subscription())
                     for stream, command in commands:
-                        self.sock.send(tune(*command, stream_id=stream))
+                        if command[1] is not None and self.settings.ready:
+                            self.sock.send(tune(*command, stream_id=stream,session=self.settings.session))
                     last_commands = commands
                 except OSError as exc:
                     self.error = str(exc)
                 next_subscription = time.monotonic() + 2
+            try: self.settings.send(self.sock)
+            except OSError as exc: self.settings.error=str(exc)
             with self.tx_lock:
                 command = self.tx_command
                 if self.tx_session is not None and (command != last_tx or time.monotonic() >= next_tx):
@@ -183,6 +191,16 @@ class Receiver:
                 continue
             if len(packet) >= 64 and packet[:4] == b"QTR2" and packet[4] == 1:
                 fields = HEADER.unpack_from(packet)
+                if packet[5]==SETTINGS_STATE:
+                    values=self.settings.receive(packet)
+                    if values is not None:
+                        for stream,key,override in ((1,'initial_rx_hz',self.initial_overrides[0]),(2,'initial_rx2_hz',self.initial_overrides[1])):
+                            self.set_frequency(int(values[key]) if override is None else override,stream)
+                        with self.tx_lock:
+                            self.set_tx(frequency=int(values['initial_tx_hz']) if self.initial_overrides[2] is None else self.initial_overrides[2],enabled=False)
+                        self.initial_overrides=(None,None,None)
+                        self.settings_generation+=1
+                    continue
                 if packet[5]==NR_STATE:
                     result=nr_state(packet)
                     with self.nr_lock:
@@ -229,7 +247,7 @@ class Receiver:
                     with self.tx_lock:
                         if (len(packet) == 64 and fields[3] == 64 and fields[4] == 3 and
                             fields[5] == self.tx_command[0] and fields[15] == self.tx_session):
-                            self.tx_error = {0:"",1:"TX frequency outside capture window",2:"Testmodus wird umgeschaltet"}.get(fields[13],"TX error")
+                            self.tx_error = {0:"",1:"TX frequency outside capture window",2:"Pluto wartet / Umschaltung läuft"}.get(fields[13],"TX error")
                             identity = (fields[15], fields[7])
                             if identity != self.tx_identity:
                                 self.tx_index = 0
@@ -244,6 +262,8 @@ class Receiver:
                     if len(packet) == 64 and fields[3] == 64 and state and fields[5] == state.command[0]:
                         with self.tx_lock:
                             if self.tx_session != fields[15]:
+                                if self.tx_session is not None and fields[15]!=self.settings.session:
+                                    self.settings.reset()
                                 self.tx_session = fields[15]
                                 # A backend restart always requires a new manual PTT press.
                                 request, hz, _ = self.tx_command
@@ -254,20 +274,20 @@ class Receiver:
                             if self.filter_session != fields[15]:
                                 self.filter_session = fields[15]
                                 request, bandwidth, center = self.filter_command
-                                self.filter_command = ((request+1)&0xffffffff, bandwidth, center)
+                                self.filter_command = ((request+1)&0xffffffff, None, None)
                                 self.filter_applied = None
                                 self.filter_acked = None
                         with self.nr_lock:
                             if self.nr_session!=fields[15]:
                                 self.nr_session=fields[15]
                                 request,percent=self.nr_command
-                                self.nr_command=((request+1)&0xffffffff,percent)
+                                self.nr_command=((request+1)&0xffffffff,None)
                                 self.nr_applied=self.nr_acked=None
                         with self.compressor_lock:
                             if self.compressor_session != fields[15]:
                                 self.compressor_session = fields[15]
                                 request, amount = self.compressor_command
-                                self.compressor_command = ((request+1)&0xffffffff, amount)
+                                self.compressor_command = ((request+1)&0xffffffff, None)
                                 self.compressor_applied = self.compressor_acked = None
                         with self.loop_lock:
                             if self.loop_session!=fields[15]:
@@ -280,6 +300,11 @@ class Receiver:
                         if not fields[13]:
                             identity = (fields[15], fields[7])
                             if state.identity != identity:
+                                if fields[4]==1:
+                                    self.zoom_assembler=Assembler(1)
+                                    while True:
+                                        try: self.zoom_frames.get_nowait()
+                                        except queue.Empty: break
                                 while True:
                                     try: state.frames.get_nowait()
                                     except queue.Empty: break
@@ -314,6 +339,7 @@ class Receiver:
                             self.offer(state.frames, audio)
                     continue
                 if fields[4] == 1:
+                    if self.applied_hz is None or fields[8]!=self.applied_hz: continue
                     frame = self.zoom_assembler.push(packet)
                     if frame is not None:
                         self.offer(self.zoom_frames, frame)
@@ -396,6 +422,11 @@ class Receiver:
                 self.tx_error = str(exc)
 
     def close(self):
+        deadline=time.monotonic()+1
+        while self.settings.values is not None and (self.settings.preferences or self.settings.patch is not None) and time.monotonic()<deadline:
+            try: self.settings.send(self.sock)
+            except OSError: break
+            time.sleep(.02)
         self.set_loop(0)
         with self.tx_lock:
             if self.tx_session is not None:
@@ -522,15 +553,24 @@ def gui(args):
     player = None if args.no_audio else AudioPlayer()
     receiver = Receiver(args.host, args.port, parse_frequency(args.rx_frequency), player.add if player else None, rx2_hz=parse_frequency(args.rx2_frequency), tx_hz=parse_frequency(args.tx_frequency))
     history, zoom_history = [], []
-    wheel_step_hz=getattr(args,'wheel_step_hz',10)
+    wheel_step_hz=getattr(args,'wheel_step_hz',None) or 10
+    ui_settings_generation=0
+    ui_settings_syncing=True
     title = tk.Label(root, text=f"QO100_TRX2 — {args.host}:{args.port}", bg="#0b1321", fg="#e8edf7", font=("sans", 15))
     title.pack(pady=8)
     controls = tk.Frame(root, bg="#0b1321")
     controls.pack()
     floor = tk.DoubleVar(value=-100)
+    def floor_changed(value):
+        if not ui_settings_syncing: receiver.settings.save_preferences(gui_display_floor=float(value))
     tk.Label(controls, text="Display floor (dBFS)", bg="#0b1321", fg="#a4b5cd").pack(side="left")
-    tk.Scale(controls, from_=-160, to=-40, resolution=5, orient="horizontal", variable=floor,
-             length=300, bg="#0b1321", fg="#e8edf7", highlightthickness=0).pack(side="left")
+    tk.Scale(controls, from_=-160, to=-40, resolution=.1, orient="horizontal", variable=floor,
+             name="display_floor",command=floor_changed,length=260, bg="#0b1321", fg="#e8edf7", highlightthickness=0).pack(side="left")
+    def open_settings():
+        from settings_dialog import show_settings
+        show_settings(root,receiver,release_ptt)
+    settings_button=tk.Button(controls,name="settings",text="Einstellungen",command=open_settings,state="disabled")
+    settings_button.pack(side="left",padx=6)
     tuning = tk.Frame(root, bg="#0b1321")
     tuning.pack()
     tk.Label(tuning, text="RX1 MHz (USB / Audio)", bg="#0b1321", fg="#e8edf7").pack(side="left")
@@ -549,9 +589,13 @@ def gui(args):
     if player:
         gain = tk.DoubleVar(value=4)
         player.volume = 4
+        def gain_changed(value):
+            player.volume=float(value)
+            if not ui_settings_syncing and receiver.loop_mode!=LOOP_AUDIO:
+                receiver.settings.save_preferences(gui_audio_gain=float(value))
         tk.Label(tuning, text="Audio gain", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=8)
-        tk.Scale(tuning, from_=0, to=20, orient="horizontal", variable=gain, length=200,
-                 command=lambda value: setattr(player,"volume",float(value)), bg="#0b1321", fg="#e8edf7").pack(side="left")
+        tk.Scale(tuning, from_=0, to=20, resolution=.1, orient="horizontal", variable=gain, length=200,
+                 name="audio_gain",command=gain_changed, bg="#0b1321", fg="#e8edf7").pack(side="left")
     filter_controls = tk.Frame(root, bg="#0b1321")
     filter_controls.pack(pady=3)
     filter_bw = tk.IntVar(value=3900)
@@ -615,6 +659,8 @@ def gui(args):
     def nr_changed(value=None):
         nonlocal nr_after
         if nr_syncing or not nr_ready: return
+        if not ui_settings_syncing and nr_strength.get()>0:
+            receiver.settings.save_preferences(gui_nr_strength=nr_strength.get())
         if nr_after is None: nr_after=root.after(50,send_nr)
     nr_switch=tk.Checkbutton(presets,name="rx1_nr_enabled",text="RX1 NR",variable=nr_enabled,
                             command=nr_changed,bg="#0b1321",fg="#e8edf7",selectcolor="#243348",state="disabled")
@@ -682,6 +728,8 @@ def gui(args):
     offset_label = tk.Label(tx_controls, name="tx_offset", text="", bg="#0b1321", fg="#ffb75c")
     offset_label.pack(side="left",padx=5)
     def update_offset_label():
+        if receiver.channels[1].command[1] is None or receiver.tx_command[1] is None:
+            offset_label.configure(text="Einstellungen werden geladen …");return
         if receiver.loop_mode==LOOP_RF:
             offset_label.configure(text="HF-Loop: RX1 folgt TX")
             return
@@ -797,12 +845,33 @@ def gui(args):
     status.pack(fill="x", padx=12, pady=6)
     last_frame = 0
     last_floor = floor.get()
+    tick_timer=close_timer=None
 
     def tick():
+        nonlocal tick_timer
         nonlocal last_frame, last_floor, filter_ready, filter_syncing, last_filter_applied
         nonlocal compressor_ready, compressor_syncing, last_compressor_applied
         nonlocal nr_ready,nr_syncing,last_nr_applied
         nonlocal loop_previous,loop_previous_generation,loop_saved_gain
+        nonlocal ui_settings_generation,ui_settings_syncing,wheel_step_hz
+        settings_values=receiver.settings.values
+        if settings_values is not None and receiver.settings_generation!=ui_settings_generation:
+            ui_settings_syncing=True
+            frequency.set(mhz_text(receiver.channels[1].command[1]))
+            frequency2.set(mhz_text(receiver.channels[2].command[1]))
+            tx_frequency.set(mhz_text(receiver.tx_command[1]))
+            floor.set(float(settings_values['gui_display_floor']))
+            if player: gain.set(float(settings_values['gui_audio_gain']));player.volume=gain.get()
+            nr_strength.set(int(settings_values['gui_nr_strength']))
+            ui_settings_generation=receiver.settings_generation
+            ui_settings_syncing=False
+            if getattr(args,'wheel_step_hz',None) is not None:
+                receiver.settings.save_preferences(gui_wheel_step_hz=args.wheel_step_hz)
+                args.wheel_step_hz=None
+        if settings_values is not None:
+            wheel_step_hz=int(settings_values['gui_wheel_step_hz'])
+            update_offset_label()
+        settings_button.configure(state="normal" if settings_values is not None and not receiver.settings.pending else "disabled")
         mode=receiver.loop_mode
         if mode is not None and (mode!=loop_previous or receiver.loop_generation!=loop_previous_generation):
             if player:
@@ -827,7 +896,7 @@ def gui(args):
         locked=mode==LOOP_RF or receiver.loop_status==3
         entry.configure(state="disabled" if locked else "normal")
         rx1_button.configure(state="disabled" if locked else "normal")
-        ptt.configure(state="disabled" if mode is None or pending else "normal")
+        ptt.configure(state="disabled" if mode is None or pending or receiver.settings.flags&6 else "normal")
         if microphone is None:
             ptt.configure(text="Audio testen halten" if mode==LOOP_AUDIO else "PTT halten — Mikrofon senden")
         changed = False
@@ -943,9 +1012,11 @@ def gui(args):
         state = "LIVE" if age < 1 else "WAITING / STALE"
         status.configure(text=f"{state} | Frames {receiver.received} | Incomplete {receiver.assembler.incomplete_frames} | Invalid {receiver.assembler.invalid_packets} | RX {receiver.applied_hz} Hz | Audio {receiver.audio_received} packets | {receiver.error} {receiver.tune_error}" +
                          (f" | Played {player.written} | {player.ppm:.0f} ppm | {player.error}" if player else " | Muted"))
-        root.after(50, tick)
+        tick_timer=root.after(50, tick)
 
     def close():
+        if tick_timer is not None: root.after_cancel(tick_timer)
+        if close_timer is not None: root.after_cancel(close_timer)
         if filter_after is not None: root.after_cancel(filter_after)
         if compressor_after is not None: root.after_cancel(compressor_after)
         if nr_after is not None: root.after_cancel(nr_after)
@@ -975,13 +1046,14 @@ def gui(args):
 
     root.protocol("WM_DELETE_WINDOW", close)
     if args.seconds:
-        root.after(int(args.seconds * 1000), close)
+        close_timer=root.after(int(args.seconds * 1000), close)
     tick()
     root.mainloop()
     return 0
 
 
 def parse_frequency(text):
+    if text is None: return None
     value = Decimal(text.replace(",",".")) * 1000000
     if not value.is_finite() or value != value.to_integral_value() or value <= 0 or value > 10**12:
         raise ValueError("Frequency must be positive MHz with at most six decimal places")
@@ -990,11 +1062,11 @@ def parse_frequency(text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rx-frequency", default="10489.900000", help="USB carrier frequency in MHz")
-    parser.add_argument("--tx-frequency", default="2400.400000", help="Independent USB uplink carrier in MHz")
-    parser.add_argument("--rx2-frequency", default="10489.600000", help="Independent RX2 USB carrier in MHz (monitor only)")
+    parser.add_argument("--rx-frequency", help="Override backend RX1 frequency in MHz")
+    parser.add_argument("--tx-frequency", help="Override backend TX frequency in MHz")
+    parser.add_argument("--rx2-frequency", help="Override backend RX2 frequency in MHz")
     parser.add_argument("--no-audio", action="store_true", help="Disable soundcard playback")
-    parser.add_argument("--wheel-step-hz",type=int,default=10,help="TX offset change per wheel notch over either waterfall (Hz)")
+    parser.add_argument("--wheel-step-hz",type=int,help="Override stored TX mouse-wheel step (Hz)")
     parser.add_argument("--audio-report", type=Path, help="Write playback test statistics on GUI close")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=40900)
@@ -1007,7 +1079,7 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.port <= 65535 or args.frames < 1 or args.timeout <= 0:
         parser.error("Invalid port, frame count or timeout")
-    if not 1<=args.wheel_step_hz<=1000:
+    if args.wheel_step_hz is not None and not 1<=args.wheel_step_hz<=1000:
         parser.error("wheel-step-hz must be 1..1000")
     try:
         return headless(args) if args.headless else gui(args)

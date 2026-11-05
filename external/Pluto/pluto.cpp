@@ -95,7 +95,13 @@ int main ()
 		strcpy(plutoid,p);
 	}
 
-	if(*plutoid != 'i')
+	if(!strcmp(plutoid,"usb:"))
+	{
+		char any_serial[1]={0};
+		res=pluto_get_USB(any_serial);
+		if(!res) { fprintf(stderr,"No Pluto found on USB\n");exit(1); }
+	}
+	else if(*plutoid != 'i')
 	{
 		// automatically search a pluto connected via USB
 		res = pluto_get_USB(plutoid);

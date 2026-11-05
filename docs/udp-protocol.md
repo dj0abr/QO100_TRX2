@@ -1,344 +1,167 @@
-# QTR2 UDP protocol, version 1
+# GUI-UDP-Schnittstelle · QTR2 v1
 
-One GUI-facing UDP socket: default backend `0.0.0.0:40900`. The GUI sends a
-SUBSCRIBE datagram from its receive socket and repeats it every 2 seconds.
-The backend sends SPECTRUM fragments to that datagram's source IP and port.
-Only one current subscriber; subscription expiry defaults to 8 seconds.
+Aktueller Vertrag für ein externes GUI. Alle Frequenzen sind **ganze Hz**:
+RX = QO-100-Downlink, TX = QO-100-Uplink. Hardware-/Umsetzerkorrekturen macht das Backend.
 
-All integers are big endian. No native C/C++ structs are sent.
-The header is exactly 64 bytes. Maximum datagram size: 1200 bytes.
-Python reference format: `struct.Struct("!4sBBHIIQQQIIIHHII")`.
+## Verbindung und Ablauf
 
-| Offset | Width | Field |
-|---:|---:|---|
-| 0 | 4 | ASCII magic `QTR2` |
-| 4 | 1 | Protocol version, 1 |
-| 5 | 1 | Type: 1 SUBSCRIBE, 2 SPECTRUM, 3 TUNE, 4 STATE, 5 AUDIO, 6 TX_CONTROL, 7 TX_STATE, 8 TX_AUDIO, 9 FILTER_CONTROL, 10 FILTER_STATE, 11 COMPRESSOR_CONTROL, 12 COMPRESSOR_STATE, 13 LOOP_CONTROL, 14 LOOP_STATE, 15 NR_CONTROL, 16 NR_STATE |
-| 6 | 2 | Header size, 64 |
-| 8 | 4 | Stream ID: 0 = full-band spectrum/global test control; 1 = RX1; 2 = RX2; 3 = TX; 4 = audio echo |
-| 12 | 4 | Frame ID / control request ID / audio tuning epoch, uint32 |
-| 16 | 8 | Backend Unix timestamp in nanoseconds at frame emission |
-| 24 | 8 | FFT exclusive end index / audio start index / STATE tuning epoch |
-| 32 | 8 | Display RF center frequency in Hz, unsigned 64 bit |
-| 40 | 4 | Complex sample rate in samples/s |
-| 44 | 4 | FFT size |
-| 48 | 4 | First bin index in this datagram |
-| 52 | 2 | Number of bins in this datagram |
-| 54 | 2 | Format: 1 = 0.01 dBFS; 2 = PCM16; STATE: status 0 OK, 1 out of range |
-| 56 | 4 | Total bins in the frame, equal to FFT size |
-| 60 | 4 | Backend session ID, newly generated for each backend run |
-| 64 | 2 × count | Signed big-endian spectral levels |
+- Backend: **UDP/IPv4, Port 40900** (konfigurierbar). Das GUI verwendet **denselben Socket** zum Senden und Empfangen; Antworten gehen an dessen Absender-IP/-Port. Kein eigener Audio-Port.
+- **Ein GUI-Teilnehmer**: Eine neue Anmeldung übernimmt die Verbindung. `SUBSCRIBE` alle **2 s** senden; ohne Anmeldung endet der Datenstrom nach standardmäßig **8 s**.
+- Start: `SUBSCRIBE` → `SETTINGS_CONTROL` abfragen (`session=0`) → Settings anzeigen → `TUNE` für RX1/RX2 mit geladenen Frequenzen → passende `STATE` abwarten → Audio annehmen. TX startet mit PTT aus.
+- Jede Kommandogruppe und jeder RX-Kanal hat eine eigene steigende **uint32 Request-ID** (Umlauf erlaubt). Änderung = neue ID; bei Paketverlust dieselbe Anfrage wiederholen, z. B. alle **250 ms**. ACK nach **Typ, Stream, Request und Session** zuordnen. Alte Anfragen werden ignoriert.
+- Die **Session** identifiziert einen Backend-Lauf. Bei Wechsel erneut Settings laden, Stream-Puffer/Epochen verwerfen und PTT ausschalten. Schreibkommandos tragen die aktuelle Session; Settings-Discovery erlaubt `session=0`.
 
-SUBSCRIBE has type 1, length 64, and every field after offset 7 is zero.
-SPECTRUM contains at most 568 bins per datagram. All its fragments carry the
-same frame metadata; only first-bin index, count and payload differ. For 8192
-bins this is 15 datagrams per spectrum line. The frequency of bin `k` is
-`center_hz + (k - fft_size/2) * sample_rate / fft_size`.
+## Gemeinsamer Header
 
-Levels are tone-normalized dBFS per FFT bin, clamped to -160..+20 dBFS, not PSD
-or calibrated dBm. A bin-centered complex tone with amplitude 0.5 measures
-approximately -6.02 dBFS. Hann-window coherent gain is included in normalization.
-Power averaging precedes conversion to dB.
+**64 Byte**, maximal **1200 Byte pro Datagramm**. Alle Zahlen **Big Endian**, alle nicht genannten Felder **0**. Keine C++-Structs direkt übertragen. Ab Byte 64 folgt ggf. die Nutzlast.
 
-The GUI assembles fragments using `(session_id, frame_id)`, checks consistent
-metadata, tolerates reordered and repeated fragments, and discards incomplete
-frames. No retransmission of display data. The reference client keeps at most
-4 unfinished frames for at most 0.5 seconds. A new session permits backend
-restart while the GUI remains open. The current client uses timestamps to
-discard late frames, assuming the backend wall clock does not jump backwards.
+| Offset | Byte | Name | Bedeutung je Nachricht |
+|---:|---:|---|---|
+| 0 | 4 | magic | ASCII `QTR2` |
+| 4 | 1 | version | `1` |
+| 5 | 1 | type | Nachrichtentyp, siehe unten |
+| 6 | 2 | header_size | `64` |
+| 8 | 4 | stream | `0` Gesamt-FFT/Settings/Loop, `1` RX1/Zoom, `2` RX2, `3` TX, `4` Audio-Echo |
+| 12 | 4 | id | Request-ID, FFT-Frame-ID oder Audio-Epoche |
+| 16 | 8 | timestamp | Sendezeit Unix-ns bei FFT/Audio/Loop-State; sonst 0 |
+| 24 | 8 | index | Sample-Index, bestätigte Epoche oder Settings-Revision |
+| 32 | 8 | frequency | Frequenz bzw. Audio-Filtermitte |
+| 40 | 4 | rate | Samples/s |
+| 44 | 4 | size | FFT-Größe bzw. Steuerwert |
+| 48 | 4 | first | Erster FFT-Bin bzw. Steuerwert/Flags |
+| 52 | 2 | count | Anzahl Werte bzw. Payload-Bytes |
+| 54 | 2 | format | Datenformat, Set/Query oder Status |
+| 56 | 4 | total | Gesamtanzahl bzw. Steuerwert |
+| 60 | 4 | session | Backend-Session |
 
-Sample counters reflect **received samples**, not hardware absolute time.
-The existing raw driver protocol has no sequence field, so loss before the
-backend cannot be counted exactly. Runtime receive-rate diagnostics expose
-sustained rate deficits. GUI-fragment loss is visible separately.
+`SUBSCRIBE` (**Typ 1**): nur magic, version, type und header_size setzen; **Byte 8–63 bleiben 0**.
 
-## Receiver control and audio (v0.2)
+## Settings lesen und speichern
 
-Spectrum stream 0 is unchanged. Stream 1 is the zoom: center is the confirmed
-USB carrier, sample rate 75000, FFT size 8192. The GUI displays only +/-25 kHz
-of these bins. Same fragmentation and dBFS encoding as the wide spectrum.
+| Nachricht | Stream | Felder / Payload |
+|---|---:|---|
+| **17 SETTINGS_CONTROL: lesen** | 0 | `id=Request`, `session=0` oder aktuelle Session; Rest 0, keine Payload |
+| **17 SETTINGS_CONTROL: ändern** | 0 | `id=neuer Request`, `session=aktuell`, `index=zuletzt gelesene Revision`, `format=1`; `size=count=total=Payload-Bytes` |
+| **18 SETTINGS_STATE** | 0 | `id=Request`, `session=aktuell`, `index=Revision`, `format=Status`, `first=Flags`; `size=count=total=Payload-Bytes` |
 
-TUNE: a 64-byte header, type 3, stream 1. Frame ID holds the request sequence;
-center_hz is the requested absolute downlink frequency in Hz. Other fields are
-zero. Only the current subscriber may tune. The GUI repeats its newest request
-at subscription renewal until acknowledged. Older request IDs are ignored.
+Payload: **UTF-8 `schlüssel=wert\n`**, maximal 1136 Byte. Dezimalpunkt `.` verwenden.
+Antwort = vollständiger Snapshot; Änderung = **nur geänderte Schlüssel**. Beispiel:
 
-STATE: 64 bytes, type 4, stream 1, echoed request ID, center_hz = actual tuning.
-The sample-index field holds the current audio epoch, format/status = 0 for OK
-or 1 if the requested zoom leaves the capture window. Session ID identifies the
-backend run. The epoch increments only when the frequency actually changes.
-Repeated requests do not reset filters or audio. Rejected commands retain the
-previous frequency. UI clients should display confirmed backend state.
+```text
+rx_correction_hz=123
+rx1_nr_percent=60
+```
 
-AUDIO: type 5, stream 1, frame ID = tuning epoch, format = 2. Sample rate 12000,
-fft_size and first_bin = 0. Bin-count and total-count fields both hold the number
-of mono PCM samples. Sample index is the **start** of this packet in the epoch.
-Payload is signed PCM16 big endian, not dB data; 32768 represents unit amplitude.
-The normal count is 240: 20 ms, 480 PCM bytes, 544 bytes including header.
-Audio is not fragmented. The GUI accepts only the session/epoch acknowledged
-by STATE, drops duplicate/late packets, buffers reordering and fills missing
-sample intervals with silence. Playback gain is local to the GUI. Audio is
-transported over the same GUI socket; no audio-specific UDP port is added.
+Status: **0** gespeichert/OK, **1** ungültig, **2** Revision veraltet (Snapshot neu einlesen, Änderung mit neuer ID erneut senden), **3** Speicherfehler, **4** Hardware-Umschaltung, **5** Hardwarefehler/Rückkehr, **6** belegt.
+Flags (`first`): Bit **0** laufende Betriebsänderungen noch nicht gespeichert, Bit **1** Hardware-Umschaltung/Rückkehr läuft, Bit **2** Hardware offline. Solange Bit 1 gesetzt ist, weiter auf die endgültige Bestätigung warten.
 
-Audio counters restart at zero on retune. The new epoch flushes playback
-history and the clock resampler. The GUI's bounded jitter buffer and slow
-sample-rate correction accommodate network jitter and different soundcard
-and Pluto clocks. No retransmission of live audio.
+Änderungssätze werden vollständig validiert. Fehler lassen die bisherigen Werte bestehen.
+**OK auf eine Settings-Änderung bestätigt dauerhafte Speicherung**; Hardwareänderungen zusätzlich erst nach erfolgreichem Start mit frischen IQ-Daten. Abstimm-/DSP-Kommandos unten speichern spätestens nach ca. 500 ms; unveränderte Heartbeats schreiben nichts. PTT und Loops bleiben flüchtig.
 
-## Two simultaneous USB receivers (v0.3)
+| Schreibbarer Schlüssel | Wert / Bereich |
+|---|---|
+| `pluto_connection`, `pluto_ip` | `usb` oder `network`; IPv4-Adresse |
+| `lnb_reference_hz` | Standard `25000000`; 10–30 MHz, resultierender LO muss gültig bleiben |
+| `rx_correction_hz`, `tx_correction_hz` | −1000000…+1000000 Hz; positiv erhöht den jeweiligen Hardware-LO |
+| `pluto_tx_base_hz` | Nominale Pluto-TX-Mitte, Standard `1290250000` |
+| `tx_attenuation_db` | 0…40 dB, Schritte 0.25 dB |
+| `initial_rx_hz`, `initial_rx2_hz`, `initial_tx_hz` | Aktuelle und nächste Startfrequenzen; RX-/TX-Mitte ±275000 Hz |
+| `rx1_filter_bandwidth_hz`, `rx1_filter_center_hz` | BW 500…3900 Hz; beide Filterränder innerhalb 100…4000 Hz |
+| `rx1_nr_percent`, `gui_nr_strength` | NR 0…100 % (0 = aus); gemerkter GUI-Reglerwert 1…100 |
+| `tx1_compressor_percent` | 0…140 %, 100 = Normalbetrieb, 0 = Bypass |
+| `gui_audio_gain`, `gui_display_floor` | GUI-Wiedergabe 0…20 (0 = stumm); Anzeige −160…−40 dBFS |
+| `gui_wheel_step_hz` | 1…1000 Hz |
 
-Stream 2 adds independent RX2 control and audio. TUNE, STATE and AUDIO retain
-their existing v1 layouts, with stream_id=2. Stream 1 is unchanged. Only RX1
-produces a zoom spectrum in this version; there is no stream-2 SPECTRUM.
+Nur lesbar: `settings_schema=1`, `rx_center_hz`, `tx_center_hz`, `pluto_rx_hz`, `pluto_tx_hz`, `hardware_online` (0/1), optional `error`/`hardware_error`.
+Berechnung: `Pluto RX = rx_center_hz − lnb_reference_hz × 390 + rx_correction_hz`; `Pluto TX = pluto_tx_base_hz + tx_correction_hz`. Endgültige LOs: 70 MHz…6 GHz. `pluto_*_hz` sind berechnete Sollwerte.
+GUI-Schlüssel werden vom Backend gespeichert, aber **vom GUI ausgeführt**. Keine lokale Settings-Datei des GUIs nötig.
 
-A client subscribes once, then sends/retries its latest TUNE for each channel.
-Each channel owns its request sequence, confirmed frequency, audio epoch and
-sample counter. Clients must match STATE by **both stream ID and request ID**,
-and AUDIO by **stream ID, session ID and audio epoch**. Equal request or epoch
-numbers on different channels do not imply shared state. Retuning one channel
-must not flush, retune or restart the other. Unsupported stream IDs are rejected.
+## RX, FFT und Audio
 
-Both AUDIO streams use 12000 Hz mono PCM16, 240 samples/20 ms, and share the
-existing GUI UDP socket. RX2 has the same +100..4000 Hz USB selection but no
-AGC, compression or digital decoding. In the test GUI only stream 1 is routed
-to ALSA default. Stream 2 enters a separate bounded queue and is monitored by
-packet/sample counts, RMS and peak level. It is then discarded. Test captures
-can store RX2 audio as a separate 12-kHz WAV file.
+| Typ | Stream | Felder / Payload |
+|---|---:|---|
+| **3 TUNE** → | 1/2 | `id=Request`, `frequency=RX-Träger`, `session=aktuell` |
+| **4 STATE** ← | 1/2 | `id=Request`, `frequency=bestätigter Träger`, `index=Audio-Epoche`, `rate=12000`, `format=0 OK / 1 außerhalb des Fensters` |
+| **2 SPECTRUM** ← | 0/1 | `id=Frame`, `timestamp`, `index=exklusives Sample-Ende`, `frequency=Mitte`, `rate`, `size=total=FFT-Größe`, `first`, `count`, `format=1`; Payload: `count × int16` |
+| **5 AUDIO** ← | 1/2/4 | `id=Epoche`, `timestamp`, `index=Sample-Start`, `frequency=Träger`, `rate=12000`, `count=total=240`, `format=2`; Payload: **240 × int16 PCM**, 544 Byte inkl. Header |
 
-## USB transmitter (v0.4)
+**FFT:** Stream 0 = 600 kHz Gesamtspektrum; Stream 1 = 75 kHz, GUI zeigt davon ±25 kHz um die RX1-Frequenz. Standard-FFT jeweils 8192 Bins. Bin `k`: `frequency + (k − size/2) × rate/size`.
+Pegel = vorzeichenbehafteter int16 / **100 dBFS**. Maximal 568 Bins pro Datagramm.
+Fragmente anhand **(Session, Stream, Frame-ID)** sammeln; Metadaten müssen übereinstimmen.
+Erst anzeigen, wenn alle Bins vorliegen; Duplikate ignorieren, alte/unvollständige Frames verwerfen (z. B. nach 500 ms).
 
-TX shares the subscribed GUI socket and uses stream 3. All controls and audio
-are accepted only from the current subscriber. TX_CONTROL additionally carries
-the current backend session ID (learned from RX STATE). A backend restart must
-reset client PTT to OFF; it requires a new manual PTT press.
+**Audio:** 12 kHz, mono, PCM16 Big Endian; Float-Normierung durch 32768. RX1 = Sprache, RX2 = unabhängiger Kanal für externe Digitalprogramme. Nur Audio mit bestätigter **(Session, Stream, Epoche)** annehmen; Epochen-/Sessionwechsel leert Puffer. Epochen können auch bei Hardware-/Loop-Umschaltung wechseln.
+Sample-Indizes erkennen Verlust, Duplikate und Reihenfolge. Für die Soundkarte: Jitterpuffer, Lücken mit Stille füllen und Soundkartentakt durch leichtes Resampling ausgleichen. FFT und Audio werden nicht nachgesendet.
+`STATE` kann auch spontan eine neue Epoche melden. Letztes `TUNE` mit gleicher ID z. B. jede Sekunde wiederholen, damit verlorene Epochenmeldungen nachgeholt werden.
 
-TX_CONTROL (6), 64 bytes: frame_id = monotonic uint32 request, center_hz =
-absolute **uplink** USB carrier in Hz, format = 0 PTT off / 1 PTT on,
-session_id = current backend session. Other fields zero. Valid carriers lie
-within tx_center_hz ±275000 Hz. Repeat the latest control at least every 500 ms.
-After 1500 ms without a valid control the backend clears PTT. Older request IDs
-are ignored; repeated identical commands renew the lease without resetting DSP.
-A changed command requires a new request ID. Rejected frequencies retain state.
+## TX
 
-TX_STATE (7), 64 bytes, echoes request and actual frequency. sample_index =
-TX epoch, session_id = backend session, sample_rate = 12000, format = 0 OK /
-1 out of range. first_bin = actual PTT (0/1), fft_size = audio FIFO samples
-(including resampler buffering), bin_count = estimated driver FIFO blocks,
-total_count = signed int32 clock correction in ppm (two's complement).
-The backend sends acknowledgments and periodic telemetry every 250 ms. Match
-both request and session. Epoch changes on PTT transitions, retunes or forced
-mute. Resending a timed-out ON command cannot re-key; increment request after
-a new manual PTT press. PTT is a data gate, not a hardware/GPIO command.
+| Typ | Stream | Felder / Payload |
+|---|---:|---|
+| **6 TX_CONTROL** → | 3 | `id=Request`, `session=aktuell`, `frequency=TX-Träger`, `format=0 PTT aus / 1 an` |
+| **7 TX_STATE** ← | 3 | `id=Request`, `index=TX-Epoche`, `frequency=bestätigt`, `rate=12000`, `format=0 OK / 1 Frequenz ungültig / 2 wartet`; `first=PTT`, `size=Audio-FIFO-Samples`, `count=Pluto-FIFO-Blöcke`, `total=vorzeichenbehaftete int32 Taktkorrektur in ppm` |
+| **8 TX_AUDIO** → | 3 | Wie AUDIO, aber `id=bestätigte TX-Epoche`, `timestamp=0`, `frequency=bestätigter TX-Träger`, `session=aktuell`; genau 240 PCM16-Samples, `index=0,240,480,…` |
 
-TX_AUDIO (8) has the same PCM16 layout as RX AUDIO, with stream=3 and exactly
-240 samples at 12000 Hz. frame_id = acknowledged TX epoch, center_hz = confirmed
-uplink carrier, session_id = backend session, sample_index = start index
-(multiple of 240). The index advances by 240 per captured packet and resets
-only when the acknowledged epoch/session changes. Duplicate, old, misaligned,
-wrong-session and wrong-epoch audio is discarded. Clients send only after the
-matching successful ON acknowledgment. No retransmission. Packet gaps are
-silence; after 200 ms without accepted audio the backend clears audio/DSP
-history and emits exact zeros until the FIFO has refilled.
+PTT nur nach Benutzeraktion einschalten. **Erst nach passendem OK mit `first=1` Audio senden**, in 20-ms-Blöcken; Index bei neuer TX-Epoche wieder 0. `TX_CONTROL` mindestens alle **500 ms** wiederholen, auch während Audio fließt. Nach **1,5 s** ohne gültiges Control fällt PTT ab; erneutes Einschalten benötigt eine **neue Request-ID**.
+Keine Audiopakete seit 200 ms → Stille; kurze Paketlücken werden ebenfalls mit Stille gefüllt. RX und TX sind unabhängig. Hardwareänderungen erzwingen PTT aus.
 
-## RX1 variable passband (v0.6)
+## Filter, Kompressor, NR und Test-Loops
 
-FILTER_CONTROL (9) and FILTER_STATE (10) use the existing subscribed GUI socket.
-Both are exactly 64 bytes and support **stream 1 only**. There is no RX2/TX
-filter control. Bandwidth and position are audio frequencies relative to the
-USB carrier; they do not change RF tuning or the zoom center.
+Alle Nachrichten: 64 Byte, aktuelle Session, eigene Request-ID. **Control:** `format=0` fragt ab (alle Wertefelder 0); `format=1` setzt Werte laut Tabelle. Beim Set von Filter/Kompressor/NR zusätzlich `rate=12000`. **State:** bestätigt die tatsächlich angenommenen Werte; `format=0 OK / 1 ungültig`.
 
-FILTER_CONTROL: frame_id = monotonic uint32 request, session_id = current
-backend session learned from RX STATE. The format field selects **0=query** or
-**1=set**. For a query, center_hz, sample_rate and fft_size must be zero.
-For a set, center_hz holds the **audio passband center in Hz**, sample_rate is
-12000, and fft_size holds the **bandwidth in Hz**. Timestamp, sample_index,
-first_bin, bin_count and total_count must be zero in both modes.
+| Control → State | Stream | Werte beim Set → bestätigte State-Felder |
+|---|---:|---|
+| **9 FILTER_CONTROL → 10 FILTER_STATE** | 1 | `size=BW`, `frequency=Audio-Mitte` → dieselben Werte, `index=RX1-Epoche`, `rate=12000` |
+| **11 COMPRESSOR_CONTROL → 12 COMPRESSOR_STATE** | 3 | `size=0…1400` (**Zehntelprozent**, 1000 = 100 %) → `size`, `index=TX-Epoche`, `rate=12000`; `first=Verdichtung`, `total=Spitzenbegrenzung`, beide in 0.001 dB |
+| **15 NR_CONTROL → 16 NR_STATE** | 1 | `size=0…100` (**Prozent**, 0 = Bypass) → `size`, `index=RX1-Epoche`, `rate=12000` |
+| **13 LOOP_CONTROL → 14 LOOP_STATE** | 0 | `size=0 Normal / 1 Audio / 2 HF` → `size=aktuell`, `first=Zielmodus`, `index=Generation`, `frequency=RX-LO-Sollwert`, `rate=600000`, `timestamp` |
 
-Allowed bandwidth: 500..3900 Hz, in integer-Hz steps. Both edges
-`center_hz ± bandwidth/2` must remain inside 100..4000 Hz. The center is an
-integer number of Hz; odd bandwidths have half-Hz edges. Defaults are BW 3900,
-center 2050 (full 100..4000 Hz); BW 500, center 700 selects 450..950 Hz.
+Filter: `Mitte ± BW/2` innerhalb 100…4000 Hz. NR wirkt nur auf RX1; Regler 100 erlaubt bis zu 30 dB Rauschdämpfung.
+Loop-Status zusätzlich: **2** HF-Modus nicht verfügbar, **3** Umschaltung läuft. Auf Status 0 und Zielmodus warten; neue Generation leert FFT-/Wasserfallpuffer und verwirft ältere FFT-Zeitstempel.
+**Audio-Loop:** PTT aktiviert Mikrofonpfad, `TX_AUDIO` kommt unverändert als **AUDIO Stream 4** zurück (TX-Epoche, Uplinkfrequenz); HF bleibt stumm. Dabei Stream 4 statt RX1 abspielen.
+**HF-Loop:** Empfänger-LO folgt TX-LO, RX1 folgt TX-Abstimmung; Selbsthören benötigt HF-Kopplung. Normalmodus stellt RX wieder her. Moduswechsel löscht PTT; GUI-Abbruch/Lease-Ende stellt Normal wieder her.
 
-FILTER_STATE: echoed request and backend session, sample_index = current RX1
-audio epoch, center_hz = accepted target audio center, sample_rate = 12000,
-fft_size = accepted target bandwidth. Format/status is **0=OK** or
-**1=out of range**. Timestamp, first_bin, bin_count and total_count are zero,
-as in RX STATE. An invalid set retains the previous target
-and returns it with status 1. Malformed packets, other streams, wrong sessions
-and older requests are ignored. Duplicate requests acknowledge current state
-and the original request status without applying a changed payload.
+## Kurze C++-Beispiele
 
-The filter has its own request sequence, independent of RX/TX tuning. New
-subscribers or renewed subscriptions after expiry may start a fresh sequence;
-the selected filter itself is retained. Query first to display the current
-backend/configuration state. Repeat the latest command until acknowledged
-(the test GUI repeats it every second). Match ACKs by request and session.
+Nur C++17/POSIX nötig: [Hilfsfunktionen](../examples/qtr2.hpp), [vollständiges Empfangsbeispiel](../examples/gui_udp.cpp).
+Es liest Settings, stimmt beide RX ab, dekodiert PCM-Blöcke und zählt FFT-Fragmente; PTT bleibt aus.
 
-An ACK describes the accepted target; the DSP crossfades over 20 ms without
-resetting RX1 audio indices, epoch, NCO, resampler or zoom. The replacement
-513-tap liquid FIR is initialized with the preceding 512 raw 12-kHz complex
-samples. Rapid updates coalesce to the latest target after the current fade,
-so convergence may take up to about 40 ms plus processing/transport delay.
-RX2 and TX retain their fixed nominal 100..4000-Hz passband. Both RX audio
-streams continue to use 12000-Hz PCM16 regardless of the selected RX1 width.
+```sh
+g++ -std=c++17 -O2 -Wall -Wextra examples/gui_udp.cpp -o /tmp/gui_udp_example
+/tmp/gui_udp_example 127.0.0.1 --seconds 5
+# Optional: neue RX1-Frequenz oder dauerhaft gespeicherte Änderung:
+/tmp/gui_udp_example 127.0.0.1 --rx-hz 10489748500 --set gui_audio_gain=5.5
+```
 
-## TX1 speech compressor (v0.7)
+**Anmelden, Settings laden, RX1 abstimmen:** `rpc()` wiederholt Requests und erneuert SUBSCRIBE während des Wartens.
 
-COMPRESSOR_CONTROL (11) and COMPRESSOR_STATE (12) use **stream 3 (modulator 1)**
-on the existing subscribed socket. Both are exactly 64 bytes. They have their
-own monotonic uint32 request sequence, independent of PTT, TX tuning and RX
-filter controls. A compressor command never asserts PTT or renews its lease.
+```cpp
+#include "qtr2.hpp"
+using namespace qtr2;
+Udp udp("192.168.10.20");                         // IP des BACKENDS
+const auto snapshot = rpc(udp, settings(1), 18); // Query mit Session 0
+const auto sid = uint32_t(get(snapshot, 60, 4));
+auto tune = header(3, 1, 1, sid);
+put(tune, 32, std::stoull(values(snapshot).at("initial_rx_hz")), 8);
+const auto rxAck = rpc(udp, tune, 4);             // index = Audio-Epoche
+```
 
-CONTROL: frame_id = request, session_id = current backend session, format =
-**0=query / 1=set**. For a set, sample_rate = 12000 and fft_size = amount
-**0..1400**, representing **0.0..140.0 percent** in 0.1-% steps. Zero is a valid
-set (speech bypass); a query has both fields zero and format 0. All other
-fields, including center_hz, timestamp and sample_index, must be zero.
+**Dauerhaft ändern** (bei Status 2 Snapshot/Revision übernehmen, neue ID vergeben und erneut versuchen):
 
-STATE: echoed request/session, sample_index = current TX epoch, center_hz = 0,
-sample_rate = 12000, fft_size = accepted target amount, format/status =
-**0=OK / 1=out of range**. first_bin = current speech gain reduction in
-**milli-dB**, total_count = current SSB peak-limiter reduction in **milli-dB**
-(both nonnegative uint32). Timestamp and bin_count are zero. The two meter
-values reflect DSP state at acknowledgment time, rather than held maxima.
+```cpp
+auto change = settings(2, sid, get(snapshot, 24, 8), "rx1_nr_percent=60\n");
+auto saved = rpc(udp, change, 18);                // format muss 0 sein
+```
 
-Query first to honor the configured startup value (`tx1_compressor_percent`,
-default 100). The test GUI exposes 60..140 percent, with a **100% Normal**
-button; lower values remain available through config/API for compatibility and
-bypass. It repeats its latest query/set every 250 ms for ACKs
-and metering. Match request and session. Invalid amounts retain the preceding
-target and acknowledge status 1. Malformed packets, other streams, wrong
-sessions and stale requests are ignored. A duplicate request returns current
-state and its original status without reapplying a modified payload. Subscriber
-changes/expired subscriptions reset request sequencing while retaining amount.
+**TX ankoppeln** (in den laufenden GUI-Empfangs-/Mikrofonpfad einfügen):
 
-An ACK describes the accepted target. The amount slews at 100 percentage points
-per 20 ms at 12 kHz (16 ms across the GUI range, up to 28 ms for 0..140%);
-TX epoch, audio indices, FIFO and PTT remain unchanged. Retune,
-PTT transitions and missing-audio resets clear compressor/limiter history while
-retaining amount. Amount 0 bypasses speech gain; the final SSB peak limiter
-remains active with the same fixed 5-ms delay at every setting. TX_AUDIO format,
-sample rate and packet size are unchanged. No RX stream is processed here.
-
-## Test loops (v0.8)
-
-LOOP_CONTROL (13) is a 64-byte header, **stream 0**, request ID in frame_id,
-backend session in session_id. Format **0=query / 1=set**. fft_size carries
-the mode for a set: **0=normal, 1=audio loop, 2=RF loop**; a query has fft_size
-zero. Every remaining field is zero. Modes are mutually exclusive.
-
-LOOP_STATE (14), 64 bytes, stream 0, echoed request/session: fft_size = actual
-mode, first_bin = target mode, center_hz = actual Pluto RX **LO** in Hz,
-sample_index = mode generation, sample_rate = 600000. Timestamp is the backend
-emission time in Unix nanoseconds. bin_count and total_count are zero.
-Format/status: **0=OK, 1=invalid mode, 2=RF loop unavailable in synthetic mode,
-3=switching hardware**. During switching the actual mode/LO remain the last
-confirmed values; wait for status 0 before using the new path.
-
-Only the current subscriber and backend session may control loops. The request
-sequence is independent of other controls; stale requests are ignored, duplicate
-requests return current state without repeating the action. Invalid commands
-retain state. The GUI repeats its latest command/query every 250 ms. No extra
-lease is required beyond ordinary SUBSCRIBE renewal. New subscribers and an
-expired subscription restore normal mode. Closing the test GUI also explicitly
-requests normal. Backend restart always begins in normal mode.
-
-A changed mode clears PTT, increments TX epoch and flushes TX history. A fresh
-manual PTT request is required. Test commands never key TX. TX_CONTROL while a
-hardware switch is pending returns status **2=busy**, with PTT off. The GUI
-disables PTT during switching. Mode 0 or 1 requests require no driver restart
-unless they leave RF mode.
-
-### Audio loop, mode 1
-
-Use ordinary TX_CONTROL to open the microphone gate, then send TX_AUDIO with
-the confirmed TX session/epoch/frequency. The backend immediately returns its
-PCM payload unchanged as **AUDIO (5), stream 4**: sample rate 12000, PCM16,
-240 samples, frame_id = TX epoch, sample_index = the original TX audio index,
-center_hz = confirmed **uplink** frequency. Timestamp is the echo emission time.
-No backend resampling, compression, modulation or audio FIFO is applied here.
-The TX IQ stream remains exact zeros even while the microphone gate is on.
-
-Wrong sessions/epochs/frequencies, invalid alignment and duplicate input packets
-are rejected. A bounded 64-packet index window permits reordered input; the echo
-keeps arrival order and the client jitter buffer reorders playback. Missing
-input packets are not retransmitted. Receiver streams 1/2 and spectra continue
-normally; clients select stream 4 instead of RX1 for speaker playback. Playback
-identity must include **stream, session and epoch**, so equal epoch numbers on
-RX1 and the echo cannot mix audio. Flush playback on a mode change and on
-releasing the audio-test button. The test GUI uses unity gain for this raw test.
-
-### RF loop, mode 2
-
-The backend restarts its owned local driver with `RX_FREQ = configured TX_FREQ`.
-All traffic to that driver remains loopback-only on the existing ports. Before
-streaming, the driver reads back and verifies RX/TX LO values. Mode completion
-is acknowledged only after fresh IQ from the new process. FIFO feedback sequence
-state and spectral histories are reset. Both RX audio epochs change because
-the shared hardware capture band has changed.
-
-RX1 automatically tunes to the digital TX offset, independently of its stored
-normal TUNE request. Its STATE/AUDIO/zoom frequency is the equivalent downlink
-`rx_center_hz + tx_frequency - tx_center_hz`. Further TX tuning updates RX1's
-DSP/epoch and zoom; the physical RX LO stays equal to the TX LO. RX2 uses the
-same test-band IQ. Normal TUNE requests are retained for restoration; the test
-GUI disables RX1 tuning/clicks in RF mode and permits TX wheel tuning.
-
-Leaving RF mode restarts the driver with configured normal `pluto_rx_hz` and
-restores the stored RX tuning. Mode and LO changes are temporary; normal config,
-filters and compressor settings remain unchanged. Use the mode-switch timestamp
-as a lower bound for accepting spectrum frames after a hardware band change;
-late spectra from the preceding band must be discarded. RF self-listening needs
-the actual coupled RF signal at the RX input.
-
-## Local Pluto direct TX transport
-
-Only loopback: backend -> 127.0.0.1:40808, driver status -> 127.0.0.1:40810.
-Generated driver config selects TX_RAW_IQ=1. Legacy 32-bit/interpolated/marker
-transport remains available only when that option is absent or zero.
-
-Each 20 ms block contains 24000 complex I16/Q16 little-endian samples at
-1200000 samples/s (96000 bytes). Two UDP datagrams each carry a 16-byte header:
-ASCII PTXI, uint32 block sequence, uint32 byte offset, uint32 total bytes;
-header integers big endian. Each carries 48000 payload bytes. The driver
-accepts consecutive offsets of a new sequence, enqueues only complete blocks,
-and discards partial, duplicate or old blocks. Loopback transport needs no
-network MTU constraint. A lost fragment loses the block rather than mixing IQ.
-
-After every hardware push: 16-byte status, ASCII PTXS, uint32 sequence,
-uint32 filled FIFO blocks, uint32 usable FIFO capacity (8), all big endian.
-The backend discards stale statuses and fills toward capacity/2. At startup,
-audio absence, or empty FIFO, the driver pushes zeros. Hardware push errors
-terminate the driver and are reported by backend child monitoring.
-
-## RX1 audio noise reduction (v0.9 test version)
-
-NR_CONTROL (15) and NR_STATE (16) use the existing subscribed GUI socket, only
-stream 1. Packets are exactly 64 bytes. NR never applies to RX2, TX, or audio
-loop echo stream 4. It operates after RX1 USB/bandwidth filtering at 12000 Hz;
-AUDIO packet layout/count/index and both FFT streams are unchanged.
-
-NR_CONTROL: frame_id = independent monotonic uint32 request; session_id =
-current backend session. format = 0 query / 1 set. For set, sample_rate = 12000
-and fft_size = integer NR strength in percent, 0..100. For query both fields
-are zero. timestamp, sample_index, center_hz, first_bin, count and total are zero.
-Commands from another subscriber/session, stale request IDs or other streams
-are ignored. A duplicate request re-sends the acknowledgment without reapplying
-its setting. Query and set share the same independent NR sequence.
-
-NR_STATE: echoes request/session; sample_index = current RX1 audio epoch;
-sample_rate = 12000; fft_size = accepted strength 0..100; format/status = 0 OK /
-1 invalid strength. Other fields are zero. Invalid strength retains the previous
-setting. Match both request and session. Python helpers: `nr_control(request,
-session, percent=None)` and `nr_state(packet)` in `gui/protocol.py`. The test GUI
-queries startup configuration before enabling controls, retries latest commands
-at 250 ms intervals, and shows accepted backend state.
-
-0 = PCM bypass, 1..100 = SpeexDSP maximum noise attenuation of approximately
-0.3*percent dB, rounded to an integer (minimum 1 dB, maximum 30 dB). This parameter
-is a ceiling, not a promised SNR improvement. No AGC/VAD/echo processing. The
-noise estimator stays warm during bypass; enabling/disabling fades between raw
-and processed PCM over 240 samples (20 ms), without resetting the audio counter.
-Active processing adds 240 samples of analysis delay. Retuning resets its
-history and noise estimate while retaining strength. The config startup default
-is `rx1_nr_percent = 0`; runtime settings are not persisted automatically.
+```cpp
+auto ptt = header(6, 3, 1, sid);
+put(ptt, 32, 2400400000ULL, 8); put(ptt, 54, 1, 2);
+auto txAck = rpc(udp, ptt, 7);
+// Nur bei format=0 UND first=1 senden; PTT-Control alle 500 ms erneuern!
+std::array<int16_t,240> pcm{};                    // hier 20 ms Mikrofon bei 12 kHz
+if (get(txAck,54,2)==0 && get(txAck,48,4)==1)
+    udp.send(tx_audio(uint32_t(get(txAck,24,8)), 0, get(txAck,32,8), sid, pcm));
+// Nächster Audioblock: Index 240. Beim Loslassen neue Control-ID, format=0.
+```

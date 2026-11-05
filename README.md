@@ -7,6 +7,9 @@ Das Python-Test-GUI zeigt beide Wasserfälle und spielt RX1 über die
 Default-Soundkartenausgabe ab. RX2 wird für Tests getrennt empfangen und überwacht.
 Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
 
+**Für GUI-Entwickler:** [UDP-Schnittstelle](docs/udp-protocol.md) ·
+[eigenständiges C++-Beispiel](examples/gui_udp.cpp).
+
 ## Bauen
 
 Benötigt werden Linux, CMake, ein C++17-Compiler, libiio (0.x-API),
@@ -80,7 +83,7 @@ beide Wasserfälle, TX und der direkte Audio-Loop bleiben unverändert.
 
 Konfigurationswert `rx1_nr_percent = 0` ist der Standard; erlaubt sind ganze
 Prozentwerte 0..100. Die GUI fragt den konfigurierten Wert zunächst ab. Änderungen
-über UDP werden nicht in die Datei zurückgeschrieben. Protokoll: **NR_CONTROL
+über UDP werden in `backend.settings` gespeichert; `backend.conf` bleibt die Vorgabe. Protokoll: **NR_CONTROL
 (15)** und **NR_STATE (16)** über den vorhandenen GUI-Port, nur Stream 1.
 Details stehen in [`docs/udp-protocol.md`](docs/udp-protocol.md).
 
@@ -103,15 +106,16 @@ Voreingestellt sind:
 Das Backend bindet zuerst den lokalen I/Q-Port und startet anschließend **seinen
 eigenen** Pluto-Treiber mit einer erzeugten Config-Datei. Der Pluto wird über
 `ip:192.168.10.25` angesprochen. Mit `Ctrl+C` werden Backend und Kindprozess beendet.
-Bei einem unerwarteten Treiberende oder ausbleibenden I/Q-Daten beendet sich das
-Backend mit Fehlermeldung. Bei hartem Tod des Backends erhält der Treiber unter
+Bei einem unerwarteten Treiberende oder ausbleibenden I/Q-Daten meldet das
+Backend den Fehler, sperrt TX und versucht die Verbindung erneut. Die Settings
+bleiben währenddessen über UDP erreichbar. Bei hartem Tod des Backends erhält der Treiber unter
 Linux zusätzlich ein Elternprozess-Todessignal.
 
 Der Treiber läuft im Vollduplexbetrieb mit `RX_ONLY 0` und `TX_RAW_IQ 1`.
 Das Backend erzeugt fertige IQ-Samples; der zusätzliche direkte Treibermodus
 fügt weder Markerton noch Interpolation oder Pegeländerungen hinzu. Ohne
 TX-Audio werden Nullsamples durchgehend weitergegeben. Der Treiber startet
-in `build/run/pluto-<PID>/` mit eigener Konfiguration und Diagnose-Log.
+in `build/run/pluto-<PID>-<Startnummer>/` mit eigener Konfiguration und Diagnose-Log.
 
 In einem zweiten Terminal:
 
@@ -358,8 +362,8 @@ Danach erfolgen exakte liquid-Polyphasen-Interpolation um Faktor 100 auf
 1,2 MS/s, Begrenzung der tatsächlichen SSB-Hüllkurvenspitzen und digitales Mischen auf die
 TX-Frequenz und I16/Q16-Konvertierung mit 6 dB digitaler Pegelreserve.
 Die tatsächliche AD9361-Ausgangsdämpfung steht in `tx_attenuation_db`
-(0..89,75 dB; Projektkonfiguration 0 dB für die getestete Station). Änderungen
-daran werden beim Backend-Start übernommen. Der Sende-/Empfangstest über QO-100
+(0..40 dB; Projektkonfiguration 0 dB für die getestete Station). Änderungen
+können über den Einstellungsdialog übernommen und dauerhaft gespeichert werden. Der Sende-/Empfangstest über QO-100
 wurde mit 0 dB TX-Dämpfung erfolgreich durchgeführt.
 
 Der Treiber meldet nach jedem Hardwareblock den TX-Füllstand. Das Backend
@@ -516,3 +520,74 @@ GUI-Schnittstelle.
 Die ursprünglichen Lizenzdateien und Copyright-Hinweise des Pluto-Projekts sind
 unter `external/Pluto/` unverändert enthalten. Herkunft und lokale Anpassungen:
 [`docs/pluto-upstream.md`](docs/pluto-upstream.md).
+
+## Zentrale, dauerhaft gespeicherte Settings
+
+Über **Einstellungen** im Test-GUI werden Pluto-Verbindung (**Netzwerk/IP oder
+USB**), LNB-Referenz, RX-/TX-Frequenzkorrektur, nominale Pluto-TX-Mitte,
+TX-Dämpfung **0..40 dB in 0,25-dB-Schritten** und Mausrad-Schrittweite eingestellt.
+Der Dialog zeigt die daraus berechneten Hardwarefrequenzen. **Übernehmen und
+speichern** sendet nur die geänderten Werte an das Backend; erst nach Prüfung,
+Übernahme und erfolgreicher Speicherung erscheint die Bestätigung.
+
+Das Backend ist die zentrale Ablage, auch für reine GUI-Einstellungen. Es merkt
+sich außerdem RX1-/RX2-/TX-Trägerfrequenzen, RX1-Bandbreite und Lage, NR samt
+letztem Reglerwert, TX-Kompressor, lokale Audioverstärkung und Display-Untergrenze.
+Beim Öffnen fragt das GUI zuerst diese Werte ab. Die bisherigen fest eingebauten
+GUI-Startfrequenzen überschreiben damit keine Backend-Einstellungen mehr.
+Explizite CLI-Frequenzargumente gelten weiterhin als bewusste Vorgabe.
+
+Die Vorgaben aus `config/backend.conf` werden beim Start mit der lokalen Datei
+**`config/backend.settings`** überlagert. Die Datei ist lesbarer `key=value`-Text,
+wird vom Backend atomar geschrieben und ist von Git ausgenommen. Beim Umzug die
+Datei mitkopieren. Ohne GUI verwendet das Backend dieselben gespeicherten Werte
+und berechnet die LOs bereits vor dem Start des Pluto-Treibers. Ein eigener
+Dateipfad ist über `--settings DATEI` möglich. Fehlende Dateien verwenden die
+Vorgaben; fehlerhafte Dateien werden mit einer Fehlermeldung abgewiesen.
+
+```
+Pluto RX = RX-Anzeigemitte − LNB-Referenz × 390 + RX-Korrektur
+Pluto TX = nominale Pluto-TX-Mitte + TX-Korrektur
+```
+
+Standard: 10489,750 MHz − 25 MHz × 390 = **739,750 MHz**. Eine positive Korrektur
+erhöht den jeweiligen Hardware-LO. Die endgültigen LOs müssen innerhalb
+70 MHz..6 GHz bleiben. Korrekturen sind in ganzen Hz bis ±1 MHz einstellbar.
+Die digitale Abstimmung des USB-Trägers innerhalb des Empfangs-/Sendefensters
+bleibt unabhängig von dieser Kalibrierung.
+
+Verbindungs-, LO- oder Dämpfungsänderungen starten den lokalen Pluto-Kindprozess
+kurz neu. PTT wird dabei ausgeschaltet und erfordert anschließend einen neuen
+Tastendruck. Die Bestätigung folgt erst auf frische IQ-Daten, nachdem der Treiber
+beide LOs und TX-Dämpfung zurückgelesen hat. Bei Fehlern wird die vorherige
+Konfiguration wieder gestartet. Auch bei fehlender Pluto-Verbindung bleibt der
+Settings-Endpunkt erreichbar. USB findet automatisch den ersten erkannten
+Pluto über libiio; das Kommandozeilenprogramm `iio_info` wird dazu nicht benötigt.
+
+Häufige Änderungen über die bisherigen DSP-/Abstimmkommandos werden für die
+Dateizugriffe auf höchstens einen Schreibvorgang pro 500 ms gebündelt und beim
+geordneten Beenden abschließend gespeichert. Explizite Settings-Transaktionen
+werden sofort dauerhaft gespeichert. **PTT und Test-Loops werden nicht
+wiederhergestellt**; der Start erfolgt immer mit PTT aus und Normalbetrieb.
+
+UDP: **SETTINGS_CONTROL (17)** / **SETTINGS_STATE (18)** über denselben GUI-Port,
+mit Session, eigener Request-Sequenz, Revision, Wiederholung und Bestätigung.
+Die vollständige Tabelle aller Schlüssel, Wertebereiche und Zustände steht in
+[`docs/udp-protocol.md`](docs/udp-protocol.md). Das erweiterbare Register liegt in
+`settings_values()`; Validierung und Hardwareberechnung verwenden dieselbe
+Konfigurationslogik für Datei und UDP.
+
+Tests ohne Hardware: `make test`. Optionaler echter Pluto-Test für Korrektur,
+Dämpfung, Wiederherstellung und Start ohne GUI (PTT bleibt aus):
+
+```sh
+python3 tests/test_settings_live.py
+```
+
+Vor dem Hardwaretest laufendes Backend und GUI beenden. Ergebnisse liegen unter
+`build/captures/settings-live.json` und `settings-live.log`.
+
+Der AD9361-Treiber rundet angeforderte LO-Frequenzen auf sein PLL-Raster. Die
+Rückleseprüfung erlaubt deshalb höchstens 5 Hz Abweichung und protokolliert
+Soll- und Istwert. Die Oberfläche zeigt die berechnete Sollfrequenz. Grundlage:
+[Analog Devices: LO-Steuerung](https://developer.analog.com/docs/linux/drivers/iio-transceiver/ad9361.html).

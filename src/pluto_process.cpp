@@ -15,7 +15,8 @@
 namespace qo100 {
 PlutoProcess::PlutoProcess(const Config& c, const std::filesystem::path& binary) {
     const auto exe = std::filesystem::canonical(binary);
-    directory_ = exe.parent_path().parent_path() / "run" / ("pluto-" + std::to_string(getpid()));
+    static unsigned launch=0;
+    directory_ = exe.parent_path().parent_path() / "run" / ("pluto-" + std::to_string(getpid())+"-"+std::to_string(++launch));
     std::filesystem::create_directories(directory_);
     log_ = directory_ / "pluto.log";
     std::ofstream config(directory_ / "pluto_config.txt");

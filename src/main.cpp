@@ -1,4 +1,5 @@
 #include "qo100/config.hpp"
+#include "qo100/settings.hpp"
 #include "qo100/pluto_process.hpp"
 #include "qo100/protocol.hpp"
 #include "qo100/spectrum.hpp"
@@ -60,23 +61,28 @@ int main(int argc, char** argv) {
     try {
         std::cout << std::unitbuf;
         std::filesystem::path config = QO100_DEFAULT_CONFIG;
+        std::filesystem::path settings_path;
         std::string source = "pluto";
         double duration = 0;
         for (int i = 1; i < argc; ++i) {
             std::string arg = argv[i];
             if (arg == "--help") {
-                std::cout << "qo100_backend [--config FILE] [--source pluto|synthetic] [--duration SECONDS]\n"
+                std::cout << "qo100_backend [--config FILE] [--settings FILE] [--source pluto|synthetic] [--duration SECONDS]\n"
                           << "Pluto mode automatically starts the local full-duplex driver. GUI UDP port: config/backend.conf.\n";
                 return 0;
             }
             if (i + 1 >= argc) throw std::runtime_error("Missing argument for " + arg);
             if (arg == "--config") config = argv[++i];
+            else if (arg == "--settings") settings_path = argv[++i];
             else if (arg == "--source") source = argv[++i];
             else if (arg == "--duration") duration = number(argv[++i]);
             else throw std::runtime_error("Unknown argument: " + arg);
         }
         if (source != "pluto" && source != "synthetic") throw std::runtime_error("source must be pluto or synthetic");
-        const auto c = qo100::load_config(config);
+        if(settings_path.empty()) { settings_path=config;settings_path.replace_extension(".settings"); }
+        qo100::SettingsStore settings(qo100::load_config(config),settings_path);
+        auto& c=settings.config();
+        std::cout << "Persistent settings: " << std::filesystem::absolute(settings_path) << '\n';
         if (liquid_libversion_number()!=LIQUID_VERSION_NUMBER) throw std::runtime_error("Liquid header/library mismatch");
         std::cout << "DSP: liquid-dsp " << liquid_libversion() << " (bundled, static)\n";
         struct sigaction action{};
@@ -96,6 +102,7 @@ int main(int argc, char** argv) {
             uint64_t frequency = 0;
             uint32_t epoch = 1, last_request = 0;
             bool have_request = false;
+            uint16_t command_status = 0;
             std::unique_ptr<qo100::RxChannel> dsp;
         };
         std::array<ReceiverState,2> receivers;
@@ -122,6 +129,12 @@ int main(int argc, char** argv) {
         uint32_t compressor_request=0;
         uint16_t compressor_status=0;
         bool have_compressor_request=false;
+        uint32_t settings_request=0;
+        bool have_settings_request=false;
+        uint16_t settings_status=0;
+        std::string settings_error,driver_error;
+        std::optional<qo100::Config> pending_settings;
+        bool settings_rollback=false,hardware_online=source=="synthetic",hardware_recovering=false;
         using TestLoop=qo100::TestLoop;
         TestLoop loop_mode=TestLoop::normal,loop_target=TestLoop::normal;
         uint32_t loop_request=0,loop_generation=0;
@@ -152,6 +165,17 @@ int main(int argc, char** argv) {
         auto send_loop_state=[&]() {
             send_packet(qo100::loop_state_packet(loop_request,loop_mode,loop_target,current_rx_lo,
                 loop_generation,session_id,loop_status,stamp()));
+        };
+        auto send_settings=[&](std::optional<uint32_t> reply_request=std::nullopt,std::optional<uint16_t> reply_status=std::nullopt) {
+            auto values=qo100::settings_values(c);
+            values["settings_schema"]="1";values["pluto_rx_hz"]=std::to_string(c.pluto_rx_hz);
+            values["pluto_tx_hz"]=std::to_string(c.pluto_tx_hz);values["rx_center_hz"]=std::to_string(c.rx_center_hz);
+            values["tx_center_hz"]=std::to_string(c.tx_center_hz);values["hardware_online"]=hardware_online?"1":"0";
+            const auto error=settings_error.empty()?settings.error():settings_error;
+            if(!error.empty()) values["error"]=error.substr(0,160);
+            else if(!driver_error.empty()) values["hardware_error"]=driver_error.substr(0,160);
+            send_packet(qo100::settings_state_packet(reply_request.value_or(settings_request),session_id,settings.revision(),
+                reply_status.value_or(settings_status), uint32_t(settings.dirty())|(pending_settings?2:0)|(!hardware_online?4:0),qo100::encode_settings(values)));
         };
         sockaddr_in driver{};driver.sin_family=AF_INET;driver.sin_port=htons(qo100::pluto_tx_port);
         driver.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
@@ -228,6 +252,7 @@ int main(int argc, char** argv) {
                   << "GUI subscribes via UDP " << c.gui_bind << ':' << c.gui_port << "\n";
         const auto start = Clock::now();
         auto next_synthetic = start, next_tx=start, last_iq = start, last_stats = start;
+        auto next_hardware_retry=start;
         bool received_iq = false;
         uint64_t last_samples = 0;
         std::array<uint8_t, 65536> buffer{};
@@ -236,6 +261,45 @@ int main(int argc, char** argv) {
             rx.dsp->tune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
             if(i==0) zoom=make_zoom();
             send_rx_state(i);
+        };
+        auto apply_runtime=[&](const qo100::Config& old,bool reset_all) {
+            for(size_t i=0;i<receivers.size();++i) {
+                const auto hz=i?c.initial_rx2_hz:c.initial_rx_hz;
+                const bool changed=hz!=receivers[i].frequency;
+                receivers[i].frequency=hz;
+                if(changed || reset_all) reset_rx(i);
+            }
+            if(old.rx1_filter!=c.rx1_filter) receivers[0].dsp->set_filter(c.rx1_filter);
+            if(old.rx1_nr_percent!=c.rx1_nr_percent) receivers[0].dsp->set_nr(c.rx1_nr_percent);
+            if(old.tx1_compressor.amount!=c.tx1_compressor.amount) tx.set_compressor(c.tx1_compressor);
+            if(tx_frequency!=c.initial_tx_hz) {
+                tx_frequency=c.initial_tx_hz;tx_enabled=false;++tx_epoch;
+                echo_seen.clear();echo_next=0;
+                tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));send_tx_state();
+                if(loop_mode==TestLoop::rf) reset_rx(0);
+            }
+            if(reset_all) spectrum.reset();
+        };
+        auto restart_driver=[&](const qo100::Config& next) {
+            tx_enabled=false;++tx_epoch;echo_seen.clear();echo_next=0;
+            tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));send_tx_state();
+            pluto.reset();hardware_online=false;
+            hardware_recovering=!pending_settings.has_value();
+            while(recv(iq->fd,buffer.data(),buffer.size(),0)>=0) {}
+            while(recv(tx_status->fd,buffer.data(),buffer.size(),0)>=0) {}
+            have_status=false;pluto_fill=0;received_iq=false;
+            last_iq=last_tx_feedback=Clock::now();
+            const auto binary=std::filesystem::canonical("/proc/self/exe").parent_path()/"pluto";
+            pluto=std::make_unique<qo100::PlutoProcess>(next,binary);
+        };
+        auto fail_settings=[&](const std::string& error) {
+            settings_error=error;settings_status=5;
+            if(!settings_rollback) {
+                settings_rollback=true;
+                try {restart_driver(c);return;} catch(const std::exception& e) {driver_error=e.what();}
+            }
+            pending_settings.reset();settings_rollback=false;pluto.reset();hardware_online=false;
+            next_hardware_retry=Clock::now()+std::chrono::seconds(5);send_settings();
         };
         auto commit_loop=[&]() {
             const bool restarted=loop_pending;
@@ -287,6 +351,7 @@ int main(int argc, char** argv) {
                         if (!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) {
                             for(auto& rx:receivers) rx.have_request=false;
                             mute_tx();tx_have_request=false;have_filter_request=false;have_compressor_request=false;have_nr_request=false;
+                            have_settings_request=false;
                         }
                         peer = from; subscribed = true; last_subscription = Clock::now();
                         if(changed_peer) {
@@ -294,6 +359,47 @@ int main(int argc, char** argv) {
                             change_loop(TestLoop::normal);
                         }
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
+                        qo100::SettingsControl control_settings{};
+                        if(qo100::parse_settings_control(buffer.data(),size_t(n),control_settings)) {
+                            if((control_settings.set && control_settings.session!=session_id) ||
+                               (!control_settings.set && control_settings.session && control_settings.session!=session_id) ||
+                               (have_settings_request && control_settings.request!=settings_request &&
+                                int32_t(control_settings.request-settings_request)<0)) continue;
+                            if(pending_settings && control_settings.request!=settings_request) {
+                                send_settings(control_settings.request,control_settings.set?6:4);continue;
+                            }
+                            if(!have_settings_request || control_settings.request!=settings_request) {
+                                settings_request=control_settings.request;have_settings_request=true;
+                                if(!pending_settings) {settings_status=0;settings_error.clear();}
+                                if(control_settings.set) {
+                                    if(pending_settings) settings_status=4;
+                                    else if(control_settings.revision!=settings.revision()) settings_status=2;
+                                    else {
+                                        try {
+                                            const auto patch=qo100::parse_settings(control_settings.payload);
+                                            auto next=qo100::patch_settings(c,patch);
+                                            if(source=="pluto" && hardware_settings_changed(c,next)) {
+                                                pending_settings=next;settings_status=4;settings_rollback=false;
+                                                loop_mode=loop_target=TestLoop::normal;loop_pending=false;
+                                                restart_driver(next);
+                                            } else {
+                                                const auto old=c;
+                                                try {settings.commit(next);} catch(const std::exception& e) {
+                                                    settings_status=3;settings_error=e.what();
+                                                }
+                                                if(!settings_status) apply_runtime(old,false);
+                                            }
+                                        } catch(const std::exception& e) {
+                                            if(pending_settings) fail_settings(e.what());
+                                            else {settings_status=1;settings_error=e.what();}
+                                        }
+                                    }
+                                }
+                            }
+                            send_settings();continue;
+                        }
+                        // During a hardware transaction only settings/subscription traffic is applied.
+                        if(pending_settings) continue;
                         qo100::LoopControl control_loop{};
                         if(qo100::parse_loop_control(buffer.data(),size_t(n),control_loop)) {
                             if(control_loop.session!=session_id || (have_loop_request && control_loop.request!=loop_request &&
@@ -319,6 +425,7 @@ int main(int argc, char** argv) {
                                     if(!requested.valid()) compressor_status=1;
                                     else if(requested.amount!=tx.compressor_settings().amount) {
                                         tx.set_compressor(requested);
+                                        c.tx1_compressor=requested;settings.changed();
                                         std::cout << "TX1 compressor=" << requested.amount/10. << " percent\n";
                                     }
                                 }
@@ -338,6 +445,9 @@ int main(int argc, char** argv) {
                                     if(nr_control.percent>100) nr_status=1;
                                     else if(nr_control.percent!=receivers[0].dsp->nr_percent()) {
                                         receivers[0].dsp->set_nr(nr_control.percent);
+                                        c.rx1_nr_percent=nr_control.percent;
+                                        if(nr_control.percent) c.gui_nr_strength=nr_control.percent;
+                                        settings.changed();
                                         std::cout << "RX1 NR=" << nr_control.percent << " percent\n";
                                     }
                                 }
@@ -357,6 +467,7 @@ int main(int argc, char** argv) {
                                     if(!requested.valid()) filter_status=1;
                                     else if(requested!=receivers[0].dsp->filter_settings()) {
                                         receivers[0].dsp->set_filter(requested);
+                                        c.rx1_filter=requested;settings.changed();
                                         std::cout << "RX1 filter BW=" << requested.bandwidth_hz << " Hz; center=" << requested.center_hz
                                                   << " Hz; passband=" << requested.low_hz() << ".." << requested.high_hz() << " Hz\n";
                                     }
@@ -374,11 +485,12 @@ int main(int argc, char** argv) {
                             if(tx_have_request && control.request==tx_request &&
                                (control.frequency!=tx_frequency || control.enabled!=tx_enabled)) { send_tx_state();continue; }
                             tx_request=control.request;tx_have_request=true;tx_command_status=valid?0:1;
-                            if(loop_pending && control.enabled) { tx_command_status=2;send_tx_state();continue; }
+                            if((loop_pending || !hardware_online) && control.enabled) { tx_command_status=2;send_tx_state();continue; }
                             if(valid) {
                                 if(control.frequency!=tx_frequency || control.enabled!=tx_enabled) {
                                     const bool retuned=control.frequency!=tx_frequency;
                                     tx_frequency=control.frequency;tx_enabled=control.enabled;++tx_epoch;echo_seen.clear();echo_next=0;
+                                    if(retuned) {c.initial_tx_hz=tx_frequency;settings.changed();}
                                     tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
                                     if(retuned && loop_mode==TestLoop::rf && !loop_pending) reset_rx(0);
                                     last_tx_audio=Clock::now()-std::chrono::seconds(10);
@@ -400,13 +512,18 @@ int main(int argc, char** argv) {
                             } else if(tx.add(audio.index,audio.samples)) last_tx_audio=Clock::now();
                             continue;
                         }
-                        uint32_t stream_id=0, request=0; uint64_t frequency=0;
-                        if(qo100::parse_tune(buffer.data(),static_cast<size_t>(n),stream_id,request,frequency)) {
+                        uint32_t stream_id=0, request=0,tune_session=0; uint64_t frequency=0;
+                        if(qo100::parse_tune(buffer.data(),static_cast<size_t>(n),stream_id,request,frequency,&tune_session)) {
+                            if(tune_session && tune_session!=session_id) continue;
                             auto& rx=receivers[stream_id-1];
                             if(rx.have_request && request!=rx.last_request && static_cast<int32_t>(request-rx.last_request)<0) continue;
+                            if(rx.have_request && request==rx.last_request) {send_rx_state(stream_id-1,rx.command_status);continue;}
                             const bool valid=frequency>=c.rx_center_hz-275000 && frequency<=c.rx_center_hz+275000;
+                            rx.command_status=valid?0:1;
                             if(valid && frequency!=rx.frequency) {
                                 rx.frequency=frequency; ++rx.epoch;
+                                if(stream_id==1) c.initial_rx_hz=frequency;else c.initial_rx2_hz=frequency;
+                                settings.changed();
                                 rx.dsp->tune(static_cast<int64_t>(rx_frequency(stream_id-1))-static_cast<int64_t>(c.rx_center_hz));
                                 if(stream_id==1) zoom=make_zoom();
                                 std::cout << "RX" << stream_id << " tuned to " << rx.frequency << " Hz; USB; epoch=" << rx.epoch << '\n';
@@ -425,6 +542,30 @@ int main(int argc, char** argv) {
                     if (n < 0) break;
                     if (ntohl(from.sin_addr.s_addr) != INADDR_LOOPBACK || !n || n%4) ++malformed_iq;
                     else {
+                        const bool recovered=hardware_recovering && !pending_settings && !loop_pending;
+                        hardware_online=true;driver_error.clear();
+                        if(recovered) {
+                            hardware_recovering=false;
+                            current_rx_lo=rx_lo_target=c.pluto_rx_hz;++loop_generation;
+                            spectrum.reset();for(size_t i=0;i<receivers.size();++i) reset_rx(i);
+                            send_loop_state();
+                        }
+                        if(pending_settings) {
+                            if(settings_rollback) {
+                                pending_settings.reset();settings_rollback=false;
+                                current_rx_lo=rx_lo_target=c.pluto_rx_hz;++loop_generation;
+                                spectrum.reset();for(size_t i=0;i<receivers.size();++i) reset_rx(i);
+                                send_loop_state();send_settings();
+                            } else {
+                                const auto old=c;
+                                try {
+                                    settings.commit(*pending_settings);pending_settings.reset();
+                                    current_rx_lo=rx_lo_target=c.pluto_rx_hz;++loop_generation;
+                                    apply_runtime(old,true);settings_status=0;settings_error.clear();
+                                    send_loop_state();send_settings();
+                                } catch(const std::exception& e) {fail_settings(e.what());continue;}
+                            }
+                        }
                         if(loop_pending) commit_loop();
                         feed_iq(buffer.data(),size_t(n));received_iq=true;last_iq=Clock::now();
                     }
@@ -433,7 +574,7 @@ int main(int argc, char** argv) {
             if(tx_enabled && (!active() || Clock::now()-last_tx_control>std::chrono::milliseconds(1500))) {
                 mute_tx();send_tx_state();
             }
-            if(!active()) change_loop(TestLoop::normal);
+            if(!active() && !pending_settings) change_loop(TestLoop::normal);
             if(tx_status && (fds[2].revents&POLLIN)) {
                 bool update=false;
                 for(int budget=0;budget<128;++budget) {
@@ -467,12 +608,25 @@ int main(int argc, char** argv) {
                 next_synthetic += std::chrono::milliseconds(10);
             }
             if (pluto) {
-                pluto->check();
-                if(Clock::now()-last_tx_feedback>std::chrono::seconds(received_iq?5:20))
-                    throw std::runtime_error("No Pluto TX FIFO feedback");
-                const auto idle = std::chrono::duration<double>(Clock::now() - last_iq).count();
-                if (idle > (received_iq ? 5 : 20)) throw std::runtime_error("No Pluto IQ samples; see " + pluto->log_path().string());
+                try {
+                    pluto->check();
+                    if(Clock::now()-last_tx_feedback>std::chrono::seconds(received_iq?5:8) ||
+                       Clock::now()-last_iq>std::chrono::seconds(received_iq?5:8))
+                        throw std::runtime_error("No Pluto IQ/FIFO data");
+                } catch(const std::exception& e) {
+                    if(pending_settings) fail_settings(e.what());
+                    else {
+                        driver_error=e.what();std::cerr<<"Pluto offline: "<<driver_error<<'\n';
+                        pluto.reset();hardware_online=false;mute_tx();
+                        loop_mode=loop_target=TestLoop::normal;loop_pending=false;loop_status=0;
+                        next_hardware_retry=Clock::now()+std::chrono::seconds(5);
+                    }
+                }
             }
+            if(source=="pluto" && !pluto && !pending_settings && Clock::now()>=next_hardware_retry) {
+                try {restart_driver(c);} catch(const std::exception& e) {driver_error=e.what();next_hardware_retry=Clock::now()+std::chrono::seconds(5);}
+            }
+            settings.flush_due();
             const double stats_interval = std::chrono::duration<double>(Clock::now() - last_stats).count();
             if (stats_interval >= 2) {
                 std::cout << "IQ samples=" << spectrum.samples() << "; rate=" << (spectrum.samples() - last_samples) / stats_interval
@@ -480,6 +634,7 @@ int main(int argc, char** argv) {
                 last_samples = spectrum.samples(); last_stats = Clock::now();
             }
         }
+        settings.flush();
         std::cout << "Stopping; IQ samples=" << spectrum.samples() << "; spectrum frames sent=" << frames_sent << '\n';
         return 0;
     } catch (const std::exception& error) {

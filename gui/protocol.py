@@ -8,17 +8,41 @@ HEADER = struct.Struct("!4sBBHIIQQQIIIHHII")
 MAGIC, VERSION, SUBSCRIBE, SPECTRUM = b"QTR2", 1, 1, 2
 TUNE, STATE, AUDIO = 3, 4, 5
 MAX_DATAGRAM = 1200
+SETTINGS_CONTROL, SETTINGS_STATE = 17,18
+
+
+def settings_control(request, session=0, revision=0, patch=None):
+    payload=b'' if patch is None else ''.join(f'{k}={v}\n' for k,v in sorted(patch.items())).encode('ascii')
+    if len(payload)>1136 or (patch is not None and not payload): raise ValueError('Invalid settings payload size')
+    return HEADER.pack(MAGIC,VERSION,SETTINGS_CONTROL,64,0,request,0,revision if patch is not None else 0,
+                       0,0,len(payload),0,len(payload),int(patch is not None),len(payload),session)+payload
+
+
+def settings_state(packet):
+    if not 64<=len(packet)<=MAX_DATAGRAM: return None
+    f=HEADER.unpack_from(packet);n=len(packet)-64
+    if (f[:4]!=(MAGIC,VERSION,SETTINGS_STATE,64) or f[4] or f[6] or f[8] or f[9]
+        or f[10]!=n or f[12]!=n or f[14]!=n or f[13]>6 or f[11]&~7): return None
+    try:
+        values={}
+        for line in packet[64:].decode('utf-8').splitlines():
+            key,sep,value=line.partition('=')
+            if not sep or not key or key in values: return None
+            values[key]=value
+        if values.get('settings_schema')!='1': return None
+        return f[5],f[15],f[7],f[13],f[11],values
+    except UnicodeError: return None
 
 
 def subscription():
     return HEADER.pack(MAGIC, VERSION, SUBSCRIBE, HEADER.size, *([0] * 12))
 
 
-def tune(request, frequency, stream_id=1):
+def tune(request, frequency, stream_id=1, session=0):
     if stream_id not in (1, 2):
         raise ValueError("Receiver stream must be 1 or 2")
     return HEADER.pack(MAGIC, VERSION, TUNE, 64, stream_id, request, 0, 0,
-                       frequency, 0, 0, 0, 0, 0, 0, 0)
+                       frequency, 0, 0, 0, 0, 0, 0, session)
 
 
 @dataclass

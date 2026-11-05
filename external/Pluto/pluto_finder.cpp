@@ -48,69 +48,24 @@ int pluto_get_IP(char *url_IP)
 }
 
 int pluto_get_USB(char *sn)
-{    
-    char s[500];
-    snprintf(s,499,"iio_info -s 2>/dev/null");
-    s[499] = 0;
-
-    pluto_context_name[0] = 0;
-    FILE *fp = popen(s,"r");
-    if(fp)
-    {
-        while (fgets(s, sizeof(s)-1, fp) != NULL) 
-        {
-            // get the USB id
-            char usbid[50];
-            char usbsn[100];
-
-            char *hp = strstr(s,"[usb:");
-            if(hp)
-            {
-                hp += 1;
-                char *he = strchr(hp,']');
-                if(he)
-                {
-                    *he = 0;
-                    strncpy(usbid,hp,49);
-                    usbid[sizeof(usbid)-1] = 0;
-
-                    // read serial number
-                    char *psn = strstr(s,"serial=");
-                    if(psn)
-                    { 
-                        psn+=7;
-                        char *spn = strchr(psn,' ');
-                        if(spn)
-                        {
-                            *spn = 0;
-                            strncpy(usbsn,psn,99);
-                            usbsn[sizeof(usbsn)-1] = 0;
-                            printf("PLUTO found, SN:%s ID:%s\n",usbsn,usbid);
-
-                            // if no special pluto requested, then use the first found pluto
-                            if(*sn == 0)
-                            {
-                                strcpy(pluto_context_name, usbid);
-                                return 1;
-                            }
-
-                            // search for a specific SN
-                            if(!strcmp(sn, usbsn))
-                            {
-                                strcpy(pluto_context_name, usbid);
-                                return 1;
-                            }
-                        }
-                        
-                    }
-                }
-            }
-        }
-        pclose(fp);
+{
+    // Scan USB directly through libiio; no dependency on iio_info text output.
+    iio_scan_context *scan=iio_create_scan_context("usb",0);
+    if(!scan) return 0;
+    iio_context_info **list=NULL;
+    const ssize_t count=iio_scan_context_get_info_list(scan,&list);
+    bool found=false;
+    for(ssize_t i=0;i<count && !found;++i) {
+        const char *uri=iio_context_info_get_uri(list[i]);
+        const char *description=iio_context_info_get_description(list[i]);
+        if(!uri || strncmp(uri,"usb:",4) || !description ||
+           (!strstr(description,"Pluto") && !strstr(description,"PLUTO")) ||
+           (*sn && !strstr(description,sn))) continue;
+        if(strlen(uri)>=sizeof(pluto_context_name)) continue;
+        strcpy(pluto_context_name,uri);found=true;
+        printf("PLUTO found: %s [%s]\n",description,uri);
     }
-    else
-        printf("cannot execute iio_info command\n");
-    
-    printf("no PLUTO found\n");
-    return 0;
+    if(list) iio_context_info_list_free(list);
+    iio_scan_context_destroy(scan);
+    return found?1:0;
 }

@@ -7,6 +7,7 @@ from protocol import Assembler, HEADER, subscription, filter_control, filter_sta
 from protocol import compressor_control, compressor_state
 from protocol import loop_control,loop_state
 from protocol import nr_control,nr_state
+from protocol import settings_control,settings_state
 
 
 def packets(frame=1, stamp=100, session=7):
@@ -21,6 +22,19 @@ def packets(frame=1, stamp=100, session=7):
 
 
 class ProtocolTest(unittest.TestCase):
+    def test_settings_wire(self):
+        query=HEADER.unpack(settings_control(8))
+        self.assertEqual((query[2],query[4],query[5],query[7],query[13],query[15]),(17,0,8,0,0,0))
+        command=settings_control(9,99,7,{'rx_correction_hz':-123})
+        f=HEADER.unpack_from(command);n=len(command)-64
+        self.assertEqual((f[7],f[10],f[12],f[13],f[14],f[15]),(7,n,n,1,n,99))
+        payload=b'settings_schema=1\nrx_correction_hz=-123\n'
+        reply=HEADER.pack(b'QTR2',1,18,64,0,9,0,8,0,0,len(payload),0,len(payload),0,len(payload),99)+payload
+        self.assertEqual(settings_state(reply),(9,99,8,0,0,{'settings_schema':'1','rx_correction_hz':'-123'}))
+        self.assertIsNone(settings_state(reply+b'x'))
+        for bad in ({}, {'x':'a'*1200}):
+            with self.assertRaises(ValueError):settings_control(9,99,7,bad)
+
     def test_nr_wire(self):
         query=HEADER.unpack(nr_control(7,99))
         self.assertEqual((query[2],query[4],query[5],query[9],query[10],query[13],query[15]),(15,1,7,0,0,0,99))

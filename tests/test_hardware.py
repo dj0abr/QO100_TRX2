@@ -7,6 +7,7 @@ import queue
 import subprocess
 import sys
 import time
+import tempfile
 import wave
 import numpy as np
 
@@ -35,8 +36,9 @@ def main():
     audio_received, audio2_received, zoom_received = [], [], []
     driver_pids = []
     receiver = None
+    settings_dir=tempfile.TemporaryDirectory(prefix="qo100-hardware-settings-")
     with (captures / "hardware-backend.log").open("w") as log:
-        backend = subprocess.Popen([str(PROJECT / "build/bin/qo100_backend"), "--config", str(config_path)],
+        backend = subprocess.Popen([str(PROJECT / "build/bin/qo100_backend"), "--config", str(config_path), "--settings", str(Path(settings_dir.name)/"backend.settings")],
                                    stdout=log, stderr=subprocess.STDOUT)
         try:
             receiver = Receiver("127.0.0.1", int(settings["gui_port"]),rx_hz=int(settings["initial_rx_hz"]))
@@ -141,6 +143,7 @@ def main():
                 backend.wait()
             assert backend.returncode == 0, f"Backend exit status {backend.returncode}; see hardware-backend.log"
             assert all(not Path(f"/proc/{pid}").exists() for pid in driver_pids), "Driver child still running"
+        settings_dir.cleanup()
         result["driver_cleanup"] = "verified"
         result["tested_at_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         (captures / "hardware-test.json").write_text(json.dumps(result, indent=2) + "\n")
