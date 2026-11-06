@@ -104,6 +104,8 @@ int main(int argc, char** argv) {
             bool have_request = false;
             uint16_t command_status = 0;
             std::unique_ptr<qo100::RxChannel> dsp;
+            std::unique_ptr<qo100::Spectrum> zoom;
+            uint32_t zoom_frame_id = 0;
         };
         std::array<ReceiverState,2> receivers;
         receivers[0].frequency=c.initial_rx_hz;
@@ -146,7 +148,6 @@ int main(int argc, char** argv) {
                 ? uint64_t(int64_t(c.rx_center_hz)+int64_t(tx_frequency)-int64_t(c.tx_center_hz))
                 : receivers[i].frequency;
         };
-        uint32_t zoom_frame_id = 0;
         auto stamp = [] { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); };
         auto active = [&] { return subscribed && std::chrono::duration<double>(Clock::now()-last_subscription).count() <= c.subscription_seconds; };
         auto send_packet = [&](const std::vector<uint8_t>& packet) {
@@ -201,19 +202,19 @@ int main(int argc, char** argv) {
             }
             ++tx_block_id;++tx_blocks;
         };
-        auto make_zoom = [&] {
+        auto make_zoom = [&](size_t i) {
             return std::make_unique<qo100::Spectrum>(75000,8192,c.spectrum_fps,
-                [&](const std::vector<int16_t>& bins,uint64_t index) {
+                [&,i](const std::vector<int16_t>& bins,uint64_t index) {
                     if (!active()) return;
-                    qo100::FrameInfo f{zoom_frame_id++,stamp(),index,rx_frequency(0),75000,8192,session_id,1};
+                    qo100::FrameInfo f{receivers[i].zoom_frame_id++,stamp(),index,rx_frequency(i),75000,8192,session_id,static_cast<uint32_t>(i+1)};
                     for(const auto& packet:qo100::spectrum_packets(f,bins)) send_packet(packet);
                 });
         };
-        auto zoom = make_zoom();
         for(size_t i=0;i<receivers.size();++i) {
+            receivers[i].zoom=make_zoom(i);
             receivers[i].dsp=std::make_unique<qo100::RxChannel>(
                 static_cast<int64_t>(receivers[i].frequency)-static_cast<int64_t>(c.rx_center_hz),
-                [&,i](std::complex<float> x) { if(i==0) zoom->push(x); },
+                [&,i](std::complex<float> x) { receivers[i].zoom->push(x); },
                 [&,i](const std::vector<int16_t>& audio,uint64_t index) {
                     if(!active()) return;
                     const auto& rx=receivers[i];
@@ -259,15 +260,21 @@ int main(int argc, char** argv) {
         auto reset_rx=[&](size_t i) {
             auto& rx=receivers[i];++rx.epoch;
             rx.dsp->tune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
-            if(i==0) zoom=make_zoom();
+            rx.zoom=make_zoom(i);
             send_rx_state(i);
+        };
+        auto retune_rx=[&](size_t i) {
+            // A dial change preserves the PCM timeline and the receiver's DSP state.
+            // Changing the epoch here would force GUI jitter/ALSA buffers to flush.
+            receivers[i].dsp->retune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
         };
         auto apply_runtime=[&](const qo100::Config& old,bool reset_all) {
             for(size_t i=0;i<receivers.size();++i) {
                 const auto hz=i?c.initial_rx2_hz:c.initial_rx_hz;
                 const bool changed=hz!=receivers[i].frequency;
                 receivers[i].frequency=hz;
-                if(changed || reset_all) reset_rx(i);
+                if(reset_all) reset_rx(i);
+                else if(changed) {retune_rx(i);send_rx_state(i);}
             }
             if(old.rx1_filter!=c.rx1_filter) receivers[0].dsp->set_filter(c.rx1_filter);
             if(old.rx1_nr_percent!=c.rx1_nr_percent) receivers[0].dsp->set_nr(c.rx1_nr_percent);
@@ -276,7 +283,7 @@ int main(int argc, char** argv) {
                 tx_frequency=c.initial_tx_hz;tx_enabled=false;++tx_epoch;
                 echo_seen.clear();echo_next=0;
                 tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));send_tx_state();
-                if(loop_mode==TestLoop::rf) reset_rx(0);
+                if(loop_mode==TestLoop::rf) {retune_rx(0);send_rx_state(0);}
             }
             if(reset_all) spectrum.reset();
         };
@@ -475,7 +482,7 @@ int main(int argc, char** argv) {
                             }
                             const auto actual=receivers[0].dsp->filter_settings();
                             send_packet(qo100::filter_state_packet(filter_request,actual.bandwidth_hz,actual.center_hz,
-                                receivers[0].epoch,session_id,filter_status));
+                                receivers[0].epoch,session_id,filter_status,filter_control.edges));
                             continue;
                         }
                         qo100::TxControl control{};qo100::TxAudio audio{};
@@ -492,7 +499,7 @@ int main(int argc, char** argv) {
                                     tx_frequency=control.frequency;tx_enabled=control.enabled;++tx_epoch;echo_seen.clear();echo_next=0;
                                     if(retuned) {c.initial_tx_hz=tx_frequency;settings.changed();}
                                     tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
-                                    if(retuned && loop_mode==TestLoop::rf && !loop_pending) reset_rx(0);
+                                    if(retuned && loop_mode==TestLoop::rf && !loop_pending) {retune_rx(0);send_rx_state(0);}
                                     last_tx_audio=Clock::now()-std::chrono::seconds(10);
                                     std::cout << "TX " << tx_frequency << " Hz; software PTT=" << tx_enabled << '\n';
                                 }
@@ -521,11 +528,10 @@ int main(int argc, char** argv) {
                             const bool valid=frequency>=c.rx_center_hz-275000 && frequency<=c.rx_center_hz+275000;
                             rx.command_status=valid?0:1;
                             if(valid && frequency!=rx.frequency) {
-                                rx.frequency=frequency; ++rx.epoch;
+                                rx.frequency=frequency;
                                 if(stream_id==1) c.initial_rx_hz=frequency;else c.initial_rx2_hz=frequency;
                                 settings.changed();
-                                rx.dsp->tune(static_cast<int64_t>(rx_frequency(stream_id-1))-static_cast<int64_t>(c.rx_center_hz));
-                                if(stream_id==1) zoom=make_zoom();
+                                retune_rx(stream_id-1);
                                 std::cout << "RX" << stream_id << " tuned to " << rx.frequency << " Hz; USB; epoch=" << rx.epoch << '\n';
                             }
                             rx.last_request=request;rx.have_request=true;

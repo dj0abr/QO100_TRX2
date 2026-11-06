@@ -14,6 +14,10 @@ RxChannel::RxChannel(int64_t offset, Zoom zoom, Audio audio, RxFilterSettings fi
     tune(offset);
 }
 RxChannel::~RxChannel() = default;
+void RxChannel::retune(int64_t offset) {
+    if (std::abs(offset) > 275000) throw std::runtime_error("Zoom must remain within the 600 kHz RX window");
+    mixer_.tune(-offset, false);
+}
 void RxChannel::tune(int64_t offset) {
     if (std::abs(offset) > 275000) throw std::runtime_error("Zoom must remain within the 600 kHz RX window");
     mixer_.tune(-offset);

@@ -63,7 +63,7 @@ def main():
                     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1280,1100',
                     '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream',
                     '--autoplay-policy=no-user-gesture-required', '--mute-audio']}}}})['sessionId']
-            call('POST', f'/session/{session}/url', {'url': f'http://127.0.0.1:{http_port}/'})
+            call('POST', f'/session/{session}/url', {'url': f'http://127.0.0.1:{http_port}/test.html'})
             wait(lambda: execute("return document.getElementById('role').textContent") == 'Bediener')
             wait(lambda: execute("return !document.getElementById('tune').disabled"))
             wait(lambda: execute("return document.getElementById('wide-frequency').textContent.length>0"))
@@ -89,7 +89,7 @@ def main():
             original = call('GET', f'/session/{session}/window')
             other = call('POST', f'/session/{session}/window/new', {'type': 'tab'})['handle']
             call('POST', f'/session/{session}/window', {'handle': other})
-            call('POST', f'/session/{session}/url', {'url': f'http://127.0.0.1:{http_port}/'})
+            call('POST', f'/session/{session}/url', {'url': f'http://127.0.0.1:{http_port}/test.html'})
             wait(lambda: execute("return document.getElementById('role').textContent") == 'Zuschauer')
             assert execute("return document.getElementById('tune').disabled && document.getElementById('ptt').disabled")
             wait(lambda: execute("return document.getElementById('wide-frequency').textContent.length>0"))

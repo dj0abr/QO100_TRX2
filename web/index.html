@@ -1,40 +1,174 @@
 <!doctype html>
 <html lang="de">
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>QO-100 Web-Test</title><link rel="stylesheet" href="/style.css">
-<header><h1>QO-100 <span>Web-Test</span></h1><strong id="role">Verbinde …</strong><button id="connect">Verbinden</button></header>
-<main>
-  <p id="status" role="status">Backend wird verbunden.</p>
-  <section class="frequencies">
-    <label>RX1 · Downlink MHz<input id="rx1" type="number" step="0.000001" value="10489.900000" data-control></label>
-    <label>RX2 · Downlink MHz<input id="rx2" type="number" step="0.000001" value="10489.600000" data-control></label>
-    <label>TX · Uplink MHz<input id="tx" type="number" step="0.000001" value="2400.400000" data-control></label>
-    <button id="tune" data-control>Abstimmen</button>
-  </section>
-  <section class="waterfalls">
-    <label>Gesamtspektrum · 600 kHz <span id="wide-frequency"></span></label><canvas id="wide" width="1100" height="220"></canvas>
-    <label>RX1-Zoom · ±25 kHz <span id="zoom-frequency"></span></label><canvas id="zoom" width="1100" height="180"></canvas>
-  </section>
-  <section class="controls">
-    <label>RX1-Bandbreite Hz<input id="bandwidth" type="number" min="500" max="3900" step="50" value="3900" data-control></label>
-    <label>Filtermitte Hz<input id="center" type="number" min="350" max="3750" step="25" value="2050" data-control></label>
-    <button id="filter" data-control>Filter setzen</button>
-    <label>RX1-Rauschreduktion %<input id="nr" type="range" min="0" max="100" value="0" data-control><output id="nr-value">0</output></label>
-    <label>TX1-Kompressor %<input id="compressor" type="range" min="60" max="140" step="0.1" value="100" data-control><output id="compressor-value">100</output></label>
-    <label>Test-Loop<select id="loop" data-control><option value="0">Normal</option><option value="1">Audio-Loop</option><option value="2">HF-Loop</option></select></label>
-  </section>
-  <section class="audio">
-    <button id="audio">Audio einschalten</button>
-    <label>Wiedergabe<select id="audio-stream"><option value="1">RX1</option><option value="2">RX2</option></select></label>
-    <label>Lautstärke<input id="volume" type="range" min="0" max="20" step="0.05" value="1"></label>
-    <button id="microphone" data-control>Mikrofon einschalten</button>
-    <button id="ptt" data-control>PTT halten</button><span id="tx-status">Empfang</span>
-  </section>
-  <details><summary>Backend-Settings</summary>
-    <p>Nur geänderte Werte als JSON eintragen. Speicherung erfolgt im Backend.</p>
-    <textarea id="patch" rows="3" data-control>{"tx_attenuation_db":0}</textarea>
-    <button id="save" data-control>Änderung speichern</button><pre id="settings"></pre>
-  </details>
-  <footer>Ein Bediener · weitere Verbindungen hören und sehen mit. Nach fünf Minuten ohne Bedienung wird der Bediener abgemeldet.</footer>
-</main><script type="module" src="/app.js"></script>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="QO-100 Web-Transceiver mit zwei Empfängern und unabhängiger Sendeabstimmung.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <title>QO100 Web Transceiver Version.2 by DJ0ABR</title>
+</head>
+<body>
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <symbol id="dish" viewBox="0 0 24 24"><path d="M5 4a12 12 0 0 0 15 15L5 4Z"/><path d="m12 12 6-6m-3-3 6 6M10 19l-2 3m7-2 1 2M18 2a6 6 0 0 1 4 4"/></symbol>
+      <symbol id="settings-icon" viewBox="0 0 24 24"><path d="m10 3-.5 2-2 1-2-.6-2 3.4L5 10v3l-1.5 1.2 2 3.4 2-.6 2 1 .5 3h4l.5-3 2-1 2 .6 2-3.4L19 13v-3l1.5-1.2-2-3.4-2 .6-2-1L14 3Z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="filter-icon" viewBox="0 0 24 24"><path d="M3 6h5m4 0h9M3 12h11m4 0h3M3 18h3m4 0h11M8 3v6m6 0v6M6 15v6"/></symbol>
+      <symbol id="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="speaker" viewBox="0 0 24 24"><path d="M3 9h4l5-5v16l-5-5H3Zm13-1a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></symbol>
+      <symbol id="mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-4 0h8"/></symbol>
+      <symbol id="user" viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></symbol>
+      <symbol id="wave" viewBox="0 0 24 24"><path d="M2 12h3l3-7 4 14 4-14 3 7h3"/></symbol>
+      <symbol id="waterfall-icon" viewBox="0 0 24 24"><path d="M3 5h18M3 10h18M3 15h18M3 20h18M6 3v19m6-19v19m6-19v19"/></symbol>
+      <symbol id="transmit" viewBox="0 0 24 24"><circle cx="12" cy="8" r="2"/><path d="m12 10-5 12m5-12 5 12M8 4a6 6 0 0 0 0 8m8-8a6 6 0 0 1 0 8M5 1a10 10 0 0 0 0 14M19 1a10 10 0 0 1 0 14m-9 3h4"/></symbol>
+    </defs>
+  </svg>
+  <div class="app">
+    <header class="masthead">
+      <div class="brand"><svg class="icon" aria-hidden="true"><use href="#dish"/></svg><span>QO100 Web Transceiver Version.2 by DJ0ABR</span></div>
+      <div class="session-actions"><button id="audio" class="small-button" type="button">Audio starten</button><button id="connect" class="small-button" type="button">Verbinden</button></div>
+    </header>
+    <section class="status-panel" aria-label="Frequenzen und Betriebszustand">
+      <div class="status-top">
+        <div class="station-label"><i id="tx-dot" class="live-dot offline"></i><span id="tx-status">Empfang</span></div>
+        <div class="connection-status">
+          <span><i id="backend-dot" class="live-dot offline"></i><span id="backend-status">Backend getrennt</span></span>
+          <span><i id="hardware-dot" class="live-dot offline"></i><span id="hardware-status">Hardware unbekannt</span></span>
+          <span class="role"><svg class="icon" aria-hidden="true"><use href="#user"/></svg><strong id="role">Getrennt</strong></span>
+        </div>
+      </div>
+      <div class="frequencies">
+        <div>
+          <button id="frequency1" type="button" class="frequency-button rx-main selected" aria-pressed="true" title="RX1 auswählen · Doppelklick zur Frequenzeingabe">
+            <span class="frequency-label">RX1 <span id="selected1" class="selected-tag">AUSGEWÄHLT</span></span>
+            <span class="frequency-value"><strong id="rx1">—</strong><span class="unit">MHz</span></span>
+            <span class="touch-hint">← Wischen: RX1 fein abstimmen →</span>
+          </button>
+          <div class="tx-row">
+            <button id="frequencytx" type="button" class="tx-uplink" title="TX-Frequenz eingeben · auf Touchgeräten zum Feinabstimmen wischen"><span class="tx-tag">TX</span><span id="tx" class="tx-value">—</span><span class="unit">MHz</span></button>
+            <div class="tx-return"><span>↳ Downlink</span><span id="tx-downlink" class="downlink-value">—</span><span class="unit">MHz</span></div>
+          </div>
+          <span class="touch-hint tx-touch-hint">← Wischen auf TX: TX fein abstimmen →</span>
+        </div>
+        <div class="rx2-panel">
+        <button id="frequency2" type="button" class="frequency-button rx-secondary" aria-pressed="false" title="RX2 auswählen · Doppelklick zur Frequenzeingabe">
+          <span class="frequency-label">RX2 <span id="selected2" class="selected-tag" hidden>AUSGEWÄHLT</span></span>
+          <span class="frequency-value"><strong id="rx2">—</strong><span class="unit">MHz</span></span>
+          <span class="touch-hint">← Wischen: RX2 fein abstimmen →</span>
+        </button>
+          <button id="decoder-toggle" type="button" aria-expanded="false" aria-controls="decoder-panel">Decoder-Text anzeigen</button>
+        </div>
+      </div>
+      <p id="audio-message" class="audio-message" role="alert" hidden></p>
+    </section>
+    <main class="workspace">
+      <aside class="sidebar" aria-label="Einstellungen">
+        <div class="sidebar-heading">Einstellungen</div>
+        <button id="setup" type="button" class="menu-button"><svg class="icon" aria-hidden="true"><use href="#settings-icon"/></svg>Setup<svg class="icon chevron" aria-hidden="true"><use href="#chevron"/></svg></button>
+        <button id="waterfall-toggle" type="button" class="menu-button" aria-expanded="false" aria-controls="waterfall-content"><svg class="icon" aria-hidden="true"><use href="#waterfall-icon"/></svg>Wasserfall<svg class="icon chevron" aria-hidden="true"><use href="#chevron"/></svg></button>
+        <div id="waterfall-content" class="filter-content waterfall-settings" hidden>
+          <label class="field-label" for="display-color">Farbe · Wasserfall und Spektrum</label>
+          <select id="display-color" class="menu-select"><option value="blue">Blau</option><option value="red">Rot</option><option value="green">Grün</option></select>
+          <label class="field-label" for="spectrum-average">Moving Average<output id="spectrum-average-value">1</output></label>
+          <input id="spectrum-average" class="range" type="range" min="1" max="20" step="1" value="1" aria-describedby="spectrum-average-help">
+          <div class="filter-range"><span>1 · aus</span><span>20 · max.</span></div>
+          <p id="spectrum-average-help" class="smoothing-note">Zeitliche Mittelung für beide Spektrumanzeigen.</p>
+          <div class="display-range-heading">Pegel · Fullband und Zoom</div>
+          <label class="field-label" for="waterfall-floor" title="Abstand zum Grundrauschen">Untergrenze<output id="waterfall-floor-value">−5 dB</output></label>
+          <input id="waterfall-floor" class="range" type="range" min="-10" max="10" step="1" value="-5" aria-label="Untergrenze für Fullband und Zoom relativ zum Rauschpegel">
+          <label class="field-label" for="waterfall-ceiling" title="Abstand zum Grundrauschen">Obergrenze<output id="waterfall-ceiling-value">+40 dB</output></label>
+          <input id="waterfall-ceiling" class="range" type="range" min="30" max="40" step="1" value="40" aria-label="Obergrenze für Fullband und Zoom relativ zum Rauschpegel">
+          <div class="display-range-heading">Fullband</div>
+          <p class="noise-levels">Grundrauschen <output id="fullband-noise">warte auf FFT …</output><br>Anzeige <output id="fullband-range">—</output></p>
+          <div class="display-range-heading">Zoom</div>
+          <p class="noise-levels">Grundrauschen <output id="zoom-noise">warte auf FFT …</output><br>Anzeige <output id="zoom-range">—</output></p>
+        </div>
+        <button id="filter-toggle" type="button" class="menu-button active" aria-expanded="true" aria-controls="filter-content"><svg class="icon" aria-hidden="true"><use href="#filter-icon"/></svg>Filter<svg class="icon chevron" aria-hidden="true"><use href="#chevron"/></svg></button>
+        <div id="filter-content" class="filter-content">
+          <div class="field-label">RX1 · USB-Filter</div>
+          <div class="filter-presets"><button type="button" class="preset" data-bandwidth="3900" data-control>3.9 k</button><button type="button" class="preset" data-bandwidth="2700" data-control>2.7 k</button><button type="button" class="preset" data-bandwidth="2400" data-control>2.4 k</button></div>
+          <label class="field-label" for="filter-lower">Untere Grenze<output id="filter-lower-value">—</output></label>
+          <input id="filter-lower" class="range" type="range" min="100" max="3500" step="0.5" value="100" data-control>
+          <label class="field-label" for="filter-upper">Obere Grenze<output id="filter-upper-value">—</output></label>
+          <input id="filter-upper" class="range" type="range" min="600" max="4000" step="0.5" value="4000" data-control>
+          <div class="filter-range"><span id="filter-low">—</span><span id="filter-high">—</span></div>
+          <label class="field-label nr-label" for="nr">Rauschreduktion<output id="nr-value">—</output></label>
+          <input id="nr" class="range" type="range" min="0" max="100" step="1" value="0" data-control>
+          <p class="filter-note">Der Durchlassbereich ist im RX1-Zoom markiert. NR wirkt nur auf RX1.</p>
+        </div>
+        <span id="mobile-filter-summary" class="mobile-filter-summary">USB</span>
+      </aside>
+      <div class="visuals">
+        <div class="touch-mode"><span class="touch-mode-label">Tippen stimmt ab</span><div class="segmented"><button id="touch-together" type="button" class="chosen" aria-pressed="true">RX1 + TX</button><button id="touch-rx" type="button" aria-pressed="false">nur RX1</button></div></div>
+        <section id="fullband" class="display" aria-labelledby="fullband-title">
+          <header class="display-heading"><div class="display-title"><h2 id="fullband-title">FULLBAND</h2><span id="fullband-axis-mode">600 kHz · Bandplan</span></div><div class="display-meta"><div class="legend"><span class="rx1-color"><i></i>RX1</span><span class="rx2-color"><i></i>RX2</span><span class="tx-color"><i></i>TX</span></div><span class="wheel-step">Mausrad <b>250 Hz</b></span></div></header>
+          <div class="plot-body"><canvas id="wide-spectrum" class="spectrum" data-spectrum data-tune aria-label="Fullband-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty">Warte auf Spektrum …</span></div>
+          <div class="fullband-axis-row"><div id="fullband-axis" class="frequency-axis fullband-frequency-axis" aria-label="Fullband-Frequenzen in MHz"></div><button id="fullband-axis-switch" type="button" class="axis-switch" aria-label="Frequenzdarstellung wechseln" title="Frequenzdarstellung wechseln">↻</button></div>
+          <div class="waterfall"><canvas id="wide" data-waterfall data-tune aria-label="Fullband-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas><span class="waterfall-caption">WASSERFALL · FULLBAND</span></div>
+          <footer class="display-footer"><span id="wide-help" class="desktop-note">Links: RX1 + TX · Rechts: nur RX1 · Shift + Rad: TX</span><span id="touch-help" class="mobile-note">Tippen: RX1 + TX</span><span>600 kHz</span></footer>
+        </section>
+        <section id="zoom-display" class="display" aria-labelledby="zoom-title">
+          <header class="display-heading"><div class="display-title"><h2 id="zoom-title">RX1-ZOOM</h2><span>±25 kHz</span></div><div class="display-meta"><span id="zoom-filter" class="desktop-note">USB</span><span class="wheel-step">Mausrad <b>25 Hz</b></span></div></header>
+          <div class="plot-body"><canvas id="zoom-spectrum" class="spectrum" data-spectrum data-tune aria-label="RX1-Zoom-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty">Warte auf RX1-Zoom …</span></div>
+          <div class="frequency-axis" aria-label="RX1-Zoom-Frequenzen in MHz"></div>
+          <div id="zoom-output" class="zoom-output">
+            <div class="waterfall"><canvas id="zoom" data-waterfall data-tune aria-label="RX1-Zoom-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas><span id="zoom-waterfall-caption" class="waterfall-caption">WASSERFALL · RX1</span></div>
+            <section id="decoder-panel" class="decoder-panel" aria-labelledby="decoder-title" hidden>
+              <header class="decoder-heading"><h2 id="decoder-title">RX2 · Decoder</h2><button id="decoder-clear" type="button" title="Nur den Text in diesem Browser löschen">Text löschen</button></header>
+              <pre id="decoder-text" role="log" aria-live="polite" aria-label="RX2 Decoder-Text" tabindex="0"></pre>
+            </section>
+          </div>
+          <footer class="display-footer"><span id="filter-caption">RX1 · Filter —</span><span class="desktop-note">Feinabstimmung · 25 Hz</span><span id="zoom-mobile-caption" class="mobile-note">RX1-Zoom · 50 kHz</span></footer>
+        </section>
+      </div>
+    </main>
+    <section class="qso-controls" aria-label="Direkte QSO-Bedienung">
+      <div class="copy-buttons"><button id="copy-rx-tx" type="button" class="copy-button" data-control title="TX auf die zu RX1 gehörende Uplinkfrequenz setzen"><span>RX1</span><span class="arrow">→</span><span>TX</span></button><button id="copy-tx-rx" type="button" class="copy-button" data-control title="RX1 auf die zu TX gehörende Downlinkfrequenz setzen"><span>TX</span><span class="arrow">→</span><span>RX1</span></button></div>
+      <div class="qso-control"><label class="control-heading" for="volume"><svg class="icon" aria-hidden="true"><use href="#speaker"/></svg><span>Lautstärke</span><output id="volume-value">20 %</output></label><input id="volume" class="range" type="range" min="0" max="20" step="0.05" value="4"><div class="slider-labels"><span>0</span><span>100 %</span></div></div>
+      <div class="qso-control"><label class="control-heading" for="compressor"><svg class="icon" aria-hidden="true"><use href="#mic"/></svg><span>Kompressor</span><output id="compressor-value">—</output></label><input id="compressor" class="range" type="range" min="0" max="140" step="0.1" value="100" data-control><div class="slider-labels"><span>0 · Bypass</span><span>140 %</span></div></div>
+      <button id="ptt" type="button" class="ptt" data-control aria-pressed="false" title="Zuerst Audio und Mikrofon einschalten, dann zum Senden gedrückt halten"><svg class="icon" aria-hidden="true"><use href="#transmit"/></svg><strong>PTT</strong><small id="ptt-hint">Mikrofon fehlt</small></button>
+    </section>
+    <footer class="page-footer"><span id="status" role="status" aria-live="polite">Verbindung wird hergestellt …</span><span id="offset-status">RX1 ausgewählt</span></footer>
+  </div>
+
+  <dialog id="setup-dialog" class="setup-dialog" aria-labelledby="setup-title">
+    <div class="dialog-heading"><h2 id="setup-title">Setup</h2><button class="dialog-close" type="button" data-close="setup-dialog" aria-label="Setup schließen">×</button></div>
+    <div class="dialog-scroll">
+      <fieldset><legend>Audio</legend><div class="form-grid">
+        <p class="field-help">Empfang: RX1 · Sprache. RX2 liefert Decoder-Text.</p>
+        <div class="form-action"><span id="audio-details">Audio ausgeschaltet</span><button id="microphone" type="button" class="small-button" data-control>Mikrofon einschalten</button></div>
+        <label>Wiedergabegerät<select id="audio-output"><option value="">Automatisch · USB Advanced bevorzugen</option><option value="default">Systemstandard</option></select></label>
+        <label>Aufnahmegerät<select id="audio-input"><option value="">Automatisch · USB Advanced bevorzugen</option><option value="default">Systemstandard</option></select></label>
+      </div><p id="audio-device-details" class="field-help">Gerätenamen erscheinen nach Freigabe des Mikrofons. Die Geräteauswahl wird nur in diesem Browser gespeichert.</p></fieldset>
+      <fieldset><legend>PTT-Taste</legend>
+        <label class="option-label"><input id="ptt-space" type="checkbox">Leertaste = PTT</label>
+        <div class="ptt-options" role="group" aria-label="PTT-Bedienung">
+          <label class="option-label"><input id="ptt-hold" type="radio" name="ptt-mode" value="hold" checked>Drücken: PTT an · Loslassen: PTT aus</label>
+          <label class="option-label"><input id="ptt-toggle" type="radio" name="ptt-mode" value="toggle">Anklicken: PTT an · Erneut anklicken: PTT aus</label>
+        </div>
+        <p class="field-help">Schaltbetrieb: automatische Abschaltung nach spätestens 5 Minuten. Die Auswahl gilt auch für die Leertaste und wird sofort in diesem Browser gespeichert.</p>
+      </fieldset>
+      <form id="settings-form">
+        <fieldset><legend>Pluto und Frequenzkorrektur</legend><div class="form-grid">
+          <label>Pluto-Verbindung<select data-setting="pluto_connection" data-control><option value="usb">USB</option><option value="network">Netzwerk</option></select></label>
+          <label>Pluto IPv4-Adresse<input type="text" data-setting="pluto_ip" autocomplete="off" data-control></label>
+          <label>LNB-Referenz (Hz)<input type="number" min="10000000" max="30000000" step="1" data-setting="lnb_reference_hz" data-control></label>
+          <label>Pluto TX-Basisfrequenz (Hz)<input type="number" min="70000000" max="6000000000" step="1" data-setting="pluto_tx_base_hz" aria-describedby="tx-base-help" data-control><span id="tx-base-help" class="field-help">Bezogen auf Bandmitte (2400,250 bzw. 10489,7540)</span></label>
+          <label>RX-Korrektur (Hz)<input type="number" min="-1000000" max="1000000" step="1" data-setting="rx_correction_hz" data-control></label>
+          <label>TX-Korrektur (Hz)<input type="number" min="-1000000" max="1000000" step="1" data-setting="tx_correction_hz" data-control></label>
+          <label>TX-Dämpfung (dB)<input type="number" min="0" max="40" step="0.25" data-setting="tx_attenuation_db" data-control></label>
+          <div class="field-help" id="hardware-details">Hardwarewerte werden geladen.</div>
+        </div><p class="field-help">Hardwareänderungen schalten PTT aus. Während der Umstellung ist die Bedienung gesperrt.</p>
+          <p id="settings-message" class="form-message" role="status"></p>
+          <div class="form-footer"><span id="settings-revision"></span><button id="save" type="submit" class="primary-button" data-control>Änderungen speichern</button></div>
+        </fieldset>
+      </form>
+      <fieldset><legend>Test und Diagnose</legend><div class="form-grid"><label>Test-Loop<select id="loop" data-control><option value="0">Normalbetrieb</option><option value="1">Audio-Loop · ohne HF</option><option value="2">HF-Loop</option></select></label><div class="field-help" id="compressor-details">Kompressorwerte werden geladen.</div></div><p class="field-help">Audio-Loop gibt das Mikrofon bei gedrückter PTT zurück. HF-Loop benötigt eine HF-Kopplung.</p></fieldset>
+    </div>
+    <div class="dialog-footer"><a href="/test.html" target="_blank" rel="noopener">Technisches Test-GUI</a><button type="button" class="small-button" data-close="setup-dialog">Schließen</button></div>
+  </dialog>
+  <dialog id="frequency-dialog" class="frequency-dialog" aria-labelledby="frequency-title"><form id="frequency-form"><div class="dialog-heading"><h2 id="frequency-title">Frequenz eingeben</h2><button type="button" class="dialog-close" data-close="frequency-dialog" aria-label="Schließen">×</button></div><label>Frequenz (MHz)<input id="frequency-input" type="text" inputmode="decimal" autocomplete="off" required></label><p id="frequency-error" class="form-message" role="status"></p><div class="dialog-footer"><button type="button" class="small-button" data-close="frequency-dialog">Abbrechen</button><button type="submit" class="primary-button" data-control>Abstimmen</button></div></form></dialog>
+  <script type="module" src="/app.js"></script>
+</body>
 </html>

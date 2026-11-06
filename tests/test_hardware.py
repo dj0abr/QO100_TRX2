@@ -108,8 +108,8 @@ def main():
                 assert playback['rx2_packets']>100 and playback['rx2_samples']>24000,playback
                 assert playback['rx2_applied_hz']==int(settings['initial_rx2_hz']),playback
                 assert playback['invalid_audio']==0,playback
-                assert playback['rx1_filter']==[int(settings['rx1_filter_bandwidth_hz']),
-                                                 int(settings['rx1_filter_center_hz'])],playback
+                assert playback['rx1_filter']==[float(settings['rx1_filter_high_hz'])-float(settings['rx1_filter_low_hz']),
+                                                 (float(settings['rx1_filter_high_hz'])+float(settings['rx1_filter_low_hz']))/2],playback
                 assert playback['rx1_filter_error']=='',playback
                 assert playback['rx1_nr_percent']==int(settings.get('rx1_nr_percent','0')),playback
                 assert playback['rx1_nr_error']=='',playback

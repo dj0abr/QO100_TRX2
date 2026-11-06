@@ -33,7 +33,7 @@ SrcPtr make_audio_resampler(int quality, int channels);
 class FrequencyShifter {
 public:
     explicit FrequencyShifter(unsigned sample_rate);
-    void tune(int64_t offset_hz);
+    void tune(int64_t offset_hz, bool reset_phase = true);
     std::complex<float> execute(std::complex<float> sample);
     void execute_block(std::complex<float>* samples, unsigned count);
 private:

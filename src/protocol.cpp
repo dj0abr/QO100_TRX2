@@ -1,5 +1,6 @@
 #include "qo100/protocol.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
@@ -72,17 +73,25 @@ std::vector<uint8_t> compressor_state_packet(uint32_t request, uint32_t amount, 
 }
 bool parse_filter_control(const uint8_t* p, size_t n, FilterControl& c) {
     if (n!=64 || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=filter_control_type ||
-        get(p,6,2)!=64 || get(p,8,4)!=1 || get(p,54,2)>1 || get(p,32,8)>UINT32_MAX ||
+        get(p,6,2)!=64 || get(p,8,4)!=1 || get(p,54,2)>3 || get(p,32,8)>UINT32_MAX ||
         get(p,16,8) || get(p,24,8) || get(p,48,6) || get(p,56,4)) return false;
-    const bool set = get(p,54,2)!=0;
+    const auto format=get(p,54,2);
+    const bool set = format==1 || format==2, edges=format>=2;
     if (set ? get(p,40,4)!=12000 : (get(p,32,8) || get(p,40,8))) return false;
-    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),uint32_t(get(p,44,4)),uint32_t(get(p,32,8)),set};
+    const double a=get(p,32,8), b=get(p,44,4);
+    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),
+        edges ? (b-a)/1000. : b, edges ? (a+b)/2000. : a, set, edges};
     return true;
 }
-std::vector<uint8_t> filter_state_packet(uint32_t request, uint32_t bandwidth, uint32_t center,
-    uint32_t epoch, uint32_t session, uint16_t status) {
-    auto p=state_packet(request,center,epoch,session,status,1);
-    p[5]=filter_state_type;put(p,44,bandwidth,4);return p;
+std::vector<uint8_t> filter_state_packet(uint32_t request, double bandwidth, double center,
+    uint32_t epoch, uint32_t session, uint16_t status, bool edges) {
+    auto p=state_packet(request,std::llround(center),epoch,session,status,1);
+    p[5]=filter_state_type;put(p,44,std::llround(bandwidth),4);
+    if(edges) {
+        put(p,48,std::llround((center-bandwidth/2)*1000),4);
+        put(p,56,std::llround((center+bandwidth/2)*1000),4);
+    }
+    return p;
 }
 bool parse_tx_control(const uint8_t* p,size_t n,TxControl& c) {
     if(n!=64 || !tx_header(p,n,tx_control_type) || get(p,54,2)>1 ||
@@ -119,7 +128,7 @@ std::vector<std::vector<uint8_t>> spectrum_packets(const FrameInfo& f, const std
         std::memcpy(p.data(), "QTR2", 4);
         p[4] = protocol_version; p[5] = spectrum_type;
         put(p, 6, header_size, 2); // header length
-        put(p, 8, f.stream_id, 4); // 0: wide; 1: receiver zoom
+        put(p, 8, f.stream_id, 4); // 0: wide; 1/2: RX1/RX2 zoom
         put(p, 12, f.frame_id, 4);
         put(p, 16, f.timestamp_ns, 8);
         put(p, 24, f.sample_index, 8);

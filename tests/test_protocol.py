@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gui"))
-from protocol import Assembler, HEADER, subscription, filter_control, filter_state, valid_filter
+from protocol import Assembler, HEADER, subscription, filter_control, filter_state, valid_filter, filter_edges_control
 from protocol import compressor_control, compressor_state
 from protocol import loop_control,loop_state
 from protocol import nr_control,nr_state
@@ -94,6 +94,17 @@ class ProtocolTest(unittest.TestCase):
             self.assertFalse(valid_filter(bandwidth, center))
             with self.assertRaises(ValueError): filter_control(1, 99, bandwidth, center)
         self.assertTrue(valid_filter(501, 700))
+
+    def test_filter_edges_wire(self):
+        self.assertEqual(HEADER.unpack(filter_edges_control(7, 99))[13], 3)
+        setting = HEADER.unpack(filter_edges_control(8, 99, 301, 2700))
+        self.assertEqual((setting[8], setting[9], setting[10], setting[13]), (301000, 12000, 2700000, 2))
+        reply = HEADER.pack(b'QTR2', 1, 10, 64, 1, 8, 0, 3, 1501, 12000, 2399, 301000, 0, 0, 2700000, 99)
+        self.assertEqual(filter_state(reply), (8, 99, 2399, 1500.5, 0))
+        bad = list(HEADER.unpack(reply)); bad[14] = 4001000
+        self.assertIsNone(filter_state(HEADER.pack(*bad)))
+        for low, high in [(99, 2700), (301, 4001), (800, 1200), (2000, 1000), (float('nan'), 2700)]:
+            with self.assertRaises(ValueError): filter_edges_control(1, 99, low, high)
 
     def test_subscribe(self):
         self.assertEqual(len(subscription()), 64)

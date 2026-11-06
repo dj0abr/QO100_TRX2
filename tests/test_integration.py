@@ -44,7 +44,13 @@ def main():
             assert lower < upper*.003, (upper,lower)
             def channel_audio(stream, count=40):
                 q=receiver.channels[stream].frames
-                return [q.get(timeout=3) for _ in range(count)]
+                packets=[]
+                while len(packets)<count:
+                    packet=q.get(timeout=3)
+                    # Continuous tuning keeps already queued audio valid for playback.
+                    # Tone measurements start with the newly selected frequency.
+                    if packet.center_hz==receiver.channels[stream].applied_hz: packets.append(packet)
+                return packets
 
             def amplitude(packets, hz):
                 x=np.concatenate([p.samples for p in packets])[3000:]

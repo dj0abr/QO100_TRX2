@@ -236,13 +236,31 @@ def filter_control(request, session, bandwidth=None, center=None):
                        bandwidth if setting else 0, 0, 0, int(setting), 0, session)
 
 
+def valid_filter_edges(low, high):
+    return (isinstance(low, (int, float)) and isinstance(high, (int, float))
+            and 100 <= low <= high <= 4000 and high-low >= 500)
+
+
+def filter_edges_control(request, session, low=None, high=None):
+    setting = low is not None or high is not None
+    if setting and not valid_filter_edges(low, high):
+        raise ValueError("RX1 filter edges must be inside 100..4000 Hz, at least 500 Hz apart")
+    return HEADER.pack(MAGIC, VERSION, FILTER_CONTROL, 64, 1, request, 0, 0,
+                       round(low*1000) if setting else 0, 12000 if setting else 0,
+                       round(high*1000) if setting else 0, 0, 0, 2 if setting else 3, 0, session)
+
+
 def filter_state(packet):
     if len(packet) != 64:
         return None
     f = HEADER.unpack(packet)
     if (f[:4] != (MAGIC, VERSION, FILTER_STATE, 64) or f[4] != 1
-        or f[9] != 12000 or f[6] or f[11] or f[12] or f[14] or f[13] not in (0, 1)
-        or not valid_filter(f[10], f[8])):
+        or f[9] != 12000 or f[6] or f[12] or f[13] not in (0, 1)):
         return None
-    # request, backend session, accepted target BW/center, status
+    if f[11] or f[14]:
+        low, high = f[11]/1000, f[14]/1000
+        if not valid_filter_edges(low, high): return None
+        return f[5], f[15], high-low, (low+high)/2, f[13]
+    if not valid_filter(f[10], f[8]): return None
+    # Legacy state: request, backend session, target BW/center, status.
     return f[5], f[15], f[10], f[8], f[13]

@@ -1,6 +1,7 @@
 #include "qo100/settings.hpp"
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 #include <unistd.h>
 
@@ -19,7 +20,23 @@ int main() {
             {{"pluto_ip","999.0.0.1"}},{{"rx_correction_hz","-9223372036854775808"}},{{"lnb_reference_hz","30000000"}},
             {{"ptt","1"}},{{"pluto_rx_hz","1"}},{{"gui_audio_gain","nan"}}}) rejects([&]{qo100::patch_settings(base,patch);});
         rejects([&]{qo100::parse_settings("gui_audio_gain=4\ngui_audio_gain=5\n");});
+        const auto migrated=qo100::patch_settings(base,{{"rx1_filter_bandwidth_hz","501"},{"rx1_filter_center_hz","700"}});
+        require(migrated.rx1_filter.low_hz()==449.5 && migrated.rx1_filter.high_hz()==950.5,"Legacy filter changed");
+        next=qo100::patch_settings(next,{{"rx1_filter_low_hz","301"},{"rx1_filter_high_hz","2700"}});
+        require(next.rx1_filter.center_hz==1500.5 && next.rx1_filter.bandwidth_hz==2399,"Cutoffs lost half-Hz center");
+        auto upper=qo100::patch_settings(next,{{"rx1_filter_high_hz","2300"}});
+        require(upper.rx1_filter.low_hz()==301 && upper.rx1_filter.high_hz()==2300,"Upper cutoff moved lower cutoff");
+        auto lower=qo100::patch_settings(upper,{{"rx1_filter_low_hz","401"}});
+        require(lower.rx1_filter.high_hz()==2300 && lower.rx1_filter.low_hz()==401,"Lower cutoff moved upper cutoff");
+        for(const auto& patch:{qo100::SettingsMap{{"rx1_filter_low_hz","99"}},{{"rx1_filter_high_hz","4001"}},
+            {{"rx1_filter_low_hz","2300"},{"rx1_filter_high_hz","2700"}},{{"rx1_filter_low_hz","nan"}},
+            {{"rx1_filter_low_hz","300"},{"rx1_filter_bandwidth_hz","500"}}}) rejects([&]{qo100::patch_settings(base,patch);});
         const auto path=directory/"backend.settings";
+        {std::ofstream saved(path);saved<<"rx1_filter_bandwidth_hz=501\nrx1_filter_center_hz=700\n";}
+        {qo100::SettingsStore legacy(base,path);require(legacy.config().rx1_filter==migrated.rx1_filter,"Legacy saved settings not migrated");legacy.changed();legacy.flush();}
+        {std::ifstream saved(path);std::string text((std::istreambuf_iterator<char>(saved)),{});
+            require(text.find("rx1_filter_low_hz=449.5")!=std::string::npos && text.find("rx1_filter_bandwidth_hz")==std::string::npos,"Saved filter was not migrated to cutoff keys");}
+
         qo100::SettingsStore store(base,path);const auto initial_revision=store.revision();
         store.commit(next);
         require(store.revision()==initial_revision+1 && !store.dirty(),"Commit not durable");

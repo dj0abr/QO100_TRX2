@@ -74,6 +74,8 @@ void set_config_value(Config& c,const std::string& k,const std::string& v) {
         else if (k == "spectrum_fps") c.spectrum_fps = u32(v);
         else if (k == "initial_rx_hz") c.initial_rx_hz = integer(v);
         else if (k == "initial_rx2_hz") c.initial_rx2_hz = integer(v);
+        else if (k == "rx1_filter_low_hz") c.rx1_filter = RxFilterSettings::from_edges(real(v), c.rx1_filter.high_hz());
+        else if (k == "rx1_filter_high_hz") c.rx1_filter = RxFilterSettings::from_edges(c.rx1_filter.low_hz(), real(v));
         else if (k == "rx1_filter_bandwidth_hz") c.rx1_filter.bandwidth_hz = u32(v);
         else if (k == "rx1_filter_center_hz") c.rx1_filter.center_hz = u32(v);
         else if (k == "rx1_nr_percent") c.rx1_nr_percent = u32(v);
@@ -161,6 +163,9 @@ Config load_config(const std::filesystem::path& path) {
         seen[k] = true;
         set_config_value(c,k,v);
     }
+    if((seen.count("rx1_filter_low_hz") || seen.count("rx1_filter_high_hz")) &&
+       (seen.count("rx1_filter_bandwidth_hz") || seen.count("rx1_filter_center_hz")))
+        throw std::runtime_error("Use filter edges or legacy bandwidth/center, not both");
     c.derive();c.validate();
     return c;
 }

@@ -18,6 +18,8 @@ void setting(bridge::Config& c,const std::string& k,const std::string& v,const s
     if(k=="listen") c.listen=v;
     else if(k=="port") c.port=number(v,1,65535);
     else if(k=="backend_port") c.backend_port=number(v,1,65535);
+    else if(k=="decoder_audio_port") c.decoder_audio_port=number(v,0,65535);
+    else if(k=="decoder_text_port") c.decoder_text_port=number(v,0,65535);
     else if(k=="idle_seconds") c.idle_seconds=number(v,1,86400);
     else if(k=="max_clients") c.max_clients=number(v,1,256);
     else if(k=="queue_bytes") c.queue_bytes=number(v,65536,4194304);
@@ -44,6 +46,7 @@ int main(int argc,char** argv) {
             std::string option=argv[i];
             if(option=="--help") {
                 std::cout<<"qo100_webbridge [--config FILE] [--listen IPv4] [--port 8080] [--backend-port 40900]\n"
+                    "                [--decoder-audio-port 0] [--decoder-text-port 0]\n"
                     "                [--web-root DIR] [--idle-seconds 300] [--max-clients 16] [--queue-bytes 524288]\n";return 0;
             }
             if(++i==argc) throw std::runtime_error("Missing value for "+option);
@@ -62,6 +65,8 @@ int main(int argc,char** argv) {
             shutdown.async_wait([&](auto){io.stop();});});
         std::cout<<"HTTP/WS http://"<<c.listen<<':'<<c.port<<"; backend UDP 127.0.0.1:"<<c.backend_port
             <<"; idle timeout "<<c.idle_seconds<<" s\n"<<std::flush;
+        if(c.decoder_audio_port) std::cout<<"RX2 audio UDP 127.0.0.1:"<<c.decoder_audio_port
+            <<"; decoder text UDP 127.0.0.1:"<<c.decoder_text_port<<'\n'<<std::flush;
         io.run();return 0;
     } catch(const std::exception& e) {std::cerr<<"Webbridge: "<<e.what()<<'\n';return 1;}
 }

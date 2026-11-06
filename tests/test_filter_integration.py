@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gui"))
-from protocol import HEADER, AUDIO, STATE, audio_packet, subscription, tune, filter_control, filter_state
+from protocol import HEADER, AUDIO, STATE, audio_packet, subscription, tune, filter_control, filter_state, filter_edges_control
 
 
 def main():
@@ -22,8 +22,8 @@ def main():
         sock.connect(("127.0.0.1", port))
         config = Path(temp) / "backend.conf"
         text = Path(sys.argv[2]).read_text().replace("gui_port = 40900", f"gui_port = {port}")
-        text = text.replace("rx1_filter_bandwidth_hz = 3900", "rx1_filter_bandwidth_hz = 500")
-        text = text.replace("rx1_filter_center_hz = 2050", "rx1_filter_center_hz = 1000")
+        text = text.replace("rx1_filter_low_hz = 100", "rx1_filter_low_hz = 750")
+        text = text.replace("rx1_filter_high_hz = 4000", "rx1_filter_high_hz = 1250")
         config.write_text(text)
         process = subprocess.Popen([sys.argv[1], "--config", str(config), "--source", "synthetic"],
                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -121,6 +121,17 @@ def main():
             invalid[10] = 100  # Well-formed command, unsupported bandwidth.
             assert command(status=1, packet=HEADER.pack(*invalid)) == (501, 1000)
             assert command() == (501, 1000)
+            # Exact cutoff protocol, including a half-Hz center and legacy half-Hz edges.
+            assert command(packet=filter_edges_control(request+1, session)) == (501, 1000)
+            assert command(packet=filter_edges_control(request+1, session, 301, 2700)) == (2399, 1500.5)
+            assert command(packet=filter_edges_control(request+1, session)) == (2399, 1500.5)
+            assert command(packet=filter_edges_control(request+1, session, 700.5, 1700)) == (999.5, 1200.25)
+            assert .115 < level(1, 1000) < .125
+            assert level(1, 1700) < .05
+            assert .075 < level(2, 1700) < .085
+            invalid_edges = list(HEADER.unpack(filter_edges_control(request+1, session, 100, 4000)))
+            invalid_edges[8], invalid_edges[10] = 1900000, 2000000
+            assert command(status=1, packet=HEADER.pack(*invalid_edges)) == (999.5, 1200.25)
             for stream, packets in audio.items():
                 assert len(packets) > 100
                 assert all((p.session_id, p.epoch) == identity[stream] for p in packets)

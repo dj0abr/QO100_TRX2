@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.20)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(QO100_WebBridge VERSION 1.0.0 LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 17)
@@ -14,5 +14,6 @@ target_compile_definitions(qo100_webbridge PRIVATE BOOST_ERROR_CODE_HEADER_ONLY
     QO100_WEB_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web")
 target_compile_options(qo100_webbridge PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(qo100_webbridge PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../decoder ${CMAKE_CURRENT_BINARY_DIR}/decoder)
 install(TARGETS qo100_webbridge RUNTIME DESTINATION bin)
 install(DIRECTORY ../web/ DESTINATION share/qo100/web)

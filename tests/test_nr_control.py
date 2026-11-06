@@ -62,11 +62,12 @@ def main():
             assert receiver.filter_applied==(3900,2050) and receiver.invalid_audio==0
             assert receiver.received>0 and receiver.channels[2].received>0
             assert setting(0)==0
-            # A retune must reset the noise estimate without changing its configured strength.
+            # Continuous retuning preserves the configured NR strength.
             assert setting(80)==80
             epoch=receiver.channels[1].identity
             receiver.set_frequency(10489901000)
-            wait(lambda: receiver.channels[1].identity!=epoch)
+            wait(lambda: receiver.applied_hz==10489901000)
+            assert receiver.channels[1].identity==epoch,'Retuning reset NR/audio state'
             assert setting(None)==80
             print('NR config/query/bypass/strength/stale/invalid/session controls; RX2/filter/TX/FFT isolation and retune verified')
         finally:

@@ -14,6 +14,7 @@ using Clock=std::chrono::steady_clock;
 struct Config {
     std::string listen="0.0.0.0", web_root=QO100_WEB_ROOT;
     uint16_t port=8080,backend_port=40900;
+    uint16_t decoder_audio_port=0,decoder_text_port=0; // Both zero disables the external decoder link.
     unsigned idle_seconds=300,max_clients=16;
     size_t queue_bytes=524288;
 };
@@ -29,9 +30,10 @@ class Bridge {
         Clock::time_point sent{},started=Clock::now();bool safety=false;
     };
     Config config_;
-    net::ip::udp::socket udp_;
+    net::ip::udp::socket udp_,decoder_;
     net::steady_timer timer_;
     std::array<uint8_t,65536> receive_buffer_{};
+    std::array<char,4097> decoder_buffer_{};
     std::map<uint64_t,Client> clients_;
     std::map<unsigned,uint32_t> counters_;
     std::map<unsigned,Pending> pending_;
@@ -45,6 +47,7 @@ class Bridge {
     Clock::time_point ptt_until_{};
     void receive();void packet(Bytes p);void tick();void reset_backend();void bootstrap();
     void send_udp(Bytes p);
+    void receive_decoder();void send_decoder(Bytes p);
     void control(Bytes p,uint8_t reply,uint64_t client=0,Json id=nullptr,std::string command="",bool safety=false);
     void discover();void safety();void tx_off();void roles();void broadcast(const Json& j);
     void text(uint64_t client,const Json& j);void error(uint64_t client,const Json& id,const std::string& code,const std::string& message);

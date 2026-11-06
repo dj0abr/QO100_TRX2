@@ -59,13 +59,18 @@ def main():
                 click(wide)  # Upper waterfall center: exact RF band midpoint.
             def scroll_up():
                 captured['rx1_identity']=r.channels[1].identity
+                captured['wheel_tx_command']=r.tx_command
                 for _ in range(3): wheel(wide)
             def check_scroll():
-                expect(10489750000,30)
-                assert r.channels[1].identity==captured['rx1_identity'],'Wheel reset RX1'
+                expect(10489750030,-30)
+                assert r.channels[1].identity==captured['rx1_identity'],'Wheel reset RX1 audio stream'
+                assert r.tx_command==captured['wheel_tx_command'],'Wheel changed TX'
                 wheel(zoom,'<MouseWheel>',delta=240)
                 wheel(zoom,'<Button-5>')
-            def lower_click(): click(zoom,10489760000)
+            def lower_click():
+                # Keep the click an exact number of pixels from the retuned zoom center.
+                captured['lower_rx']=zoom.plot_geometry.center_hz+10000
+                click(zoom,captured['lower_rx'])
             def margins():
                 captured['commands']=(r.channels[1].command,r.tx_command)
                 # These coordinates are on metadata/background rather than plot data.
@@ -85,10 +90,27 @@ def main():
                 click(wide)
                 click(zoom,previous+10000)
                 captured['last_rx']=previous+10000
+            def filter_upper():
+                captured['filter_identity']=(r.channels[1].identity,r.channels[2].identity)
+                widgets['rx1_filter_high'].set(2700)
+            def check_filter(low,high):
+                assert r.filter_applied==(high-low,(low+high)/2),r.filter_applied
+                assert not r.filter_error and r.filter_acked==r.filter_command[0]
+                assert (r.channels[1].identity,r.channels[2].identity)==captured['filter_identity'],'Filter reset audio'
+                assert widgets['rx1_filter_low'].get()==low
+                assert widgets['rx1_filter_high'].get()==high
+            def filter_lower():
+                check_filter(100,2700);widgets['rx1_filter_low'].set(301)
+            def filter_limit():
+                check_filter(301,2700);widgets['rx1_filter_low'].set(2600)
+            def filter_full():
+                check_filter(2200,2700)
+                next(w for w in widgets.values() if isinstance(w,tk.Button) and w.cget('text')=='Full BW').invoke()
             steps=[initial,lambda:expect(10489750000,0),scroll_up,check_scroll,
-                   lambda:expect(10489750000,40),lower_click,lambda:expect(10489760000,40),
-                   margins,check_margins,resized_click,lambda:expect(10489810000,40),
-                   stale_zoom,lambda:expect(captured['last_rx'],40)]
+                   lambda:expect(10489750040,-40),lower_click,lambda:expect(captured['lower_rx'],-40),
+                   margins,check_margins,resized_click,lambda:expect(10489810000,-40),
+                   stale_zoom,lambda:expect(captured['last_rx'],-40),
+                   filter_upper,filter_lower,filter_limit,filter_full,lambda:check_filter(100,4000)]
             def run(index=0):
                 try:
                     steps[index]()
@@ -98,7 +120,7 @@ def main():
                             from PIL import ImageGrab
                             ImageGrab.grab(bbox=(self.winfo_rootx(),self.winfo_rooty(),self.winfo_rootx()+self.winfo_width(),self.winfo_rooty()+self.winfo_height())).save(captures/'mouse-gui.png')
                         except OSError: pass
-                        print('Both waterfalls, linked TX, wheel offset, RX2 isolation, margins, resized widget and stale-zoom image mapping: passed')
+                        print('Both waterfalls, linked TX on click, RX-only wheel, RX2 isolation, margins, resized widget and stale-zoom image mapping, independent filter cutoffs, minimum width and Full BW: passed')
                         self.tk.call(self.protocol('WM_DELETE_WINDOW'))
                 except Exception as exc:
                     errors.append(exc);self.tk.call(self.protocol('WM_DELETE_WINDOW'))
@@ -117,7 +139,7 @@ def main():
         try:
             gui_args=SimpleNamespace(host='127.0.0.1',port=port,no_audio=True,rx_frequency='10489.900000',
                                      rx2_frequency='10489.600000',tx_frequency='2400.400000',wheel_step_hz=10,
-                                     audio_report=captures/'mouse-gui-report.json',screenshot=None,seconds=10)
+                                     audio_report=captures/'mouse-gui-report.json',screenshot=None,seconds=15)
             test_gui.gui(gui_args)
         finally:
             backend.terminate();output=backend.communicate(timeout=5)[0]
@@ -125,7 +147,7 @@ def main():
             tk.Tk=original_root;test_gui.Receiver=original_receiver
         if errors: raise errors[0]
         report=json.loads(gui_args.audio_report.read_text())
-        assert report['tx_offset_hz']==40 and report['tx_packets']==0 and report['invalid_audio']==0,report
+        assert report['tx_offset_hz']==-40 and report['tx_packets']==0 and report['invalid_audio']==0,report
         assert backend.returncode==0,output
 
 

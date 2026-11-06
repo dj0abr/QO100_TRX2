@@ -10,6 +10,12 @@ Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
 **Für GUI-Entwickler:** [UDP-Schnittstelle](docs/udp-protocol.md) ·
 [eigenständiges C++-Beispiel](examples/gui_udp.cpp).
 
+**RX2-Decoder:** Für digitale Betriebsarten reicht der Webadapter RX2-Audio lokal
+an ein externes Programm weiter. Nur dessen Textausgabe gelangt zum Browser.
+FT8: `./build/bin/qo100_ft8_decoder` zusätzlich starten und RX2 auf den USB-Träger
+der FT8-Aktivität abstimmen. Der WSJT-X-Rechenkern wird mitgebaut; der bisherige
+Dummy-Name startet ebenfalls den FT8-Empfänger. [Start, Zeit und Tests](docs/ft8-decoder.md).
+
 **Browser-GUI:** Der separate Adapter `qo100_webbridge` verbindet die GUI-UDP-Schnittstelle
 mit HTTP/WebSocket und liefert eine HTML/JS-Testseite aus. Ein Bediener, beliebig weitere
 Zuschauer bis zum konfigurierten Verbindungslimit; nach fünf Minuten ohne Bedienung wird
@@ -17,7 +23,7 @@ der Bediener abgemeldet. [Start und WebSocket-Protokoll](docs/webbridge.md).
 
 ```sh
 # Zusätzliche Header-Pakete unter Debian/Ubuntu:
-sudo apt install libboost-dev nlohmann-json3-dev
+sudo apt install libboost-dev nlohmann-json3-dev gfortran libfftw3-dev
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/bin/qo100_webbridge --config config/webbridge.conf
@@ -29,7 +35,7 @@ den Backend-UDP-Port abonnieren. Für einen Build ohne Adapter: `-DQO100_BUILD_W
 
 ## Bauen
 
-Benötigt werden Linux, CMake, ein C++17-Compiler, libiio (0.x-API),
+Benötigt werden Linux, CMake >= 3.20, ein C++17-Compiler, libiio (0.x-API),
 libad9361, libsamplerate und FFTW3 mit Float-Unterstützung.
 Für das Test-GUI: Python 3, tkinter, numpy und Pillow; zur Audioausgabe die
 Systembibliotheken libasound und libsamplerate. Es ist kein zusätzliches
@@ -94,7 +100,7 @@ Klang müssen deshalb im Funkbetrieb beurteilt werden.
 von 20 ms. Die Rauschschätzung läuft auch während der Überbrückung mit, damit
 kein manuelles Einlernen nötig ist. Aktive NR fügt durch die überlappte Analyse
 20 ms Audioverzögerung hinzu. Umschalten setzt weder Samplezähler noch RX-Epoch
-zurück. Bei Frequenzwechsel wird die Rauschschätzung mit den RX-Filtern gelöscht.
+zurück. Beim normalen Abstimmen bleiben Rauschschätzung und RX-Filterzustände erhalten.
 AGC, VAD und Echounterdrückung sind deaktiviert. RX2 für externe Digitalprogramme,
 beide Wasserfälle, TX und der direkte Audio-Loop bleiben unverändert.
 
@@ -169,9 +175,10 @@ Frequenz unter dem Mauszeiger ab. Ein Klick in die zugehörige Spektrumkurve
 funktioniert genauso. TX folgt auf die passende QO-100-Uplinkfrequenz und behält
 den eingestellten TX-Versatz bei. RX2 bleibt unabhängig.
 
-Mit dem **Mausrad über einem der beiden Wasserfälle** wird nur TX verstellt:
-nach oben **+10 Hz**, nach unten **−10 Hz** je Rastung. RX1 und die Mitte seines
-Zooms bleiben dabei stehen. Der aktuelle Versatz steht neben der PTT-Taste.
+Mit dem **Mausrad über einem der beiden Wasserfälle** wird nur RX1 verstellt:
+nach oben **+10 Hz**, nach unten **−10 Hz** je Rastung (Standardschrittweite).
+Der Zoom folgt RX1; TX und RX2 behalten ihre Frequenz. Der dadurch geänderte
+TX-Versatz steht neben der PTT-Taste.
 Eine andere Schrittweite lässt sich beim Start wählen, beispielsweise:
 
 ```bash
@@ -256,46 +263,44 @@ als Mono-Audio ausgegeben. Es gibt keine AGC und keine Sprach-/Rauschbearbeitung
 Das Audio verwendet **12 kHz, Mono, PCM16** und Pakete mit 240 Samples/20 ms.
 Das sind **24 kB/s reine Audiodaten**; mit dem QTR2-Header 27,2 kB/s UDP-Nutzlast.
 Die Übertragung bleibt innerhalb derselben GUI-UDP-Schnittstelle. Metadaten
-enthalten Sample-Zähler und Abstimmungsgeneration. Das GUI puffert kurzzeitig,
+enthalten Sample-Zähler und Audio-Stromgeneration. Das GUI puffert kurzzeitig,
 sortiert anhand der Sample-Indizes und ersetzt fehlende Pakete durch Stille.
 Der Puffer bleibt auf höchstens 0,5 s begrenzt. Ein langsam nachgeregelter
 Sinc-Resampler gleicht die Taktabweichung zwischen Pluto und Soundkarte aus.
 Die Soundkarte wird über ALSA **default** geöffnet; ALSA kann bei Bedarf auf
 die Hardware-Samplerate umsetzen. Der Audiothread arbeitet unabhängig von Tk.
 
-Bei einer tatsächlichen Frequenzänderung werden Kanalfilter, Zoom und
-Audiogeneration zurückgesetzt. Das GUI verwirft alte Audiopakete nach der
-Bestätigung. Wiederholte Abstimmkommandos setzen den Kanal nicht erneut zurück;
-verspätete ältere Befehle werden ignoriert. Ein vollständiger ±25-kHz-Zoom muss
+Bei einer normalen RX-Frequenzänderung wird nur die Mischfrequenz geändert.
+Oszillatorphase, Kanalfilter, NR, Resampler, Zoom und Audiopuffer laufen weiter;
+Audio-Epoche und Sample-Zähler bleiben kontinuierlich. Die Tonhöhe folgt der
+Abstimmung ohne Stummschaltung. Nur echte Hardware-/Signalweg-Resets wechseln
+die Audio-Epoche und leeren die Puffer. Verspätete ältere Befehle werden ignoriert. Ein vollständiger ±25-kHz-Zoom muss
 innerhalb des 600-kHz-Empfangsfensters bleiben.
 
-## RX1: Bandbreite und Lage des Durchlassbereichs
+## RX1: Untere und obere Filtergrenze
 
-RX1 besitzt im Test-GUI zwei unabhängig einstellbare Regler:
+RX1 besitzt im Python-Test-GUI und im WebGUI zwei Regler: **untere Grenze**
+und **obere Grenze**, jeweils in Audio-Hz relativ zum USB-Träger. Eine Änderung
+verschiebt nur die jeweilige Grenze; die andere bleibt stehen. Zulässig sind
+**100–4000 Hz** bei mindestens **500 Hz Abstand**. Die Regler begrenzen sich
+entsprechend. Beispiel: unten **300 Hz**, oben **2700 Hz** ergibt **2400 Hz BW**.
+Abstimmfrequenz und Zoom-Mitte ändern sich dadurch nicht.
 
-- **BW:** 500 bis 3900 Hz, in 1-Hz-Schritten einstellbar.
-- **Mitte / Lage:** Mittenfrequenz des Audio-Durchlassbereichs in Hz relativ
-  zum eingestellten USB-Träger. Die Grenzen sind `Mitte ± BW/2`.
+Bandbreiten-Presets behalten die untere Grenze, soweit die neue Breite hineinpasst.
+**Full BW** setzt **100–4000 Hz**. Die Grenzen bezeichnen den nominellen
+Durchlassbereich mit etwa −6 dB an den Kanten; der FIR hat endliche Übergangsbereiche.
 
-Beispiel: **BW 500 Hz, Mitte 700 Hz** ergibt einen Durchlassbereich von
-**450–950 Hz**. Bei gleicher Breite lässt sich dieser Bereich entlang des
-Audiospektrums verschieben. Die Abstimmfrequenz und die Mitte des Zooms ändern
-sich dabei nicht. Die Filtergrenzen bleiben innerhalb **100–4000 Hz**; das GUI
-begrenzt den Lageregler passend zur gewählten Breite.
-
-Die Tasten **500 Hz, 1.2 kHz, 1.8 kHz, 2.7 kHz und Full BW** setzen die Breite.
-Die bisherige Mitte bleibt erhalten, soweit sie zur neuen Breite passt.
-**Full BW** bedeutet weiterhin **100–4000 Hz**, also 3900 Hz Breite bei 2050 Hz Mitte.
-Die Grenzen bezeichnen den nominellen Durchlassbereich mit etwa −6 dB an den
-Kanten; der FIR hat endliche Übergangsbereiche.
-
-Beim Start liest das GUI die aktuelle Filtereinstellung aus dem Backend.
-Die Startwerte stehen in `config/backend.conf`:
+Die GUIs lesen die Werte beim Start vom Backend. Das Backend speichert Änderungen
+dauerhaft; die Vorgaben in `config/backend.conf` lauten:
 
 ```ini
-rx1_filter_bandwidth_hz = 3900
-rx1_filter_center_hz = 2050
+rx1_filter_low_hz = 100
+rx1_filter_high_hz = 4000
 ```
+
+Alte Konfigurationen und gespeicherte Werte mit `rx1_filter_bandwidth_hz` und
+`rx1_filter_center_hz` werden übernommen und beim nächsten Speichern als Grenzen
+abgelegt. Auch bisherige halbe Hertz an den Rändern bleiben erhalten.
 
 Ungültige Kombinationen verhindern den Backend-Start bzw. werden bei UDP-Steuerung
 mit Fehlerstatus abgelehnt. Änderungen werden zwischen gleich langen, mit der
@@ -323,13 +328,17 @@ werden. Empfangsstatistik und bestätigte Frequenz werden separat angezeigt:
 Paketanzahl, Sample-Anzahl, RMS und Spitzenpegel. RX2 wird weder auf die
 Soundkarte gemischt noch einer Sprachbearbeitung oder einem Digitaldecoder
 zugeführt. Seine kurze Test-Queue ist begrenzt und wird nach der Auswertung
-verworfen. Ein zusätzlicher RX2-Wasserfall ist in diesem Schritt nicht nötig.
+verworfen. Das Backend erzeugt zusätzlich einen unabhängigen RX2-Zoom
+(8192 Bins bei 75 kHz, nutzbarer Ausschnitt ±25 kHz um RX2). Dieser kommt als
+`SPECTRUM`, Stream 2, über UDP und den Webadapter bis zum Browser. Die Webseiten
+und die beiden bestehenden Anzeigen des Test-GUIs bleiben vorerst unverändert.
 
 Beide Audioströme sind **12 kHz, Mono, PCM16**, jeweils 240 Samples pro Paket.
 Die Stream-ID 1 kennzeichnet RX1, die Stream-ID 2 RX2. Alle Daten und
 Steuerbefehle verwenden weiterhin denselben GUI-UDP-Port. Reine Audionutzdaten:
-24 kB/s je Kanal, zusammen 48 kB/s. Beim Retune werden nur Filter und Audioepoch
-des angesprochenen Kanals zurückgesetzt. Eine lokale Änderung der
+24 kB/s je Kanal, zusammen 48 kB/s. Beim normalen Retune bleiben Audio-Epoche,
+Filter, Resampler, Oszillatorphase und Sample-Takt erhalten. Beide Audioströme
+laufen für eine unterbrechungsfreie Abstimmung weiter. Eine lokale Änderung der
 RX1-Wiedergabelautstärke verändert die übertragenen Samples von RX2 nicht.
 
 ```bash
@@ -454,8 +463,8 @@ und sich zurückhören. Dieser Hörtest benötigt eine HF-Einkopplung vom TX zum
 die passende Kopplung/Dämpfung gehört zum HF-Aufbau.
 
 Im HF-Loop bekommt auch RX2 den auf das TX-Band umgestellten Hardwarestrom.
-RX1-Abstimmung und Wasserfall-Klick sind gesperrt; TX-Abstimmung und Mausrad
-funktionieren weiter. Die Frequenzanzeige bleibt auf die zugehörige
+RX1-Abstimmung, Wasserfall-Klick und Mausrad sind gesperrt; die manuelle
+TX-Abstimmung funktioniert weiter. Die Frequenzanzeige bleibt auf die zugehörige
 QO-100-Downlinkskala umgerechnet. **Normal** stellt den RX-LO wieder auf
 **739,750 MHz** und die zuvor gewählten RX-Frequenzen zurück. Filter- und
 Kompressoreinstellungen bleiben erhalten. Die Umschaltung wird erst nach
@@ -548,7 +557,7 @@ speichern** sendet nur die geänderten Werte an das Backend; erst nach Prüfung,
 Übernahme und erfolgreicher Speicherung erscheint die Bestätigung.
 
 Das Backend ist die zentrale Ablage, auch für reine GUI-Einstellungen. Es merkt
-sich außerdem RX1-/RX2-/TX-Trägerfrequenzen, RX1-Bandbreite und Lage, NR samt
+sich außerdem RX1-/RX2-/TX-Trägerfrequenzen, untere/obere RX1-Filtergrenze, NR samt
 letztem Reglerwert, TX-Kompressor, lokale Audioverstärkung und Display-Untergrenze.
 Beim Öffnen fragt das GUI zuerst diese Werte ab. Die bisherigen fest eingebauten
 GUI-Startfrequenzen überschreiben damit keine Backend-Einstellungen mehr.

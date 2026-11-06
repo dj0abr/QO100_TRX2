@@ -23,6 +23,8 @@ public:
     RxChannel(const RxChannel&) = delete;
     RxChannel& operator=(const RxChannel&) = delete;
     void tune(int64_t offset_hz);
+    // Change frequency while keeping oscillator phase, DSP history and sample clock.
+    void retune(int64_t offset_hz);
     void push(std::complex<float> sample);
     void set_filter(RxFilterSettings settings) { usb_filter_.set(settings); }
     RxFilterSettings filter_settings() const { return usb_filter_.target(); }

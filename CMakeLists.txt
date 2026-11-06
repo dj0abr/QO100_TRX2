@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.20)
 project(QO100_TRX2 VERSION 0.11.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -70,6 +70,7 @@ target_compile_definitions(qo100_backend PRIVATE
     QO100_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf")
 add_dependencies(qo100_backend pluto)
 
+include(CTest)
 option(QO100_BUILD_WEBBRIDGE "Build standalone HTTP/WebSocket GUI adapter" ON)
 if(QO100_BUILD_WEBBRIDGE)
     add_subdirectory(webbridge)
@@ -78,7 +79,6 @@ endif()
 add_executable(benchmark_dsp EXCLUDE_FROM_ALL tools/benchmark_dsp.cpp)
 target_link_libraries(benchmark_dsp PRIVATE qo100_core)
 
-include(CTest)
 if(BUILD_TESTING)
     add_executable(gui_udp_example examples/gui_udp.cpp)
     target_compile_options(gui_udp_example PRIVATE -Wall -Wextra -Wpedantic)
@@ -113,6 +113,17 @@ if(BUILD_TESTING)
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
             ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
         set_tests_properties(webbridge_udp PROPERTIES TIMEOUT 60)
+        add_test(NAME rx2_zoom_websocket COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rx2_zoom.py
+            $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(rx2_zoom_websocket PROPERTIES TIMEOUT 25)
+        add_test(NAME rx2_decoder_udp COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rx2_decoder.py
+            $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
+            $<TARGET_FILE:test_udp_text_decoder> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf
+            ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(rx2_decoder_udp PROPERTIES TIMEOUT 25)
     endif()
     add_test(NAME cpp_gui_udp COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpp_gui.py
@@ -146,6 +157,10 @@ if(BUILD_TESTING)
     add_test(NAME synthetic_udp COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_integration.py
         $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    add_test(NAME rx_retune_continuity COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rx_retune.py
+        $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(rx_retune_continuity PROPERTIES TIMEOUT 20)
     add_test(NAME tx_udp COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tx_integration.py
         $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)

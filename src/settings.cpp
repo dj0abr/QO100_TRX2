@@ -20,8 +20,8 @@ SettingsMap settings_values(const Config& c) {
         {"tx_attenuation_db",value(c.tx_attenuation_db)},
         {"initial_rx_hz",value(c.initial_rx_hz)},{"initial_rx2_hz",value(c.initial_rx2_hz)},
         {"initial_tx_hz",value(c.initial_tx_hz)},
-        {"rx1_filter_bandwidth_hz",value(c.rx1_filter.bandwidth_hz)},
-        {"rx1_filter_center_hz",value(c.rx1_filter.center_hz)},
+        {"rx1_filter_low_hz",value(c.rx1_filter.low_hz())},
+        {"rx1_filter_high_hz",value(c.rx1_filter.high_hz())},
         {"rx1_nr_percent",value(c.rx1_nr_percent)},
         {"tx1_compressor_percent",value(c.tx1_compressor.amount/10.)},
         {"gui_audio_gain",value(c.gui_audio_gain)},{"gui_display_floor",value(c.gui_display_floor)},
@@ -48,8 +48,11 @@ std::string encode_settings(const SettingsMap& values) {
 }
 Config patch_settings(const Config& old,const SettingsMap& patch) {
     Config next=old;const auto supported=settings_values(old);
+    const bool legacy=patch.count("rx1_filter_bandwidth_hz") || patch.count("rx1_filter_center_hz");
+    if(legacy && (patch.count("rx1_filter_low_hz") || patch.count("rx1_filter_high_hz")))
+        throw std::runtime_error("Use filter edges or legacy bandwidth/center, not both");
     for(const auto& [k,v]:patch) {
-        if(!supported.count(k)) throw std::runtime_error("Unknown or read-only setting: "+k);
+        if(!supported.count(k) && k!="rx1_filter_bandwidth_hz" && k!="rx1_filter_center_hz") throw std::runtime_error("Unknown or read-only setting: "+k);
         set_config_value(next,k,v);
     }
     if(next.rx1_nr_percent) next.gui_nr_strength=next.rx1_nr_percent;

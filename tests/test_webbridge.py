@@ -145,9 +145,9 @@ def main():
             viewer = browser()
             viewer.role('viewer', True)
             viewer.state()
-            for stream in [0, 1]:
+            for stream in [0, 1, 2]:
                 viewer.wait(lambda p: isinstance(p, bytes) and p[5] == 2 and struct.unpack_from('!I', p, 8)[0] == stream)
-            for stream in [1, 2]:
+            for stream in [1]:
                 viewer.wait(lambda p: isinstance(p, bytes) and p[5] == 5 and len(p) == 544 and struct.unpack_from('!I', p, 8)[0] == stream)
             # No viewer command, query, or audio may be forwarded to the backend.
             marker = 10489771234
@@ -172,7 +172,14 @@ def main():
             attempts = [p for p in proxy.log if p[5] == 3 and HEADER.unpack_from(p)[8] == frequency]
             assert len(attempts) >= 2 and len({p[12:16] for p in attempts}) == 1
             command(owner, 'tune', stream=2, frequency_hz=10489610000)
-            command(owner, 'filter', bandwidth_hz=1800, center_hz=1100)
+            command(owner, 'filter', bandwidth_hz=1800, center_hz=1100)  # Legacy command stays supported.
+            command(owner, 'filter', low_hz=301, high_hz=2700)
+            edges = viewer.state(lambda s: s.get('filter', {}).get('low_hz')==301)
+            assert edges['filter']['low_hz']==301 and edges['filter']['high_hz']==2700,edges
+            assert edges['filter']['center_hz']==1500.5,edges
+            command(owner, 'filter', query=True)
+            queried = viewer.state(lambda s: s.get('filter', {}).get('low_hz')==301)
+            assert queried['filter']['low_hz']==301 and queried['filter']['high_hz']==2700,queried
             command(owner, 'nr', percent=60)
             command(owner, 'compressor', percent=100.7)
             saved = command(owner, 'settings_get')
@@ -195,6 +202,8 @@ def main():
             viewer.wait(lambda s: isinstance(s, dict) and s.get('type') == 'role' and s.get('clients') == 2, 4)
             command(owner, 'nr', percent=60)
             # Audio-loop TX is observable byte-for-byte by all clients, with no RF.
+            # State is now published immediately, including the earlier PTT test.
+            owner.messages.clear()
             command(owner, 'loop', mode=1)
             command(owner, 'tx', frequency_hz=2400400000, ptt=True)
             tx = owner.state(lambda s: s.get('tx', {}).get('ptt'))

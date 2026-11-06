@@ -12,14 +12,14 @@ C tone(float amplitude,double hz,uint64_t index,double rate) {
     return std::polar(amplitude,float(std::remainder(2*pi*hz*index/rate,2*pi)));
 }
 void curves() {
-    for(qo100::RxFilterSettings settings: {qo100::RxFilterSettings{500,700}, {1200,1100}, {1800,1300}, {2700,1650}, {3900,2050}, {501,700}}) {
+    for(qo100::RxFilterSettings settings: {qo100::RxFilterSettings{500,700}, {1200,1100}, {1800,1300}, {2700,1650}, {3900,2050}, {501,700}, qo100::RxFilterSettings::from_edges(301,2700), qo100::RxFilterSettings::from_edges(700.5,1700)}) {
         auto f=qo100::make_usb_filter(1,settings);
         auto response=[&](double hz) { C y;qo100::check_liquid(firfilt_cccf_freqresponse(f.get(),hz/12000,&y));return std::abs(y); };
         require(std::abs(response(settings.center_hz)-1)<.005,"Incorrect filter center gain");
         require(std::abs(response(settings.low_hz())-.5)<.02 && std::abs(response(settings.high_hz())-.5)<.02,"Filter bandwidth/position is incorrect");
         require(response(settings.low_hz()-150)<.0001 && response(settings.high_hz()+150)<.0001,"Insufficient filter stopband rejection");
     }
-    for(qo100::RxFilterSettings bad:{qo100::RxFilterSettings{499,700},{3901,2050},{500,349},{500,3751},{UINT32_MAX,700},{500,UINT32_MAX}})
+    for(qo100::RxFilterSettings bad:{qo100::RxFilterSettings{499,700},{3901,2050},{500,349},{500,3751},{UINT32_MAX,700},{500,UINT32_MAX},{500,NAN},{NAN,1000},{500,INFINITY}})
         require(!bad.valid(),"Out-of-range filter accepted");
 }
 void crossfade() {

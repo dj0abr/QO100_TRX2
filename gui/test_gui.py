@@ -8,9 +8,9 @@ import socket
 import threading
 import time
 import numpy as np
-from protocol import Assembler, subscription, tune, audio_packet, HEADER, STATE, AUDIO
+from protocol import SPECTRUM, Assembler, subscription, tune, audio_packet, HEADER, STATE, AUDIO
 from protocol import TX_STATE, tx_control, tx_audio
-from protocol import FILTER_STATE, filter_control, filter_state, valid_filter
+from protocol import FILTER_STATE, filter_edges_control, filter_state, valid_filter_edges
 from protocol import COMPRESSOR_STATE, compressor_control, compressor_state
 from protocol import LOOP_STATE, LOOP_AUDIO, LOOP_RF, loop_control, loop_state
 from protocol import NR_STATE, nr_control, nr_state
@@ -57,7 +57,7 @@ class Receiver:
         self.tx_error = ""
         self.tx_fill = self.tx_pluto_fill = self.tx_ppm = 0
         self.filter_lock = threading.RLock()
-        self.filter_command = (1, None, None)  # request, BW, center; None queries backend defaults
+        self.filter_command = (1, None, None)  # request, lower/upper cutoff; None queries backend defaults
         self.filter_session = None
         self.filter_applied = None
         self.filter_acked = None
@@ -147,8 +147,8 @@ class Receiver:
                 command = self.filter_command
                 if self.filter_session is not None and (command != last_filter or time.monotonic() >= next_filter):
                     try:
-                        request, bandwidth, center = command
-                        self.sock.send(filter_control(request, self.filter_session, bandwidth, center))
+                        request, low, high = command
+                        self.sock.send(filter_edges_control(request, self.filter_session, low, high))
                         last_filter = command
                         next_filter = time.monotonic() + 1
                     except OSError as exc:
@@ -338,6 +338,8 @@ class Receiver:
                         elif not state.sink:
                             self.offer(state.frames, audio)
                     continue
+                if packet[5] == SPECTRUM and fields[4] not in (0, 1):
+                    continue
                 if fields[4] == 1:
                     if self.applied_hz is None or fields[8]!=self.applied_hz: continue
                     frame = self.zoom_assembler.push(packet)
@@ -362,10 +364,13 @@ class Receiver:
         state.command = ((state.command[0] + 1) & 0xffffffff, hz)
 
     def set_filter(self, bandwidth, center):
-        if not valid_filter(bandwidth, center):
-            raise ValueError("RX1 filter requires BW 500..3900 Hz with edges inside 100..4000 Hz")
+        return self.set_filter_edges(center-bandwidth/2, center+bandwidth/2)
+
+    def set_filter_edges(self, low, high):
+        if not valid_filter_edges(low, high):
+            raise ValueError("RX1 filter edges must remain inside 100..4000 Hz, at least 500 Hz apart")
         with self.filter_lock:
-            self.filter_command = ((self.filter_command[0]+1)&0xffffffff, bandwidth, center)
+            self.filter_command = ((self.filter_command[0]+1)&0xffffffff, low, high)
             self.filter_acked = None
             self.filter_error = ""
             return self.filter_command[0]
@@ -598,8 +603,8 @@ def gui(args):
                  name="audio_gain",command=gain_changed, bg="#0b1321", fg="#e8edf7").pack(side="left")
     filter_controls = tk.Frame(root, bg="#0b1321")
     filter_controls.pack(pady=3)
-    filter_bw = tk.IntVar(value=3900)
-    filter_center = tk.IntVar(value=2050)
+    filter_low = tk.DoubleVar(value=100)
+    filter_high = tk.DoubleVar(value=4000)
     filter_syncing = False
     filter_ready = False
     filter_after = None
@@ -607,37 +612,40 @@ def gui(args):
     def constrain_filter():
         nonlocal filter_syncing
         filter_syncing = True
-        width = int(filter_bw.get())
-        minimum = (200+width+1)//2
-        maximum = (8000-width)//2
-        center_scale.configure(from_=minimum, to=maximum, state="normal" if filter_ready and minimum<maximum else "disabled")
-        filter_center.set(max(minimum, min(maximum, int(filter_center.get()))))
+        low, high = filter_low.get(), filter_high.get()
+        low_scale.configure(to=high-500, state="normal" if filter_ready and high>600 else "disabled")
+        high_scale.configure(from_=low+500, state="normal" if filter_ready and low<3500 else "disabled")
         filter_syncing = False
     def send_filter():
         nonlocal filter_after
         filter_after = None
         if filter_ready:
-            receiver.set_filter(int(filter_bw.get()), int(filter_center.get()))
+            receiver.set_filter_edges(filter_low.get(), filter_high.get())
     def filter_changed(value=None):
         nonlocal filter_after
         if filter_syncing or not filter_ready: return
         constrain_filter()
         # Throttle to at most 20 updates/s while dragging, retaining the latest values.
         if filter_after is None: filter_after = root.after(50, send_filter)
-    tk.Label(filter_controls, text="RX1 BW (Hz)", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=5)
-    bw_scale = tk.Scale(filter_controls, name="rx1_bandwidth", from_=500, to=3900, resolution=1,
-                        orient="horizontal", variable=filter_bw, command=filter_changed, length=300,
+    tk.Label(filter_controls, text="RX1 untere Grenze (Hz)", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=5)
+    low_scale = tk.Scale(filter_controls, name="rx1_filter_low", from_=100, to=3500, resolution=.5,
+                        orient="horizontal", variable=filter_low, command=filter_changed, length=300,
                         bg="#0b1321", fg="#e8edf7", highlightthickness=0, state="disabled")
-    bw_scale.pack(side="left")
-    tk.Label(filter_controls, text="Mitte / Lage (Audio Hz)", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=5)
-    center_scale = tk.Scale(filter_controls, name="rx1_filter_center", from_=350, to=3750, resolution=1,
-                            orient="horizontal", variable=filter_center, command=filter_changed, length=300,
+    low_scale.pack(side="left")
+    tk.Label(filter_controls, text="Obere Grenze (Hz)", bg="#0b1321", fg="#e8edf7").pack(side="left", padx=5)
+    high_scale = tk.Scale(filter_controls, name="rx1_filter_high", from_=600, to=4000, resolution=.5,
+                            orient="horizontal", variable=filter_high, command=filter_changed, length=300,
                             bg="#0b1321", fg="#e8edf7", highlightthickness=0, state="disabled")
-    center_scale.pack(side="left")
+    high_scale.pack(side="left")
     presets = tk.Frame(root, bg="#0b1321")
     presets.pack()
     def preset_filter(width):
-        filter_bw.set(width)
+        nonlocal filter_syncing
+        low = min(filter_low.get(), 4000-width)
+        filter_syncing = True
+        low_scale.configure(to=3500); high_scale.configure(from_=600)
+        filter_low.set(low); filter_high.set(low+width)
+        filter_syncing = False
         filter_changed()
     preset_buttons = []
     for label, width in (("500 Hz",500),("1.2 kHz",1200),("1.8 kHz",1800),("2.7 kHz",2700),("Full BW",3900)):
@@ -735,7 +743,7 @@ def gui(args):
             return
         try:
             offset=tx_offset_hz(receiver.channels[1].command[1],receiver.tx_command[1])
-            offset_label.configure(text=f"TX-Offset {offset:+d} Hz | Rad {wheel_step_hz} Hz")
+            offset_label.configure(text=f"TX-Offset {offset:+d} Hz | RX-Rad {wheel_step_hz} Hz")
         except (ValueError,ArithmeticError):
             offset_label.configure(text="TX-Offset: Frequenzeingabe prüfen")
     update_offset_label()
@@ -820,6 +828,7 @@ def gui(args):
         receiver.set_tx(frequency=tx_hz)
         update_offset_label()
     def waterfall_wheel(event):
+        if receiver.loop_mode==LOOP_RF or receiver.loop_status==3: return "break"
         geometry=getattr(event.widget,'plot_geometry',None)
         if geometry is None: return "break"
         if geometry.widget_frequency_at(event.x,event.y,event.widget.winfo_width(),event.widget.winfo_height()) is None:
@@ -827,14 +836,15 @@ def gui(args):
         steps=wheel_steps(event)
         if not steps: return "break"
         try:
-            rx_hz=receiver.channels[1].command[1]
-            tx_hz=receiver.tx_command[1]+wheel_step_hz*steps
+            if receiver.channels[1].command[1] is None or receiver.tx_command[1] is None: return "break"
+            rx_hz=receiver.channels[1].command[1]+wheel_step_hz*steps
+            tx_hz=receiver.tx_command[1]
         except (ValueError,ArithmeticError):
-            receiver.tx_error="Frequenzeingaben vor der Mausabstimmung prüfen"
+            receiver.tune_error="Frequenzeingaben vor der Mausabstimmung prüfen"
             return "break"
         if valid_mouse_tuning(rx_hz,tx_hz):
-            tx_frequency.set(mhz_text(tx_hz))
-            receiver.set_tx(frequency=tx_hz)
+            frequency.set(mhz_text(rx_hz))
+            receiver.set_frequency(rx_hz)
             update_offset_label()
         return "break"
     for widget in (canvas,zoom_canvas):
@@ -953,17 +963,17 @@ def gui(args):
         applied = receiver.filter_applied
         if applied is not None and applied != last_filter_applied and filter_after is None and receiver.filter_acked == receiver.filter_command[0]:
             filter_syncing = True
-            filter_bw.set(applied[0]); filter_center.set(applied[1])
+            low_scale.configure(to=3500); high_scale.configure(from_=600)
+            filter_low.set(applied[1]-applied[0]/2); filter_high.set(applied[1]+applied[0]/2)
             filter_syncing = False
             filter_ready = True
-            bw_scale.configure(state="normal")
             for button in preset_buttons: button.configure(state="normal")
             constrain_filter()
             last_filter_applied = applied
         if applied is not None:
             width, center = applied
             pending = filter_after is not None or receiver.filter_acked != receiver.filter_command[0]
-            filter_monitor.configure(text=f"RX1 Filter: {center-width/2:g}–{center+width/2:g} Hz | BW {width} Hz | Mitte {center} Hz"
+            filter_monitor.configure(text=f"RX1 Filter: {center-width/2:g}–{center+width/2:g} Hz | BW {width:g} Hz"
                 + (" | wird übernommen…" if pending else " | bestätigt") + (f" | {receiver.filter_error}" if receiver.filter_error else ""))
         nr=receiver.nr_applied
         if nr is not None and nr!=last_nr_applied and nr_after is None and receiver.nr_acked==receiver.nr_command[0]:
@@ -1066,7 +1076,7 @@ def main():
     parser.add_argument("--tx-frequency", help="Override backend TX frequency in MHz")
     parser.add_argument("--rx2-frequency", help="Override backend RX2 frequency in MHz")
     parser.add_argument("--no-audio", action="store_true", help="Disable soundcard playback")
-    parser.add_argument("--wheel-step-hz",type=int,help="Override stored TX mouse-wheel step (Hz)")
+    parser.add_argument("--wheel-step-hz",type=int,help="Override stored RX1 mouse-wheel step (Hz)")
     parser.add_argument("--audio-report", type=Path, help="Write playback test statistics on GUI close")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=40900)

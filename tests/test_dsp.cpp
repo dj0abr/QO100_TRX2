@@ -12,6 +12,13 @@ constexpr double pi=3.14159265358979323846;
 using Complex=std::complex<float>;
 void require(bool ok,const char* message) { if(!ok) throw std::runtime_error(message); }
 void mixers() {
+    for(int old_offset:{-1379,1379}) for(int new_offset:{-1404,0,1404}) {
+        qo100::FrequencyShifter mixer(600000), reference(600000);
+        mixer.tune(old_offset);reference.tune(old_offset);
+        for(int i=0;i<137;++i) {mixer.execute({1,0});reference.execute({1,0});}
+        mixer.tune(new_offset,false);
+        require(std::abs(mixer.execute({1,0})-reference.execute({1,0}))<1e-6,"Retuning changed oscillator phase");
+    }
     for(unsigned rate:{600000U,1200000U}) for(int offset:{-275000,-150001,-1500,-1,0,1,1500,150001,275000}) {
         qo100::FrequencyShifter mixer(rate);
         mixer.tune(offset);

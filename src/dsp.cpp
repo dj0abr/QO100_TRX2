@@ -53,11 +53,13 @@ FrequencyShifter::FrequencyShifter(unsigned sample_rate)
     : nco_(nco_crcf_create(LIQUID_VCO_INTERP)), rate_(sample_rate) {
     if (!nco_ || !rate_) throw std::runtime_error("Cannot create liquid oscillator");
 }
-void FrequencyShifter::tune(int64_t offset) {
+void FrequencyShifter::tune(int64_t offset, bool reset_phase) {
     if (offset <= -int64_t(rate_)/2 || offset >= int64_t(rate_)/2)
         throw std::runtime_error("Mixer offset exceeds Nyquist range");
-    up_ = offset >= 0;
-    check_liquid(nco_crcf_reset(nco_.get()));
+    const bool up = offset >= 0;
+    if (reset_phase) check_liquid(nco_crcf_reset(nco_.get()));
+    else if (up != up_) check_liquid(nco_crcf_set_phase(nco_.get(), -nco_crcf_get_phase(nco_.get())));
+    up_ = up;
     check_liquid(nco_crcf_set_frequency(nco_.get(), float(2*pi*std::abs(double(offset))/rate_)));
 }
 std::complex<float> FrequencyShifter::execute(std::complex<float> sample) {

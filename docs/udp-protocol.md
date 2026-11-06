@@ -21,7 +21,7 @@ RX = QO-100-Downlink, TX = QO-100-Uplink. Hardware-/Umsetzerkorrekturen macht da
 | 4 | 1 | version | `1` |
 | 5 | 1 | type | Nachrichtentyp, siehe unten |
 | 6 | 2 | header_size | `64` |
-| 8 | 4 | stream | `0` Gesamt-FFT/Settings/Loop, `1` RX1/Zoom, `2` RX2, `3` TX, `4` Audio-Echo |
+| 8 | 4 | stream | `0` Gesamt-FFT/Settings/Loop, `1` RX1/Zoom, `2` RX2/Zoom, `3` TX, `4` Audio-Echo |
 | 12 | 4 | id | Request-ID, FFT-Frame-ID oder Audio-Epoche |
 | 16 | 8 | timestamp | Sendezeit Unix-ns bei FFT/Audio/Loop-State; sonst 0 |
 | 24 | 8 | index | Sample-Index, bestätigte Epoche oder Settings-Revision |
@@ -66,7 +66,7 @@ Flags (`first`): Bit **0** laufende Betriebsänderungen noch nicht gespeichert, 
 | `pluto_tx_base_hz` | Nominale Pluto-TX-Mitte, Standard `1290250000` |
 | `tx_attenuation_db` | 0…40 dB, Schritte 0.25 dB |
 | `initial_rx_hz`, `initial_rx2_hz`, `initial_tx_hz` | Aktuelle und nächste Startfrequenzen; RX-/TX-Mitte ±275000 Hz |
-| `rx1_filter_bandwidth_hz`, `rx1_filter_center_hz` | BW 500…3900 Hz; beide Filterränder innerhalb 100…4000 Hz |
+| `rx1_filter_low_hz`, `rx1_filter_high_hz` | Audio-Unter-/Obergrenze 100…4000 Hz, mindestens 500 Hz Abstand |
 | `rx1_nr_percent`, `gui_nr_strength` | NR 0…100 % (0 = aus); gemerkter GUI-Reglerwert 1…100 |
 | `tx1_compressor_percent` | 0…140 %, 100 = Normalbetrieb, 0 = Bypass |
 | `gui_audio_gain`, `gui_display_floor` | GUI-Wiedergabe 0…20 (0 = stumm); Anzeige −160…−40 dBFS |
@@ -82,15 +82,15 @@ GUI-Schlüssel werden vom Backend gespeichert, aber **vom GUI ausgeführt**. Kei
 |---|---:|---|
 | **3 TUNE** → | 1/2 | `id=Request`, `frequency=RX-Träger`, `session=aktuell` |
 | **4 STATE** ← | 1/2 | `id=Request`, `frequency=bestätigter Träger`, `index=Audio-Epoche`, `rate=12000`, `format=0 OK / 1 außerhalb des Fensters` |
-| **2 SPECTRUM** ← | 0/1 | `id=Frame`, `timestamp`, `index=exklusives Sample-Ende`, `frequency=Mitte`, `rate`, `size=total=FFT-Größe`, `first`, `count`, `format=1`; Payload: `count × int16` |
+| **2 SPECTRUM** ← | 0/1/2 | `id=Frame`, `timestamp`, `index=exklusives Sample-Ende`, `frequency=Mitte`, `rate`, `size=total=FFT-Größe`, `first`, `count`, `format=1`; Payload: `count × int16` |
 | **5 AUDIO** ← | 1/2/4 | `id=Epoche`, `timestamp`, `index=Sample-Start`, `frequency=Träger`, `rate=12000`, `count=total=240`, `format=2`; Payload: **240 × int16 PCM**, 544 Byte inkl. Header |
 
-**FFT:** Stream 0 = 600 kHz Gesamtspektrum; Stream 1 = 75 kHz, GUI zeigt davon ±25 kHz um die RX1-Frequenz. Standard-FFT jeweils 8192 Bins. Bin `k`: `frequency + (k − size/2) × rate/size`.
+**FFT:** Stream 0 = 600 kHz Gesamtspektrum; Stream 1/2 = unabhängige 75-kHz-Zooms um RX1/RX2; für eine Anzeige von ±25 kHz den mittleren 50-kHz-Ausschnitt verwenden. Standard-FFT jeweils 8192 Bins. Bin `k`: `frequency + (k − size/2) × rate/size`.
 Pegel = vorzeichenbehafteter int16 / **100 dBFS**. Maximal 568 Bins pro Datagramm.
 Fragmente anhand **(Session, Stream, Frame-ID)** sammeln; Metadaten müssen übereinstimmen.
 Erst anzeigen, wenn alle Bins vorliegen; Duplikate ignorieren, alte/unvollständige Frames verwerfen (z. B. nach 500 ms).
 
-**Audio:** 12 kHz, mono, PCM16 Big Endian; Float-Normierung durch 32768. RX1 = Sprache, RX2 = unabhängiger Kanal für externe Digitalprogramme. Nur Audio mit bestätigter **(Session, Stream, Epoche)** annehmen; Epochen-/Sessionwechsel leert Puffer. Epochen können auch bei Hardware-/Loop-Umschaltung wechseln.
+**Audio:** 12 kHz, mono, PCM16 Big Endian; Float-Normierung durch 32768. RX1 = Sprache, RX2 = unabhängiger Kanal für externe Digitalprogramme. Nur Audio mit bestätigter **(Session, Stream, Epoche)** annehmen. Eine normale RX-Abstimmung ändert nur die Mischfrequenz: **Audio-Epoche und Sample-Index laufen unverändert weiter**, ebenso Oszillatorphase, Filter, NR und Resampler. Bereits gepuffertes Audio bleibt gültig und wird kontinuierlich ausgespielt; die Frequenzänderung ist in den Frequenzfeldern von STATE/AUDIO erkennbar. Erst ein echter Hardware-/Signalweg-Reset wechselt die RX-Epoche und beginnt den Sample-Index neu. Bei Session-, Stream- oder Epochenwechsel alte Puffer verwerfen; alte Audiopakete bleiben gesperrt.
 Sample-Indizes erkennen Verlust, Duplikate und Reihenfolge. Für die Soundkarte: Jitterpuffer, Lücken mit Stille füllen und Soundkartentakt durch leichtes Resampling ausgleichen. FFT und Audio werden nicht nachgesendet.
 `STATE` kann auch spontan eine neue Epoche melden. Letztes `TUNE` mit gleicher ID z. B. jede Sekunde wiederholen, damit verlorene Epochenmeldungen nachgeholt werden.
 
@@ -116,7 +116,14 @@ Alle Nachrichten: 64 Byte, aktuelle Session, eigene Request-ID. **Control:** `fo
 | **15 NR_CONTROL → 16 NR_STATE** | 1 | `size=0…100` (**Prozent**, 0 = Bypass) → `size`, `index=RX1-Epoche`, `rate=12000` |
 | **13 LOOP_CONTROL → 14 LOOP_STATE** | 0 | `size=0 Normal / 1 Audio / 2 HF` → `size=aktuell`, `first=Zielmodus`, `index=Generation`, `frequency=RX-LO-Sollwert`, `rate=600000`, `timestamp` |
 
-Filter: `Mitte ± BW/2` innerhalb 100…4000 Hz. NR wirkt nur auf RX1; Regler 100 erlaubt bis zu 30 dB Rauschdämpfung.
+**Filtergrenzen (empfohlen):** Typ 9 mit `format=2` setzt `frequency=untere Grenze ×1000`, `size=obere Grenze ×1000` (0.001 Hz), `rate=12000`.
+`format=3` fragt die Grenzen ab (alle Wertefelder 0). Die Antwort Typ 10 enthält
+`first=untere Grenze ×1000`, `total=obere Grenze ×1000`; Status weiterhin `format=0/1`.
+`frequency`/`size` enthalten zusätzlich gerundete Mitte/BW für Diagnose.
+Formate 0/1 bleiben für alte BW-/Mitte-Clients erhalten; deren Antwort hat `first=total=0`.
+Settings liefern die neuen Grenzschlüssel; alte BW-/Mitte-Schlüssel werden beim Schreiben weiterhin akzeptiert,
+dürfen aber nicht im selben Patch mit Grenzschlüsseln gemischt werden.
+Filter: untere/obere Grenze innerhalb 100…4000 Hz, mindestens 500 Hz Abstand. NR wirkt nur auf RX1; Regler 100 erlaubt bis zu 30 dB Rauschdämpfung.
 Loop-Status zusätzlich: **2** HF-Modus nicht verfügbar, **3** Umschaltung läuft. Auf Status 0 und Zielmodus warten; neue Generation leert FFT-/Wasserfallpuffer und verwirft ältere FFT-Zeitstempel.
 **Audio-Loop:** PTT aktiviert Mikrofonpfad, `TX_AUDIO` kommt unverändert als **AUDIO Stream 4** zurück (TX-Epoche, Uplinkfrequenz); HF bleibt stumm. Dabei Stream 4 statt RX1 abspielen.
 **HF-Loop:** Empfänger-LO folgt TX-LO, RX1 folgt TX-Abstimmung; Selbsthören benötigt HF-Kopplung. Normalmodus stellt RX wieder her. Moduswechsel löscht PTT; GUI-Abbruch/Lease-Ende stellt Normal wieder her.

@@ -34,10 +34,25 @@ int main() {
         const auto upper=amplitude(1000), lower=amplitude(2000);
         if(std::abs(upper-.25)>.005) throw std::runtime_error("USB amplitude or anti-alias rejection incorrect");
         if(lower>.00025) throw std::runtime_error("Lower sideband rejection is less than 60 dB");
-        rx.tune(1500); // reset all histories on retune
+        const auto before_retuning=audio.size();
+        for(int i=600000;i<1200000;++i) {
+            // Faster than one audio packet: resetting on each step would starve RX.
+            if(i%6000==0) rx.retune(-1500+(i/6000%2)*25);
+            rx.push(std::polar(.25f,float(std::remainder(-2*pi*500*i/600000.,2*pi))));
+        }
+        if(audio.size()-before_retuning<11760) throw std::runtime_error("Retuning discarded audio samples");
+        for(size_t first=before_retuning;first+240<=audio.size();first+=240) {
+            double energy=0;
+            for(size_t i=first;i<first+240;++i) energy+=audio[i]*audio[i];
+            if(energy<.01) throw std::runtime_error("Retuning introduced a silent audio packet");
+        }
+        rx.tune(1500); // Explicit reset for startup/hardware changes.
         bool rejected=false;
         try { rx.tune(275001); } catch(const std::exception&) {rejected=true;}
         if(!rejected) throw std::runtime_error("Out-of-band tuning accepted");
+        rejected=false;
+        try { rx.retune(275001); } catch(const std::exception&) {rejected=true;}
+        if(!rejected) throw std::runtime_error("Out-of-band continuous tuning accepted");
         std::cout<<"USB 1 kHz amplitude="<<upper<<"; unwanted 2 kHz amplitude="<<lower
                  <<"; LSB rejection="<<20*std::log10(upper/std::max(lower,1e-12))<<" dB\n";
         return 0;

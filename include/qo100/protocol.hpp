@@ -32,12 +32,13 @@ bool parse_compressor_control(const uint8_t*, size_t, CompressorControl&);
 std::vector<uint8_t> compressor_state_packet(uint32_t request, uint32_t amount, uint32_t epoch,
     uint32_t session, uint16_t status, uint32_t compression_millidb, uint32_t limiting_millidb);
 struct FilterControl {
-    uint32_t request, session, bandwidth_hz, center_hz;
-    bool set;
+    uint32_t request, session;
+    double bandwidth_hz, center_hz;
+    bool set, edges;
 };
 bool parse_filter_control(const uint8_t*, size_t, FilterControl&);
-std::vector<uint8_t> filter_state_packet(uint32_t request, uint32_t bandwidth, uint32_t center,
-    uint32_t epoch, uint32_t session, uint16_t status);
+std::vector<uint8_t> filter_state_packet(uint32_t request, double bandwidth, double center,
+    uint32_t epoch, uint32_t session, uint16_t status, bool edges=false);
 struct TxControl { uint32_t request, session; uint64_t frequency; bool enabled; };
 struct TxAudio { uint32_t epoch, session; uint64_t index, frequency; std::vector<int16_t> samples; };
 bool parse_tx_control(const uint8_t*, size_t, TxControl&);
