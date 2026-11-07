@@ -121,7 +121,8 @@ def main():
                 'binary':shutil.which('chromium'),'args':['--headless=new','--no-sandbox','--disable-dev-shm-usage','--window-size=1440,1000',
                 '--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required','--mute-audio',
                 '--disable-background-timer-throttling','--disable-renderer-backgrounding']}}}})['sessionId']
-            cdp('Page.addScriptToEvaluateOnNewDocument',{'source':'''if(!localStorage.getItem('qo100.testDbSeeded')){
+            cdp('Page.addScriptToEvaluateOnNewDocument',{'source':'''Object.defineProperty(navigator,'languages',{configurable:true,get:()=>['de-DE']});
+                if(!localStorage.getItem('qo100.testDbSeeded')){
                     localStorage.setItem('qo100.fullbandFloor','-113');localStorage.setItem('qo100.zoomFloor','-97');
                     localStorage.setItem('qo100.fullbandAxis','pluto-tx');
                     localStorage.setItem('qo100.testDbSeeded','true');
@@ -561,6 +562,42 @@ def main():
             wait(lambda:execute('return !document.getElementById("ptt").disabled'))
             assert execute('return localStorage.getItem("qo100.audioOutput")')=='default'
             assert execute('return localStorage.getItem("qo100.audioInput")')=='default'
+            # Language changes keep controls, unsaved Setup values, FFT history and audio alive.
+            assert execute('return document.documentElement.lang')=='de'
+            assert execute('return document.getElementById("language").value')=='auto'
+            execute('window.__languageAudioNode=window.__radioNode')
+            old_ip=execute('const n=document.querySelector("[data-setting=pluto_ip]");const old=n.value;n.value="192.0.2.42";return old')
+            decoder_before=execute('return document.getElementById("decoder-text").textContent')
+            before=snapshot();history=mark_history();changed('#language','en');expect_history(history)
+            time.sleep(.4)
+            assert execute('return document.documentElement.lang')=='en'
+            assert execute('return [document.getElementById("audio").textContent,document.getElementById("connect").textContent,document.getElementById("role").textContent]')==['Stop audio','Disconnect','Operator']
+            assert execute('return document.getElementById("waterfall-toggle").textContent')=='Waterfall'
+            assert execute('return document.getElementById("save").textContent')=='Save changes'
+            assert execute('return document.querySelector("label[for=filter-lower]").firstChild.textContent')=='Lower edge'
+            assert execute('return document.querySelector("label[for=nr]").firstChild.textContent')=='Noise reduction'
+            assert execute('return document.querySelector("[data-setting=pluto_ip]").value')=='192.0.2.42'
+            assert execute('return document.getElementById("decoder-text").textContent')==decoder_before
+            assert execute('return window.__radioNode===window.__languageAudioNode && window.__radioNode.context.state==="running" && !document.getElementById("ptt").disabled')
+            after=snapshot();assert before['session']==after['session'] and before['rx']==after['rx'] and before['tx']==after['tx']
+            assert execute('return document.querySelectorAll("#filter-lower,#ptt-hold,#ptt-space,#audio-input").length')==4
+            save_screenshot(capture.with_name(capture.stem+'-english-setup.png'))
+            execute('document.querySelector("[data-setting=pluto_ip]").value=arguments[0]',old_ip)
+            click('[data-close="setup-dialog"]')
+            cdp('Emulation.setDeviceMetricsOverride',{'width':390,'height':844,'deviceScaleFactor':1,'mobile':True})
+            execute('window.scrollTo(0,0)')
+            assert execute('return document.documentElement.scrollWidth<=innerWidth')
+            save_screenshot(capture.with_name(capture.stem+'-english-mobile.png'))
+            cdp('Emulation.setDeviceMetricsOverride',{'width':1440,'height':1000,'deviceScaleFactor':1,'mobile':False})
+            click('#setup');changed('#language','auto')
+            assert execute('return document.documentElement.lang')=='de'
+            execute('Object.defineProperty(navigator,"languages",{configurable:true,get:()=>["fr-FR"]})')
+            changed('#language','auto');assert execute('return document.documentElement.lang')=='en'
+            execute('Object.defineProperty(navigator,"languages",{configurable:true,get:()=>["de-DE"]})')
+            changed('#language','de')
+            assert execute('return document.getElementById("save").textContent')=='Änderungen speichern'
+            assert execute('return document.querySelector("label[for=filter-lower]").firstChild.textContent')=='Untere Grenze'
+            assert execute('return document.getElementById("ptt-space").type')=='checkbox'
             click('[data-close="setup-dialog"]')
             click('#frequency1')
             cdp('Emulation.setDeviceMetricsOverride',{'width':1440,'height':900,'deviceScaleFactor':1,'mobile':False})
@@ -613,8 +650,11 @@ def main():
                 if width==320:save_screenshot(capture.with_name(capture.stem+'-bandplan-320.png'))
             click('#fullband-axis-switch')
             # Preferences survive a reload; transmitting is never restored.
+            changed('#language','en')
             call('POST',f'/session/{session}/url',{'url':url})
-            wait(lambda:execute('return document.getElementById("role").textContent')=='Bediener')
+            wait(lambda:execute('return document.getElementById("role").textContent')=='Operator')
+            assert execute('return document.documentElement.lang==="en" && document.getElementById("language").value==="en"')
+            changed('#language','de')
             assert execute('return document.getElementById("ptt-toggle").checked && document.getElementById("ptt-space").checked')
             assert execute('return [document.getElementById("waterfall-floor").value,document.getElementById("waterfall-ceiling").value]')==['-7','37']
             assert execute('return document.getElementById("spectrum-average").value')=='20'

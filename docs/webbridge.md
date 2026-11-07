@@ -101,6 +101,15 @@ der Zoom des ausgewählten Empfängers enthalten jeweils Spektrum, Frequenzachse
 RX1, Gelb RX2 und die gestrichelte rote Linie die TX-Downlinkposition. Der RX1-
 Durchlassbereich wird eingezeichnet. Die Anzeigen stammen ausschließlich vom Backend.
 
+### Sprache
+
+Unter **Setup → Sprache** stehen **Automatisch**, **Deutsch** und **English**
+zur Auswahl. Automatisch verwendet die bevorzugte Browsersprache: Deutsch bei
+`de`/`de-*`, sonst Englisch. Eine manuelle Auswahl wird lokal im Browser gespeichert.
+Beschriftungen, Menüs und laufende Buttontexte wechseln sofort, ohne Audio oder
+WebSocket-Verbindung neu zu starten. Technische Fehler- und Diagnosemeldungen
+bleiben in ihrer bisherigen Sprache.
+
 ### Abstimmung
 
 RX1 oder RX2 durch Klick auf seine Frequenzanzeige auswählen; die aktive Anzeige

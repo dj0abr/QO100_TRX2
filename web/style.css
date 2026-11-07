@@ -427,6 +427,7 @@ legend { padding: 0 7px; color: #a5cedb; font-size: 12px; }
 #decoder-clear { padding: 0 3px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; }
 #decoder-text { flex: 1; min-width: 0; min-height: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 0 10px 4px; color: var(--text); font: 12px/1.5 var(--mono); scrollbar-width: thin; }
 #decoder-text:empty::before { content: "Warte auf RX2-Decoder-Text …"; color: var(--muted); }
+html[lang="en"] #decoder-text:empty::before { content: "Waiting for RX2 decoder text …"; }
 #decoder-toggle:focus-visible, #decoder-clear:focus-visible, #decoder-text:focus-visible { outline: 2px solid var(--rx2); outline-offset: -2px; }
 @media (min-width: 801px) { .zoom-output { height: 100%; } }
 @media (max-width: 800px) { .zoom-output { height: 130px; } }

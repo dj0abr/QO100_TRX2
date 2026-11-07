@@ -1,3 +1,5 @@
+[English](README.md) · [Deutsch](README.de.md)
+
 # QO100_TRX2
 
 QO-100 software transceiver using an ADALM-Pluto and an SBC (Raspberry Pi, Odroid, …).

@@ -315,4 +315,9 @@ for(const rejects of [false,true]){
   assert(opened.every(stream=>stream.getTracks()[0].stopped));
   assert.match(wrongInput.error,rejects?/Gerätezuordnung/:/USB 2.0 Camera.*statt.*USB Advanced/);
 }
-console.log('WebGUI: RF mapping, split tuning, RX2, bounds, FFT assembly, robust noise estimation/tracking, relative display ranges, 12/44.1/48 kHz audio and USB device selection passed.');
+const {resolveLanguage} = await moduleAt('language.js');
+assert.equal(resolveLanguage('auto','de-DE'),'de');assert.equal(resolveLanguage('auto','de-AT'),'de');
+assert.equal(resolveLanguage('auto','DE'),'de');assert.equal(resolveLanguage('auto','en-US'),'en');
+assert.equal(resolveLanguage('auto','fr-FR'),'en');assert.equal(resolveLanguage('en','de-DE'),'en');
+assert.equal(resolveLanguage('de','en-US'),'de');assert.equal(resolveLanguage('invalid','en-US'),'en');
+console.log('WebGUI: RF mapping, split tuning, RX2, bounds, FFT assembly, robust noise estimation/tracking, relative display ranges, 12/44.1/48 kHz audio, USB device selection and language detection passed.');

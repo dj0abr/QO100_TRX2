@@ -2,6 +2,7 @@ import {DOWNLINK_UPLINK_HZ, frequencyText, parseMHz, validateFrequency, tuneTarg
 import {FrameAssembler, RadioDisplay, displayOffsets, AXIS_MODES} from './radio-display.js';
 import {RadioAudio} from './audio.js';
 import {PttControl} from './ptt-control.js';
+import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
 
 const $ = id => document.getElementById(id);
 let socket, operator = false, state = {}, selected = 1, together = true, request = 0;
@@ -85,7 +86,7 @@ function connect() {
     try { message = JSON.parse(event.data); } catch { notify('Ungültige Nachricht vom Adapter.', true); return; }
     if (message.type === 'role') {
       const wasOperator = operator; operator = message.role === 'operator';
-      $('role').textContent = operator ? 'Bediener' : 'Zuschauer';
+      $('role').textContent = operator ? t('Bediener', 'Operator') : t('Zuschauer', 'Viewer');
       $('role').title = `${message.clients} Verbindung(en) · Inaktivitätslimit ${message.idle_seconds} s`;
       if (wasOperator && !operator) { stopPtt(); radio.stopMic(); clearTimers(); }
       controls();
@@ -108,7 +109,7 @@ function connect() {
     stopPtt(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset();
     for (const item of pending.values()) { clearTimeout(item.timeout); item.reject(fail('Verbindung getrennt.', 'closed')); }
     pending.clear(); frames.reset(); views.forEach(view => view.clear());
-    $('role').textContent = 'Getrennt'; controls();
+    $('role').textContent = t('Getrennt', 'Disconnected'); controls();
     if (noticeUntil !== Infinity) notify('Verbindung getrennt. Mit „Verbinden“ erneut anmelden.', false, Infinity);
   };
 }
@@ -149,11 +150,11 @@ function selectReceiver(channel) {
   $('touch-together').hidden = channel === 2;
   $('touch-together').classList.toggle('chosen', channel === 1 && together);
   $('touch-together').setAttribute('aria-pressed', String(channel === 1 && together));
-  $('touch-rx').textContent = `nur RX${channel}`;
+  $('touch-rx').textContent = t(`nur RX${channel}`, `RX${channel} only`);
   $('touch-rx').classList.toggle('chosen', channel === 2 || !together);
   $('touch-rx').setAttribute('aria-pressed', String(channel === 2 || !together));
-  $('wide-help').textContent = `${channel === 2 ? 'Links / Rechts: RX2' : 'Links: RX1 + TX · Rechts: nur RX1'} · Strg + Rad: RX${channel} + TX · Shift + Rad: TX`;
-  $('touch-help').textContent = `Tippen: ${channel === 1 && together ? 'RX1 + TX' : `nur RX${channel}`}`;
+  $('wide-help').textContent = t(`${channel === 2 ? 'Links / Rechts: RX2' : 'Links: RX1 + TX · Rechts: nur RX1'} · Strg + Rad: RX${channel} + TX · Shift + Rad: TX`, `${channel === 2 ? 'Left / Right: RX2' : 'Left: RX1 + TX · Right: RX1 only'} · Ctrl + Wheel: RX${channel} + TX · Shift + Wheel: TX`);
+  $('touch-help').textContent = t(`Tippen: ${channel === 1 && together ? 'RX1 + TX' : `nur RX${channel}`}`, `Tap: ${channel === 1 && together ? 'RX1 + TX' : `RX${channel} only`}`);
   views.forEach(view => view.update(state, selected)); renderZoomLabels(); renderNoiseLevels(); renderFrequencies();
 }
 
@@ -166,7 +167,7 @@ function renderFrequencies() {
   const tx = frequency('tx'), rx = frequency(1);
   $('tx-downlink').textContent = frequencyText(Number.isSafeInteger(tx) ? tx + DOWNLINK_UPLINK_HZ : undefined);
   const offset = tx - (rx - DOWNLINK_UPLINK_HZ);
-  $('offset-status').textContent = `RX${selected} ausgewählt${Number.isSafeInteger(offset) ? ` · TX-Versatz ${offset >= 0 ? '+' : '−'}${Math.abs(offset).toLocaleString('de-DE')} Hz` : ''}`;
+  $('offset-status').textContent = t(`RX${selected} ausgewählt`, `RX${selected} selected`) + (Number.isSafeInteger(offset) ? ` · ${t('TX-Versatz', 'TX offset')} ${offset >= 0 ? '+' : '−'}${Math.abs(offset).toLocaleString('de-DE')} Hz` : '');
 }
 function rangePaint(input) {
   input.style.setProperty('--fill', `${100 * (Number(input.value) - Number(input.min)) / Math.max(1, Number(input.max) - Number(input.min))}%`);
@@ -185,7 +186,7 @@ function renderNoiseLevels() {
   const format = value => value.toLocaleString('de-DE', {minimumFractionDigits: 1, maximumFractionDigits: 1});
   for (const [index, name] of ['fullband', 'zoom'].entries()) {
     const view = views[index], measured = view.noise.value !== null;
-    $(`${name}-noise`).textContent = measured ? `${format(view.noise.value)} dBFS${view.noise.reliable ? '' : ' (gehalten)'}` : view.frame ? 'keine sichere Schätzung' : 'warte auf FFT …';
+    $(`${name}-noise`).textContent = measured ? `${format(view.noise.value)} dBFS${view.noise.reliable ? '' : t(' (gehalten)', ' (held)')}` : view.frame ? t('keine sichere Schätzung', 'no reliable estimate') : t('warte auf FFT …', 'waiting for FFT …');
     $(`${name}-noise`).dataset.dbfs = measured ? view.noise.value : '';
     $(`${name}-range`).textContent = measured ? `${format(view.floor)} … ${format(view.ceiling)} dBFS` : '—';
     $(`${name}-range`).dataset.floor = measured ? view.floor : '';
@@ -205,13 +206,14 @@ function setDisplayColor(value) {
 }
 function setFullbandAxis(mode) {
   const value = views[0].setAxisMode(mode), index = AXIS_MODES.findIndex(item => item.value === value);
-  const current = AXIS_MODES[index].label, next = AXIS_MODES[(index + 1) % AXIS_MODES.length].label;
+  const label = item => item.label === 'Bandplan' ? t('Bandplan', 'Band plan') : item.label;
+  const current = label(AXIS_MODES[index]), next = label(AXIS_MODES[(index + 1) % AXIS_MODES.length]);
   $('fullband-axis-mode').textContent = `600 kHz · ${current}`;
   $('fullband-axis').dataset.mode = value;
-  const description = value === 'bandplan' ? 'QO-100 Narrowband-Bandplan nach AMSAT-DL' : `Fullband-Frequenzen: ${current} in MHz`;
+  const description = value === 'bandplan' ? t('QO-100 Narrowband-Bandplan nach AMSAT-DL', 'QO-100 narrowband band plan by AMSAT-DL') : t(`Fullband-Frequenzen: ${current} in MHz`, `Fullband frequencies: ${current} in MHz`);
   $('fullband-axis').setAttribute('aria-label', description);
-  $('fullband-axis-switch').title = `${description} · Klicken für ${next}`;
-  $('fullband-axis-switch').setAttribute('aria-label', `${description}. Wechseln zu ${next}.`);
+  $('fullband-axis-switch').title = `${description} · ${t('Klicken für', 'Click for')} ${next}`;
+  $('fullband-axis-switch').setAttribute('aria-label', `${description}. ${t('Wechseln zu', 'Switch to')} ${next}.`);
 }
 function renderFilter(changed = 'low') {
   const values = filterValues(Number($('filter-lower').value), Number($('filter-upper').value), changed);
@@ -231,14 +233,14 @@ function renderZoomLabels() {
   const rx = `RX${selected}`, low = Number($('filter-lower').value), high = Number($('filter-upper').value);
   $('zoom-title').textContent = `${rx}-ZOOM`;
   $('zoom-filter').textContent = selected === 1 ? `USB · ${((high - low) / 1000).toFixed(1)} kHz` : 'RX2 · USB';
-  $('filter-caption').textContent = selected === 1 ? `RX1 · Filter ${low}–${high} Hz` : 'RX2 · Decoder-Empfang';
+  $('filter-caption').textContent = selected === 1 ? `RX1 · Filter ${low}–${high} Hz` : t('RX2 · Decoder-Empfang', 'RX2 · Decoder reception');
   $('zoom-mobile-caption').textContent = `${rx}-Zoom · 50 kHz`;
   const view = views[1];
-  view.empty.textContent = `Warte auf ${rx}-Zoom …`;
-  view.spectrum.setAttribute('aria-label', `${rx}-Zoom-Spektrum, zum Abstimmen anklicken`);
-  view.waterfall.setAttribute('aria-label', `${rx}-Zoom-Wasserfall, zum Abstimmen anklicken`);
-  view.axis.setAttribute('aria-label', `${rx}-Zoom-Frequenzen in MHz`);
-  $('zoom-waterfall-caption').textContent = `WASSERFALL · ${rx}`;
+  view.empty.textContent = t(`Warte auf ${rx}-Zoom …`, `Waiting for ${rx} zoom …`);
+  view.spectrum.setAttribute('aria-label', t(`${rx}-Zoom-Spektrum, zum Abstimmen anklicken`, `${rx} zoom spectrum, click to tune`));
+  view.waterfall.setAttribute('aria-label', t(`${rx}-Zoom-Wasserfall, zum Abstimmen anklicken`, `${rx} zoom waterfall, click to tune`));
+  view.axis.setAttribute('aria-label', t(`${rx}-Zoom-Frequenzen in MHz`, `${rx} zoom frequencies in MHz`));
+  $('zoom-waterfall-caption').textContent = `${t('WASSERFALL', 'WATERFALL')} · ${rx}`;
 }
 function applyFilter(values) {
   filterBusy++;
@@ -275,8 +277,8 @@ function update(next) {
   updateRange('nr', next.nr?.percent); $('nr-value').textContent = `${$('nr').value} %`;
   updateRange('compressor', next.compressor?.percent); compressorLabel();
   if (document.activeElement !== $('loop')) $('loop').value = next.loop?.mode ?? 0;
-  $('hardware-details').textContent = next.settings?.pluto_rx_hz ? `Pluto RX: ${frequencyText(Number(next.settings.pluto_rx_hz))} MHz · Pluto TX: ${frequencyText(Number(next.settings.pluto_tx_hz))} MHz` : 'Hardwarewerte werden geladen.';
-  $('compressor-details').textContent = `Verdichtung: ${Number(next.compressor?.compression_db || 0).toFixed(1)} dB · Begrenzung: ${Number(next.compressor?.limiting_db || 0).toFixed(1)} dB`;
+  $('hardware-details').textContent = next.settings?.pluto_rx_hz ? `Pluto RX: ${frequencyText(Number(next.settings.pluto_rx_hz))} MHz · Pluto TX: ${frequencyText(Number(next.settings.pluto_tx_hz))} MHz` : t('Hardwarewerte werden geladen.', 'Loading hardware values.');
+  $('compressor-details').textContent = `${t('Verdichtung', 'Compression')}: ${Number(next.compressor?.compression_db || 0).toFixed(1)} dB · ${t('Begrenzung', 'Limiting')}: ${Number(next.compressor?.limiting_db || 0).toFixed(1)} dB`;
   $('settings-revision').textContent = next.revision ? `Revision ${next.revision}` : '';
   renderWaterfallSettings(); views.forEach(view => view.update(next, selected)); controls();
   for (const waiter of stateWaiters) waiter(next);
@@ -286,21 +288,22 @@ function controls() {
   for (const element of document.querySelectorAll('[data-control]')) element.disabled = !writable;
   $('ptt').disabled = !writable || !!(state.flags & 6) || !radio.microphone || !radio.running;
   $('audio').disabled = !!radio.starting;
-  $('audio').textContent = radio.starting ? 'Audio startet …' : radio.enabled ? 'Audio stoppen' : operator ? 'Audio / Mikrofon' : 'Audio starten';
+  $('audio').textContent = radio.starting ? t('Audio startet …', 'Starting audio …') : radio.enabled ? t('Audio stoppen', 'Stop audio') : operator ? t('Audio / Mikrofon', 'Audio / Microphone') : t('Audio starten', 'Start audio');
   $('audio').classList.toggle('active', radio.running);
   $('connect').disabled = socket?.readyState === WebSocket.CONNECTING;
-  $('connect').textContent = isOpen() ? 'Trennen' : 'Verbinden';
-  $('backend-status').textContent = !isOpen() ? 'Backend getrennt' : session ? 'Backend verbunden' : 'Backend wird gesucht';
+  $('connect').textContent = isOpen() ? t('Trennen', 'Disconnect') : t('Verbinden', 'Connect');
+  $('role').textContent = isOpen() ? operator ? t('Bediener', 'Operator') : t('Zuschauer', 'Viewer') : t('Getrennt', 'Disconnected');
+  $('backend-status').textContent = !isOpen() ? t('Backend getrennt', 'Backend disconnected') : session ? t('Backend verbunden', 'Backend connected') : t('Backend wird gesucht', 'Looking for backend');
   $('backend-dot').className = `live-dot${isOpen() && session ? '' : ' offline'}`;
   const hardwareOnline = state.settings?.hardware_online === '1' && !(state.flags & 6);
-  $('hardware-status').textContent = state.flags & 2 ? 'Hardware startet' : state.flags & 4 ? 'Hardware offline' : hardwareOnline ? 'Hardware bereit' : 'Hardware unbekannt';
+  $('hardware-status').textContent = state.flags & 2 ? t('Hardware startet', 'Hardware starting') : state.flags & 4 ? 'Hardware offline' : hardwareOnline ? t('Hardware bereit', 'Hardware ready') : t('Hardware unbekannt', 'Hardware unknown');
   $('hardware-dot').className = `live-dot${state.flags & 4 ? ' error' : hardwareOnline ? '' : ' offline'}`;
   const transmitting = !!state.tx?.ptt;
-  $('tx-status').textContent = transmitting ? (state.loop?.mode === 1 ? 'Audio-Test' : 'Senden') : state.loop?.mode ? `Empfang · ${state.loop.mode === 1 ? 'Audio' : 'HF'}-Loop` : 'Empfang';
+  $('tx-status').textContent = transmitting ? (state.loop?.mode === 1 ? t('Audio-Test', 'Audio test') : t('Senden', 'Transmitting')) : state.loop?.mode ? t(`Empfang · ${state.loop.mode === 1 ? 'Audio' : 'HF'}-Loop`, `Receiving · ${state.loop.mode === 1 ? 'Audio' : 'RF'} loop`) : t('Empfang', 'Receiving');
   $('tx-dot').className = `live-dot${transmitting ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
   $('ptt').classList.toggle('sending', transmitting); $('ptt').setAttribute('aria-pressed', String(transmitting));
   renderPttHint();
-  $('audio-details').textContent = radio.starting ? 'Audio wird gestartet …' : radio.micBusy ? 'Mikrofon wird geöffnet …' : radio.running ? `Audio aktiv · Gerät ${radio.context.sampleRate / 1000} kHz · Funk 12 kHz · Mikrofon ${radio.microphone ? 'aktiv' : 'aus'}` : 'Audio ausgeschaltet';
+  $('audio-details').textContent = radio.starting ? t('Audio wird gestartet …', 'Starting audio …') : radio.micBusy ? t('Mikrofon wird geöffnet …', 'Opening microphone …') : radio.running ? t(`Audio aktiv · Gerät ${radio.context.sampleRate / 1000} kHz · Funk 12 kHz · Mikrofon ${radio.microphone ? 'aktiv' : 'aus'}`, `Audio active · Device ${radio.context.sampleRate / 1000} kHz · Radio 12 kHz · Microphone ${radio.microphone ? 'active' : 'off'}`) : t('Audio ausgeschaltet', 'Audio off');
   $('audio-message').hidden = !(radio.error || radio.warning);
   $('audio-message').textContent = radio.error || radio.warning;
   $('audio-message').classList.toggle('warning', !radio.error && !!radio.warning);
@@ -315,16 +318,16 @@ function controls() {
 function renderDevices() {
   for (const [kind, id, value] of [['audioinput', 'audio-input', radio.inputId], ['audiooutput', 'audio-output', radio.outputId]]) {
     const node = $(id), devices = radio.devices.filter(d => d.kind === kind && !['default', 'communications'].includes(d.deviceId));
-    const signature = JSON.stringify([devices.map(d => [d.deviceId, d.label]), value]);
+    const signature = JSON.stringify([devices.map(d => [d.deviceId, d.label]), value, language]);
     if (node.dataset.signature !== signature) {
-      const options = [new Option('Automatisch · USB Advanced bevorzugen', ''), new Option('Systemstandard', 'default')];
-      for (const [index, device] of devices.entries()) options.push(new Option(device.label || `Gerät ${index + 1} · Freigabe erforderlich`, device.deviceId));
-      if (value && value !== 'default' && !devices.some(d => d.deviceId === value)) options.push(new Option('Gespeichertes Gerät nicht verfügbar', value));
+      const options = [new Option(t('Automatisch · USB Advanced bevorzugen', 'Automatic · Prefer USB Advanced'), ''), new Option(t('Systemstandard', 'System default'), 'default')];
+      for (const [index, device] of devices.entries()) options.push(new Option(device.label || t(`Gerät ${index + 1} · Freigabe erforderlich`, `Device ${index + 1} · Permission required`), device.deviceId));
+      if (value && value !== 'default' && !devices.some(d => d.deviceId === value)) options.push(new Option(t('Gespeichertes Gerät nicht verfügbar', 'Saved device unavailable'), value));
       node.replaceChildren(...options); node.value = value; node.dataset.signature = signature;
     }
     node.disabled = !!radio.starting || radio.micBusy || (kind === 'audioinput' && !canControl());
   }
-  if (radio.running) $('audio-device-details').textContent = `Wiedergabe: ${radio.deviceLabel('audiooutput')} · ${radio.microphone ? `Aufnahme: ${radio.deviceLabel('audioinput')}` : 'Mikrofon aus'}. Auswahl gilt für diesen Browser.`;
+  $('audio-device-details').textContent = radio.running ? `${t('Wiedergabe', 'Playback')}: ${radio.deviceLabel('audiooutput')} · ${radio.microphone ? `${t('Aufnahme', 'Recording')}: ${radio.deviceLabel('audioinput')}` : t('Mikrofon aus', 'Microphone off')}. ${t('Auswahl gilt für diesen Browser.', 'Selection applies to this browser.')}` : t('Gerätenamen erscheinen nach Freigabe des Mikrofons. Die Geräteauswahl wird nur in diesem Browser gespeichert.', 'Device names appear after microphone permission is granted. Device selection is saved in this browser only.');
 }
 function syncCapture() {
   ptt.checkTimeout();
@@ -350,8 +353,8 @@ function startPtt() {
 function renderPttHint() {
   const seconds = Math.ceil(ptt.remainingMs / 1000);
   const remaining = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-  $('ptt-hint').textContent = !operator ? 'Nur Bediener' : !state.ready ? 'Nicht bereit' : state.flags & 4 ? 'Hardware offline' : !radio.microphone ? 'Mikrofon fehlt' : state.tx?.ptt ? (ptt.mode === 'toggle' && ptt.deadline ? `Klick: aus · ${remaining}` : state.loop?.mode === 1 ? 'Audio-Loop' : 'Senden') : ptt.mode === 'toggle' ? 'Klicken zum Senden' : 'Gedrückt halten';
-  $('ptt').title = `${ptt.mode === 'toggle' ? 'Klicken schaltet PTT um · maximal 5 Minuten' : 'Drücken und halten zum Senden'}${ptt.spaceEnabled ? ' · Leertaste = PTT' : ''}`;
+  $('ptt-hint').textContent = !operator ? t('Nur Bediener', 'Operator only') : !state.ready ? t('Nicht bereit', 'Not ready') : state.flags & 4 ? 'Hardware offline' : !radio.microphone ? t('Mikrofon fehlt', 'Microphone unavailable') : state.tx?.ptt ? (ptt.mode === 'toggle' && ptt.deadline ? t(`Klick: aus · ${remaining}`, `Click: off · ${remaining}`) : state.loop?.mode === 1 ? t('Audio-Loop', 'Audio loop') : t('Senden', 'Transmitting')) : ptt.mode === 'toggle' ? t('Klicken zum Senden', 'Click to transmit') : t('Gedrückt halten', 'Press and hold');
+  $('ptt').title = `${ptt.mode === 'toggle' ? t('Klicken schaltet PTT um · maximal 5 Minuten', 'Click to toggle PTT · 5 minutes maximum') : t('Drücken und halten zum Senden', 'Press and hold to transmit')}${ptt.spaceEnabled ? t(' · Leertaste = PTT', ' · Space = PTT') : ''}`;
 }
 function mediaChanged() {
   if (!radio.microphone || !radio.running) stopPtt();
@@ -401,7 +404,7 @@ function openSetup() {
 function openFrequency(channel) {
   if (!canControl()) return;
   stopPtt(); editingFrequency = String(channel);
-  $('frequency-title').textContent = channel === 'tx' ? 'TX-Frequenz' : `RX${channel}-Frequenz`;
+  $('frequency-title').textContent = channel === 'tx' ? t('TX-Frequenz', 'TX frequency') : t(`RX${channel}-Frequenz`, `RX${channel} frequency`);
   $('frequency-input').value = (frequency(channel) / 1e6).toFixed(6);
   $('frequency-error').textContent = ''; $('frequency-dialog').showModal(); $('frequency-input').select();
 }
@@ -550,10 +553,11 @@ function showDecoder(visible) {
   $('decoder-panel').hidden = !visible;
   $('zoom-output').classList.toggle('decoder-visible', visible);
   $('decoder-toggle').setAttribute('aria-expanded', String(visible));
-  $('decoder-toggle').textContent = `Decoder-Text ${visible ? 'ausblenden' : 'anzeigen'}`;
+  decoderLabel();
   writePreference('decoderVisible', visible);
   if (visible) $('decoder-text').scrollTop = $('decoder-text').scrollHeight;
 }
+function decoderLabel() { $('decoder-toggle').textContent = $('decoder-panel').hidden ? t('Decoder-Text anzeigen', 'Show decoder text') : t('Decoder-Text ausblenden', 'Hide decoder text'); }
 $('decoder-toggle').onclick = () => showDecoder($('decoder-panel').hidden);
 $('decoder-clear').onclick = () => { $('decoder-text').textContent = ''; };
 // Keep local decoder controls and log scrolling independent of global Space PTT.
@@ -614,6 +618,14 @@ for (const event of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'touchsta
 }, {passive: true});
 setInterval(() => send({type: 'heartbeat'}), 1000);
 setInterval(() => { if (!ptt.checkTimeout() && pttHeld && operator) send({type: 'ptt_keepalive'}); renderPttHint(); renderNoiseLevels(); }, 250);
+$('language').value = languagePreference();
+$('language').onchange = () => {
+  setLanguagePreference($('language').value);
+  views.forEach(view => view.setLanguage(language));
+  selectReceiver(selected); renderFilter(); renderNoiseLevels();
+  setFullbandAxis(views[0].axisMode); decoderLabel(); controls();
+};
+applyLanguage(); views.forEach(view => view.setLanguage(language));
 bindPlots(views[0], 250); bindPlots(views[1], 25);
 bindFrequency(1, $('frequency1')); bindFrequency(2, $('frequency2')); bindFrequency('tx', $('frequencytx'));
 volumeChanged(false); renderFilter(); renderWaterfallSettings(); setSpectrumAverage(readPreference('spectrumAverage') ?? 1); setDisplayColor(readPreference('displayColor') ?? 'blue'); setFullbandAxis('bandplan'); selectReceiver(1); controls(); connect();

@@ -23,11 +23,12 @@ export const NB_BANDPLAN = [
   {start:10489990000,end:10490000000,kind:'beacon',labels:['B'],description:'Multimedia-Bake 10489,9935 MHz (990–997 kHz) und obere CW-Bake 10490,000 MHz, mit Schutzbändern'},
 ];
 
-export function bandplanSegments(center, span, width, measure, reservedRight = 0) {
+export function bandplanSegments(center, span, width, measure, reservedRight = 0, language = 'de') {
   const left = center - span / 2, right = center + span / 2;
   const segments = NB_BANDPLAN.filter(item => item.end > left && item.start < right).map(item => {
     const position = (Math.max(left, item.start) - left) / span, size = (Math.min(right, item.end) - Math.max(left, item.start)) / span;
-    return {...item,position,size,text:''};
+    const labels = language === 'en' && item.kind === 'broadcast' ? ['Broadcast', 'BC', 'B'] : language === 'en' && item.kind === 'emergency' ? ['Emergency', 'EM', 'E'] : item.labels;
+    return {...item,labels,position,size,text:''};
   });
   const occupied = [];
   for (const item of [...segments].sort((a,b) => Number(b.kind === 'beacon') - Number(a.kind === 'beacon') || a.start - b.start)) {
@@ -233,7 +234,7 @@ export class RadioDisplay {
     this.average = new SpectrumAverage(); this.spectrumValues = null;
     this.peaks = new SpectrumPeaks();
     this.noise = new NoiseFloor(); this.offsets = displayOffsets(); this.refreshRange();
-    this.color = 'blue';
+    this.color = 'blue'; this.language = 'de';
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(this.spectrum); this.observer.observe(this.waterfall);
     this.resize();
@@ -276,6 +277,9 @@ export class RadioDisplay {
   setAxisMode(mode) {
     this.axisMode = this.zoom ? 'downlink' : AXIS_MODES.some(item => item.value === mode) ? mode : 'bandplan';
     this.drawAxis(); return this.axisMode;
+  }
+  setLanguage(language) {
+    this.language = language; this.axisLayout = null; this.drawAxis();
   }
   refreshRange() {
     const noise = this.noise.value ?? -100;
@@ -460,10 +464,10 @@ export class RadioDisplay {
     // The font shorthand may be empty with tabular-nums; match the actual label font explicitly.
     const font = `${style.fontSize} ${style.fontFamily}`;
     const reserved = this.element.querySelector('.axis-switch')?.getBoundingClientRect().width ?? 0;
-    const layout = `${center}:${span}:${width}:${font}:${reserved}`;
+    const layout = `${center}:${span}:${width}:${font}:${reserved}:${this.language}`;
     if (this.axisLayout === layout) return;
     this.axisLayout = layout; this.axisMeasure.font = font;
-    const segments = bandplanSegments(center, span, width, text => this.axisMeasure.measureText(text).width, reserved);
+    const segments = bandplanSegments(center, span, width, text => this.axisMeasure.measureText(text).width, reserved, this.language);
     this.axis.replaceChildren(...segments.map(item => {
       const section = document.createElement('div');
       section.className = `bandplan-segment bandplan-${item.kind}`;
