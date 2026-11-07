@@ -285,8 +285,6 @@ function controls() {
   const writable = canControl();
   for (const element of document.querySelectorAll('[data-control]')) element.disabled = !writable;
   $('ptt').disabled = !writable || !!(state.flags & 6) || !radio.microphone || !radio.running;
-  $('microphone').disabled = !writable || radio.micBusy;
-  $('microphone').textContent = radio.micBusy ? 'Mikrofon wird geöffnet …' : radio.microphone ? 'Mikrofon ausschalten' : 'Mikrofon einschalten';
   $('audio').disabled = !!radio.starting;
   $('audio').textContent = radio.starting ? 'Audio startet …' : radio.enabled ? 'Audio stoppen' : operator ? 'Audio / Mikrofon' : 'Audio starten';
   $('audio').classList.toggle('active', radio.running);
@@ -302,7 +300,7 @@ function controls() {
   $('tx-dot').className = `live-dot${transmitting ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
   $('ptt').classList.toggle('sending', transmitting); $('ptt').setAttribute('aria-pressed', String(transmitting));
   renderPttHint();
-  $('audio-details').textContent = radio.starting ? 'Audio wird gestartet …' : radio.running ? `Audio aktiv · Gerät ${radio.context.sampleRate / 1000} kHz · Funk 12 kHz` : 'Audio ausgeschaltet';
+  $('audio-details').textContent = radio.starting ? 'Audio wird gestartet …' : radio.micBusy ? 'Mikrofon wird geöffnet …' : radio.running ? `Audio aktiv · Gerät ${radio.context.sampleRate / 1000} kHz · Funk 12 kHz · Mikrofon ${radio.microphone ? 'aktiv' : 'aus'}` : 'Audio ausgeschaltet';
   $('audio-message').hidden = !(radio.error || radio.warning);
   $('audio-message').textContent = radio.error || radio.warning;
   $('audio-message').classList.toggle('warning', !radio.error && !!radio.warning);
@@ -482,16 +480,19 @@ $('connect').onclick = () => { if (isOpen()) { stopPtt(); socket.close(); } else
 $('audio').onclick = async () => {
   try {
     if (radio.enabled) { stopPtt(); radio.stop(); }
-    else if (canControl()) await radio.enableMic();
+    else if (canControl()) { await radio.enableMic(); if (!canControl()) radio.stopMic(); }
     else await radio.start();
   } catch (error) { notify(radio.error || `Audio / Mikrofon: ${error.message}`, true); }
 };
-$('microphone').onclick = () => {
-  if (radio.microphone) { stopPtt(); radio.stopMic(); }
-  else radio.enableMic().then(() => { if (!operator || !state.ready) radio.stopMic(); }).catch(error => notify(radio.error || `Mikrofon: ${error.message}`, true));
-};
-for (const [id, kind] of [['audio-input', 'audioinput'], ['audio-output', 'audiooutput']]) $(id).onchange = () => {
-  stopPtt(); radio.selectDevice(kind, $(id).value).catch(error => notify(radio.error || error.message, true));
+for (const [id, kind] of [['audio-input', 'audioinput'], ['audio-output', 'audiooutput']]) $(id).onchange = async () => {
+  stopPtt();
+  try {
+    await radio.selectDevice(kind, $(id).value);
+    // Selecting a working input also recovers a failed/disconnected microphone.
+    if (kind === 'audioinput' && radio.running && canControl()) {
+      await radio.enableMic(); if (!canControl()) radio.stopMic();
+    }
+  } catch (error) { notify(radio.error || error.message, true); }
 };
 $('setup').onclick = openSetup;
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => $(button.dataset.close).close();

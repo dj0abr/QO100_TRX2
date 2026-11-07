@@ -11,7 +11,8 @@ attenuation are retained.
   quantization and loss of precision when wrapping small negative frequencies.
 - RX 600 kS/s -> 75 kS/s: `firdecim_crcf`, factor 8, existing 321 Kaiser taps.
 - RX USB filter: `firfilt_cccf`, existing 513 complex taps selecting +100..4000 Hz.
-- TX USB filter: same liquid FIR with factor-two analytic-signal normalization.
+- TX USB filter: same liquid FIR with factor-two analytic-signal normalization;
+  current TX voice band is fixed at +100..3000 Hz.
 - TX 12 kS/s -> 1.2 MS/s: `firinterp_crcf`, exact factor 100, Kaiser prototype,
   semi-length 16, design stop-band attenuation 100 dB. Always 24000 IQs per
   240 audio samples, including after reset.
@@ -43,8 +44,10 @@ Two additional CTest cases cover:
 1. `liquid_dsp_quality`: linked/header version match; positive/negative mixer
    offsets at both sample rates; sample vs block equivalence; frequency error
    <0.05 Hz; oscillator residual < -106 dBc after removing frequency offset;
-   USB passband/edge/stopband response; full TX spectrum at 200, 1000, 3000 and
-   3900 Hz with carrier offset -273457 Hz. Distant spurs must stay below -90 dBc.
+   RX USB passband/edge/stopband response; full TX spectrum at 200..2800 Hz,
+   the 3000-Hz edge and rejected 3100/3500/3900-Hz tones, with carrier offset
+   -273457 Hz. In-band distant spurs must stay below -90 dBc; out-of-band test
+   tones must be suppressed by more than 75 dB, also at 100/140% compression.
    These are numerical synthetic tests, not measurements of RF hardware noise.
 2. `bundled_liquid`: SHA-256 integrity, shared-library version, and absence of a
    dynamic liquid dependency in both executables.

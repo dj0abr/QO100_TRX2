@@ -144,30 +144,41 @@ export class RadioAudio {
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('Mikrofonzugriff benötigt HTTPS oder localhost.');
       const requestStream = id => {
-        return navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false, ...(id !== 'default' ? {deviceId: {ideal: id}} : {})}});
+        return navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false, ...(id !== 'default' ? {deviceId: {exact: id}} : {})}});
       };
-      // Obtain permission before enumerating/routing output devices. In Brave,
+      await this.refreshDevices();
+      if (generation !== this.micGeneration) return;
+      // Obtain microphone permission before routing output devices. In Brave,
       // the pre-permission output list may not contain a usable default sink.
-      stream = await requestStream(this.deviceId('audioinput'));
+      const requested = this.deviceId('audioinput');
+      try { stream = await requestStream(requested); }
+      catch (error) {
+        if (requested === 'default' || !['NotFoundError', 'OverconstrainedError'].includes(error.name)) throw error;
+        // A saved ID may change when permission is granted. This is only a
+        // permission probe: validate/reopen the chosen device before connecting it.
+        if (generation !== this.micGeneration) return;
+        stream = await requestStream('default');
+      }
       await this.refreshDevices();
       if (generation !== this.micGeneration) { stream.getTracks().forEach(track => track.stop()); return; }
       // Labels are usually exposed only after microphone permission has been granted.
       const preferred = this.deviceId('audioinput');
-      const track = stream.getAudioTracks()[0], device = this.devices.find(d => d.kind === 'audioinput' && d.deviceId === preferred);
-      const settings = track?.getSettings();
-      const sameLabel = device?.label && track?.label && device.label === track.label;
-      const sameGroup = device?.groupId && settings?.groupId && device.groupId === settings.groupId;
-      if (preferred !== 'default' && settings?.deviceId !== preferred && !sameLabel && !sameGroup) {
+      const device = this.devices.find(d => d.kind === 'audioinput' && d.deviceId === preferred);
+      const matches = candidate => {
+        const track = candidate.getAudioTracks()[0], settings = track?.getSettings();
+        return settings?.deviceId === preferred || device?.label && device.label === track?.label ||
+          device?.groupId && device.groupId === settings?.groupId;
+      };
+      if (preferred !== 'default' && !matches(stream)) {
         // Keep the first valid stream until a replacement actually opens.
-        try {
-          const replacement = await requestStream(preferred);
-          stream.getTracks().forEach(t => t.stop()); stream = replacement;
-        } catch (error) {
-          if (!['NotFoundError', 'OverconstrainedError'].includes(error.name)) throw error;
-          this.warning = 'Die bevorzugte Aufnahmezuordnung ist veraltet. Die vom Browser freigegebene Aufnahme bleibt aktiv.';
-        }
+        const replacement = await requestStream(preferred);
+        stream.getTracks().forEach(t => t.stop()); stream = replacement;
       }
       if (generation !== this.micGeneration) { stream.getTracks().forEach(track => track.stop()); return; }
+      if (preferred !== 'default' && !matches(stream)) {
+        const actual = stream.getAudioTracks()[0]?.label || 'unbekanntes Gerät';
+        throw new Error(`Der Browser hat „${actual}“ statt „${device?.label || 'gewähltes Mikrofon'}“ geöffnet. Bitte die Mikrofonfreigabe und Geräteauswahl dieser Website im Browser prüfen.`);
+      }
       await this.start();
       if (generation !== this.micGeneration) { stream.getTracks().forEach(track => track.stop()); return; }
       this.microphone = stream;

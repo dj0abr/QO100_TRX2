@@ -237,7 +237,7 @@ await recovered.routeOutput();assert.match(recovered.warning,/Wiedergabe/);
 let getCalls=0,stopped=false,startedAfterPermission=false;
 const track={label:'USB Advanced Audio Device Analog Stereo',getSettings:()=>({deviceId:'permission-scoped-id'}),stop:()=>{stopped=true;}};
 const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
-navigator.mediaDevices.getUserMedia=async constraints=>{getCalls++;assert(!constraints.audio.deviceId?.exact);return stream;};
+navigator.mediaDevices.getUserMedia=async constraints=>{getCalls++;assert.equal(constraints.audio.deviceId?.exact,'usb-in');return stream;};
 const capture=new RadioAudio(()=>{},()=>{});
 capture.context={sampleRate:44100,createMediaStreamSource:()=>({connect(){},disconnect(){}}),createBiquadFilter:()=>({frequency:{},Q:{},connect(){},disconnect(){}})};
 capture.node={};
@@ -252,4 +252,67 @@ defaultCapture.context=capture.context;defaultCapture.node={};defaultCapture.sta
 await defaultCapture.enableMic();
 assert.equal(getCalls,2);assert(!stopped);
 assert.equal(defaultCapture.deviceLabel('audioinput'),'USB Advanced Audio Device Analog Stereo');
+// A browser may ignore an ideal device ID and open its camera microphone instead.
+// Explicit switching must request an exact ID and use the matching track.
+const cameraDevice={kind:'audioinput',deviceId:'camera-in',label:'USB 2.0 Camera Analog Stereo',groupId:'camera-group'};
+const inputDevices=[...freshDevices,cameraDevice];
+const inputStream=device=>{
+  const track={label:device.label,stopped:false,getSettings:()=>({deviceId:device.deviceId,groupId:device.groupId}),stop(){this.stopped=true;}};
+  return {getTracks:()=>[track],getAudioTracks:()=>[track]};
+};
+const mic=()=>{
+  const audio=new RadioAudio(()=>{},()=>{});audio.inputId='';audio.outputId='';
+  audio.context={...capture.context,state:'running'};audio.node={port:{postMessage(){}}};audio.start=async()=>{audio.enabled=true;};
+  return audio;
+};
+const usbDevice=inputDevices.find(d=>d.deviceId==='usb-in');
+navigator.mediaDevices.enumerateDevices=async()=>inputDevices;
+let requests=[];
+navigator.mediaDevices.getUserMedia=async ({audio})=>{
+  requests.push(audio);
+  return inputStream(inputDevices.find(d=>d.deviceId===audio.deviceId?.exact) || cameraDevice);
+};
+const switchedInput=mic();switchedInput.inputId='camera-in';
+await switchedInput.enableMic();const oldCamera=switchedInput.microphone.getAudioTracks()[0];
+await switchedInput.selectDevice('audioinput','usb-in');
+assert(oldCamera.stopped);assert.equal(requests.at(-1).deviceId.exact,'usb-in');
+assert.equal(switchedInput.deviceLabel('audioinput'),usbDevice.label);assert.equal(stored.get('qo100.audioInput'),'usb-in');
+switchedInput.stopMic();
+// First grant: expose devices using a temporary default stream, then open USB exactly.
+let permission=false,probe;
+requests=[];
+navigator.mediaDevices.enumerateDevices=async()=>permission?inputDevices:[];
+navigator.mediaDevices.getUserMedia=async ({audio})=>{
+  requests.push(audio);permission=true;
+  if(!audio.deviceId) return probe=inputStream(cameraDevice);
+  assert.equal(audio.deviceId.exact,'usb-in');return inputStream(usbDevice);
+};
+const firstGrant=mic();await firstGrant.enableMic();
+assert.equal(requests.length,2);assert(!requests[0].deviceId);assert(probe.getTracks()[0].stopped);
+assert.equal(firstGrant.deviceLabel('audioinput'),usbDevice.label);firstGrant.stopMic();
+// Stale IDs / Brave permission mapping may require a default permission probe.
+navigator.mediaDevices.enumerateDevices=async()=>inputDevices;
+requests=[];
+navigator.mediaDevices.getUserMedia=async ({audio})=>{
+  requests.push(audio);
+  if(requests.length===1) throw new DOMException('Mapping not ready','NotFoundError');
+  if(!audio.deviceId) return probe=inputStream(cameraDevice);
+  assert.equal(audio.deviceId.exact,'usb-in');return inputStream(usbDevice);
+};
+const retryInput=mic();await retryInput.enableMic();
+assert.equal(requests.length,3);assert(probe.getTracks()[0].stopped);
+assert.equal(retryInput.deviceLabel('audioinput'),usbDevice.label);retryInput.stopMic();
+// Never connect the camera when exact selection is rejected or ignored, even on retry.
+for(const rejects of [false,true]){
+  const opened=[];let connected=false;
+  navigator.mediaDevices.getUserMedia=async ({audio})=>{
+    if(rejects && audio.deviceId)throw new DOMException('USB unavailable','OverconstrainedError');
+    const stream=inputStream(cameraDevice);opened.push(stream);return stream;
+  };
+  const wrongInput=mic();wrongInput.context.createMediaStreamSource=()=>{connected=true;throw new Error('Wrong microphone connected');};
+  await assert.rejects(wrongInput.enableMic());
+  assert(!connected);assert.equal(wrongInput.microphone,null);assert(wrongInput.running);
+  assert(opened.every(stream=>stream.getTracks()[0].stopped));
+  assert.match(wrongInput.error,rejects?/Gerätezuordnung/:/USB 2.0 Camera.*statt.*USB Advanced/);
+}
 console.log('WebGUI: RF mapping, split tuning, RX2, bounds, FFT assembly, robust noise estimation/tracking, relative display ranges, 12/44.1/48 kHz audio and USB device selection passed.');

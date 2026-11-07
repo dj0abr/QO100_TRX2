@@ -402,21 +402,20 @@ export class RadioDisplay {
     }
     ctx.putImageData(row, 0, 0);
   }
-  paintMarkers(ctx, w, h, waterfall = false) {
+  paintMarkers(ctx, w, h) {
     if (!this.geometry) return;
-    const fullbandWaterfall = waterfall && !this.zoom;
     const left = this.geometry.center - this.geometry.span / 2;
     const x = hz => (hz - left) / this.geometry.span * w;
     const rx1 = this.state.rx?.['1']?.frequency_hz;
     const filter = this.state.filter;
-    if (!fullbandWaterfall && rx1 && filter?.bandwidth_hz) {
+    if (this.zoom && rx1 && filter?.bandwidth_hz) {
       const low = x(rx1 + filter.center_hz - filter.bandwidth_hz / 2);
       const high = x(rx1 + filter.center_hz + filter.bandwidth_hz / 2);
       ctx.fillStyle = '#55d9ee15'; ctx.fillRect(low, 0, high - low, h);
       ctx.strokeStyle = '#55d9ee60'; ctx.lineWidth = 1; ctx.strokeRect(low, 0, high - low, h);
     }
     ctx.save();
-    if (fullbandWaterfall) ctx.globalAlpha = 0.5;
+    if (!this.zoom) ctx.globalAlpha = 0.5;
     const markers = [[rx1, COLORS.rx1, false], [this.state.rx?.['2']?.frequency_hz, COLORS.rx2, false], [this.state.tx?.frequency_hz + 8089500000, COLORS.tx, true]];
     for (const [hz, color, dashed] of markers) if (Number.isSafeInteger(hz) && x(hz) >= 0 && x(hz) <= w) {
       ctx.strokeStyle = color; ctx.lineWidth = this.dpr || 1;
@@ -428,7 +427,7 @@ export class RadioDisplay {
   }
   drawMarkers() {
     const ctx = this.overlay.getContext('2d'); ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
-    this.paintMarkers(ctx, this.overlay.width, this.overlay.height, true);
+    this.paintMarkers(ctx, this.overlay.width, this.overlay.height);
   }
   drawAxis() {
     const bandplan = !this.zoom && this.axisMode === 'bandplan';

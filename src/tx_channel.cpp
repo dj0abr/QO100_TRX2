@@ -13,7 +13,9 @@ void process(SRC_STATE* state, SRC_DATA& data) {
 }
 TxChannel::TxChannel(int64_t offset, CompressorSettings compressor)
     : clock_(make_audio_resampler(SRC_SINC_FASTEST, 1)),
-      usb_filter_(make_usb_filter(2)), interpolator_(firinterp_crcf_create_kaiser(100, 16, 100)),
+      // Fixed TX voice band; independent of the wider RX defaults/settings.
+      usb_filter_(make_usb_filter(2, RxFilterSettings::from_edges(100, 3000))),
+      interpolator_(firinterp_crcf_create_kaiser(100, 16, 100)),
       compressor_(compressor) {
     if (!interpolator_) throw std::runtime_error("Cannot create liquid TX interpolator");
     reset(offset);

@@ -168,7 +168,11 @@ Vertikales Wischen scrollt die Seite. Die QSO-Leiste bleibt am unteren Rand erre
 ### Audio, PTT und Einstellungen
 
 **Audio / Mikrofon** aktiviert die Wiedergabe und fragt beim Bediener die
-Mikrofonfreigabe ab. Zuschauer aktivieren ausschließlich die Wiedergabe. **PTT**
+Mikrofonfreigabe ab. Das Mikrofon bleibt zusammen mit Audio aktiv; einen separaten
+Mikrofonschalter im Setup gibt es nicht. **Audio stoppen** beendet auch die Aufnahme.
+Nach einem Mikrofonfehler kann bei laufendem Audio ein Aufnahmegerät im Setup
+gewählt werden, um die Aufnahme erneut zu starten.
+Zuschauer aktivieren ausschließlich die Wiedergabe. **PTT**
 erfordert ein eingeschaltetes Mikrofon. Unter **Setup → PTT-Taste** stehen zwei
 Bedienarten zur Wahl: **Drücken/Halten** (Standard) oder **Anklicken zum Umschalten**.
 Im Schaltbetrieb beendet ein zweiter Klick die Aussendung; nach spätestens
@@ -270,6 +274,11 @@ jeweiligen Browser gespeichert. Veraltete Geräte-IDs werden nach der Freigabe
 erneuert; zeigt der Systemstandard bereits auf das USB-Gerät, bleibt diese
 Zuordnung erhalten. Eine abgelehnte Ausgabezuordnung erzeugt eine Warnung und
 bricht eine funktionierende Mikrofonaufnahme nicht ab.
+Die Aufnahme wird mit verbindlicher Geräte-ID angefordert und vor der Verwendung
+anhand des geöffneten Tracks geprüft. Ein vorübergehend für die Freigabe geöffneter
+Systemstandard wird durch das gewählte Mikrofon ersetzt; eine falsche Quelle
+wird nicht an den Sender angeschlossen. Wird die Auswahl abgelehnt, bleibt die
+Wiedergabe aktiv und das Mikrofon aus, mit einer Fehlermeldung im WebGUI.
 Ein Gerätewechsel beendet PTT. Browser ohne
 `AudioContext.setSinkId` verwenden die Systemausgabe; deren Zuordnung erfolgt
 beispielsweise über pavucontrol. Audiofehler bleiben im Statusbereich sichtbar;

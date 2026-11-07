@@ -64,8 +64,11 @@ void filters() {
 }
 void tx_spectrum() {
     constexpr int carrier=-273457;
-    for(int frequency:{200,1000,3000,3900}) {
-        qo100::TxChannel tx(carrier);
+    // Measure the actual interpolated/mixed IQ, including the compressor.
+    // RX's full bandwidth remains 100..4000 Hz; TX ends at 3000 Hz.
+    for(unsigned amount:{0U,1000U,1400U}) for(int frequency:{200,1000,2000,2800,3000,3100,3500,3900}) {
+        if(amount && frequency<3100) continue; // In-band compression is tested separately.
+        qo100::TxChannel tx(carrier,{amount});
         uint64_t index=0;
         auto add=[&] {
             std::vector<int16_t> pcm(240);
@@ -102,9 +105,18 @@ void tx_spectrum() {
         }
         const double level=peak/coherent;
         const double rejection=20*std::log10(peak/std::max(unwanted,1e-20));
-        std::cout<<"TX "<<frequency<<" Hz: amplitude="<<level<<"; strongest distant spur="<<-rejection<<" dBc at "<<spur_hz<<" Hz\n";
-        require(level>.22 && level<.26,"TX audio passband or interpolation gain changed");
-        require(rejection>90,"TX interpolation image or mixer spur exceeds -90 dBc");
+        const double attenuation=-20*std::log10(std::max(level,1e-20)/(16000./32768*.5));
+        std::cout<<"TX "<<frequency<<" Hz / compressor "<<amount/10.<<"%: amplitude="<<level
+                 <<"; attenuation="<<attenuation<<" dB; strongest distant spur="<<-rejection<<" dBc at "<<spur_hz<<" Hz\n";
+        if(frequency<3000) {
+            require(level>.22 && level<.26,"TX audio passband or interpolation gain changed");
+            require(rejection>90,"TX interpolation image or mixer spur exceeds -90 dBc");
+        } else if(frequency==3000) {
+            require(level>.10 && level<.14,"TX upper filter edge is not at 3 kHz");
+        } else {
+            require(attenuation>75,"TX audio above 3.1 kHz is not sufficiently suppressed");
+        }
+        require(tx.underruns==0 && tx.overruns==0,"TX bandwidth test interrupted audio FIFO");
         fftwf_destroy_plan(plan);fftwf_free(in);fftwf_free(out);
     }
 }

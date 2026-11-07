@@ -104,6 +104,8 @@ Sample-Indizes erkennen Verlust, Duplikate und Reihenfolge. Für die Soundkarte:
 
 PTT nur nach Benutzeraktion einschalten. **Erst nach passendem OK mit `first=1` Audio senden**, in 20-ms-Blöcken; Index bei neuer TX-Epoche wieder 0. `TX_CONTROL` mindestens alle **500 ms** wiederholen, auch während Audio fließt. Nach **1,5 s** ohne gültiges Control fällt PTT ab; erneutes Einschalten benötigt eine **neue Request-ID**.
 Keine Audiopakete seit 200 ms → Stille; kurze Paketlücken werden ebenfalls mit Stille gefüllt. RX und TX sind unabhängig. Hardwareänderungen erzwingen PTT aus.
+TX-USB ist im Backend fest auf **100–3000 Hz** begrenzt (nominelle Filtergrenzen,
+mit endlicher Flanke); PCM bleibt bei 12 kHz. RX-Filterbefehle verändern TX nicht.
 
 ## Filter, Kompressor, NR und Test-Loops
 

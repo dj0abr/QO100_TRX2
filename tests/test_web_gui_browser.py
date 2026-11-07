@@ -544,8 +544,19 @@ def main():
             time.sleep(5.2)
             assert execute('return !document.getElementById("audio-message").hidden')
             execute('navigator.mediaDevices.getUserMedia=window.__originalGetUserMedia;delete window.__originalGetUserMedia')
-            click('#setup');click('#microphone')
+            click('#setup')
+            assert execute('return document.getElementById("microphone")===null')
+            changed('#audio-input','default')
             wait(lambda:execute('return !document.getElementById("ptt").disabled && document.getElementById("audio-message").hidden'))
+            # A concrete input choice must reach getUserMedia as a required device ID.
+            named_input=execute('return [...document.getElementById("audio-input").options].find(n=>n.value && n.value!=="default").value')
+            execute('''window.__captureGetUserMedia=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                navigator.mediaDevices.getUserMedia=constraints=>{window.__captureConstraints=constraints;return window.__captureGetUserMedia(constraints);};''')
+            changed('#audio-input',named_input)
+            wait(lambda:execute('return !document.getElementById("ptt").disabled && document.getElementById("audio-message").hidden'))
+            assert execute('return window.__captureConstraints.audio.deviceId.exact')==named_input
+            assert execute('return localStorage.getItem("qo100.audioInput")')==named_input
+            execute('navigator.mediaDevices.getUserMedia=window.__captureGetUserMedia;delete window.__captureGetUserMedia')
             changed('#audio-output','default');changed('#audio-input','default')
             wait(lambda:execute('return !document.getElementById("ptt").disabled'))
             assert execute('return localStorage.getItem("qo100.audioOutput")')=='default'
