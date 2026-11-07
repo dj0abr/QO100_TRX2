@@ -2,8 +2,8 @@ export class RadioAudio {
   constructor(onSamples, onChange) {
     this.onSamples = onSamples; this.onChange = onChange;
     this.gain = 4; this.enabled = false; this.micGeneration = 0;
-    this.devices = []; this.error = ''; this.warning = ''; this.inputId = ''; this.outputId = '';
-    try { this.inputId = localStorage.getItem('qo100.audioInput') || ''; this.outputId = localStorage.getItem('qo100.audioOutput') || ''; } catch {}
+    this.devices = []; this.error = ''; this.warning = ''; this.inputId = 'default'; this.outputId = 'default';
+    try { this.inputId = localStorage.getItem('qo100.audioInput') || 'default'; this.outputId = localStorage.getItem('qo100.audioOutput') || 'default'; } catch {}
     navigator.mediaDevices?.addEventListener('devicechange', () => this.refreshDevices().catch(() => {}));
   }
   async start() {
@@ -64,15 +64,17 @@ export class RadioAudio {
     const version = this.deviceRefresh = (this.deviceRefresh || 0) + 1;
     const devices = navigator.mediaDevices?.enumerateDevices ? await navigator.mediaDevices.enumerateDevices() : [];
     if (version !== this.deviceRefresh) return;
-    this.devices = devices;
+    // These virtual endpoints belong to external digital programs, not to the
+    // browser's speaker/microphone path (including their monitor/default aliases).
+    this.devices = devices.filter(d => !/\bQO100[_ -](?:RX2(?:[_ -]Internal)?|TX2)\b/i.test(d.label));
     // Before permission, browsers may expose only anonymous/default devices.
     // Never treat that restricted list as evidence that a saved device vanished.
     for (const [kind, field, key] of [['audioinput', 'inputId', 'qo100.audioInput'], ['audiooutput', 'outputId', 'qo100.audioOutput']]) {
       const selected = this[field];
-      if (selected && selected !== 'default' && devices.some(d => d.kind === kind && d.label) && !devices.some(d => d.kind === kind && d.deviceId === selected)) {
-        this[field] = '';
+      if (selected && selected !== 'default' && devices.some(d => d.kind === kind && d.label) && !this.devices.some(d => d.kind === kind && d.deviceId === selected)) {
+        this[field] = 'default';
         try { localStorage.removeItem(key); } catch {}
-        this.warning = 'Eine gespeicherte Gerätezuordnung war veraltet und wurde erneuert. USB Advanced Audio Device wird bevorzugt.';
+        this.warning = 'Eine gespeicherte Gerätezuordnung ist nicht verfügbar. Der Systemstandard wird verwendet.';
       }
     }
     this.onChange();
@@ -81,8 +83,7 @@ export class RadioAudio {
     const selected = kind === 'audioinput' ? this.inputId : this.outputId;
     if (selected === 'default') return selected;
     if (selected && this.devices.some(d => d.kind === kind && d.deviceId === selected)) return selected;
-    if (kind === 'audiooutput' && this.context && !this.context.setSinkId) return 'default';
-    return this.devices.find(d => d.kind === kind && !['default', 'communications'].includes(d.deviceId) && /usb.*advanced.*audio/i.test(d.label) && (kind !== 'audioinput' || !/monitor/i.test(d.label)))?.deviceId || 'default';
+    return 'default';
   }
   deviceLabel(kind) {
     if (kind === 'audioinput' && this.microphone) {
@@ -96,11 +97,7 @@ export class RadioAudio {
   }
   async routeOutput() {
     if (!this.context) return;
-    let id = this.deviceId('audiooutput');
-    const system = this.devices.find(d => d.kind === 'audiooutput' && d.deviceId === 'default');
-    const chosen = this.devices.find(d => d.kind === 'audiooutput' && d.deviceId === id);
-    // Do not turn a functioning default USB output into a forced opaque sink ID.
-    if (!this.outputId && system && chosen && (system.groupId && system.groupId === chosen.groupId || /usb.*advanced.*audio/i.test(system.label) && /usb.*advanced.*audio/i.test(chosen.label))) id = 'default';
+    const id = this.deviceId('audiooutput');
     const sink = id === 'default' ? '' : id;
     if (typeof this.context.sinkId === 'string' && this.context.sinkId === sink) { this.activeOutputId = id; return; }
     if (!this.context.setSinkId) {
@@ -113,7 +110,7 @@ export class RadioAudio {
     } catch (error) {
       // Output selection must not close an otherwise working microphone stream.
       this.warning = `Wiedergabe: Die Gerätezuordnung wurde vom Browser abgelehnt (${error.name}). Der Systemstandard wird verwendet.`;
-      this.outputId = ''; this.activeOutputId = 'default';
+      this.outputId = 'default'; this.activeOutputId = 'default';
       try { localStorage.removeItem('qo100.audioOutput'); } catch {}
       if (this.context.sinkId !== '') {
         try { await this.context.setSinkId(''); }
@@ -123,6 +120,7 @@ export class RadioAudio {
   }
   async selectDevice(kind, id) {
     this.error = ''; this.warning = '';
+    id = id || 'default';
     if (kind === 'audioinput') this.inputId = id; else this.outputId = id;
     try { localStorage.setItem(kind === 'audioinput' ? 'qo100.audioInput' : 'qo100.audioOutput', id); } catch {}
     try {

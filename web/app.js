@@ -332,10 +332,10 @@ function renderDevices() {
     const node = $(id), devices = radio.devices.filter(d => d.kind === kind && !['default', 'communications'].includes(d.deviceId));
     const signature = JSON.stringify([devices.map(d => [d.deviceId, d.label]), value, language]);
     if (node.dataset.signature !== signature) {
-      const options = [new Option(t('Automatisch · USB Advanced bevorzugen', 'Automatic · Prefer USB Advanced'), ''), new Option(t('Systemstandard', 'System default'), 'default')];
+      const options = [new Option(t('Systemstandard', 'System default'), 'default')];
       for (const [index, device] of devices.entries()) options.push(new Option(device.label || t(`Gerät ${index + 1} · Freigabe erforderlich`, `Device ${index + 1} · Permission required`), device.deviceId));
       if (value && value !== 'default' && !devices.some(d => d.deviceId === value)) options.push(new Option(t('Gespeichertes Gerät nicht verfügbar', 'Saved device unavailable'), value));
-      node.replaceChildren(...options); node.value = value; node.dataset.signature = signature;
+      node.replaceChildren(...options); node.value = value || 'default'; node.dataset.signature = signature;
     }
     node.disabled = !!radio.starting || radio.micBusy || (kind === 'audioinput' && !canControl());
   }

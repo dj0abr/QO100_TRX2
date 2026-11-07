@@ -120,6 +120,15 @@ Der Bandplan zeigt die Bereiche für die verschiedenen Betriebsarten. Mit **↻*
 - **RX3:** FT8-Monitor.
 - **RX4:** PSK-Bakenmonitor.
 
+**Anmerkung zu RX2 in WSJT-X:** Unter **Einstellungen → Audio** folgende Geräte wählen:
+
+| Einstellung | Gerät |
+|---|---|
+| Input (Eingang) | `QO100_RX2_input` |
+| Output (Ausgang) | `QO100_TX2` |
+
+WSJT-X zeigt zusätzlich interne Anschlüsse wie `QO100_RX2.Monitor` und `QO100_TX2.Monitor` an. Für den Betrieb über RX2/TX2 die oben aufgeführten Geräte verwenden.
+
 Beide Monitoringfrequenzen unter **Setup → Monitoring-Empfänger** als ganze Hz einstellen und speichern. **Decoder-Text anzeigen** über dem Zoom öffnet die Ausgabe; Radiobuttons wählen **RX3 · FT8** oder **RX4 · PSK**. Beide Quellen werden gleichzeitig empfangen und getrennt gepuffert. `./start_all.sh` startet beide Decoder.
 
 ![Decodierte FT8-Nachrichten](docs/decoderoutput.png)

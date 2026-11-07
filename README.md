@@ -120,6 +120,15 @@ The bandplan identifies the operating areas. Click **↻** at the right of the F
 - **RX3:** FT8 monitor.
 - **RX4:** PSK beacon monitor.
 
+**Note on using RX2 with WSJT-X:** Under **Settings → Audio**, select these devices:
+
+| Setting | Device |
+|---|---|
+| Input | `QO100_RX2_input` |
+| Output | `QO100_TX2` |
+
+WSJT-X also lists internal endpoints such as `QO100_RX2.Monitor` and `QO100_TX2.Monitor`. Use the devices listed above for RX2/TX2 operation.
+
 Set both USB carrier frequencies in whole Hz under **Setup → Monitoring receivers** and save. **Show decoder text** above the zoom opens the output; radio buttons select **RX3 · FT8** or **RX4 · PSK**. Both sources are received concurrently and buffered separately. `./start_all.sh` starts both decoders.
 
 ![FT8 decoded messages](docs/decoderoutput.png)

@@ -292,12 +292,12 @@ verwerfen weiterhin alte Audiodaten.
 Mikrofon und AudioWorklet benötigen HTTPS oder localhost.
 
 Unter **Setup → Audio** lassen sich Aufnahme- und Wiedergabegerät auswählen.
-Automatisch wird ein verfügbares **USB Advanced Audio Device** bevorzugt,
-ansonsten der Systemstandard. Nach der Mikrofonfreigabe werden die Gerätenamen
-angezeigt und die passende USB-Ausgabe ausgewählt. Die Auswahl wird lokal im
-jeweiligen Browser gespeichert. Veraltete Geräte-IDs werden nach der Freigabe
-erneuert; zeigt der Systemstandard bereits auf das USB-Gerät, bleibt diese
-Zuordnung erhalten. Eine abgelehnte Ausgabezuordnung erzeugt eine Warnung und
+Zur Auswahl stehen **Systemstandard** und die verfügbaren Audiogeräte. Ohne
+explizite Geräteauswahl gilt der Systemstandard. Die virtuellen Digitalgeräte
+QO100_RX2, QO100_TX2 und QO100_RX2_Internal samt Monitorvarianten sind ausgeblendet.
+Nach der Mikrofonfreigabe werden die Gerätenamen angezeigt. Die Auswahl wird lokal
+im jeweiligen Browser gespeichert. Bei veralteten Geräte-IDs wird nach der Freigabe
+auf den Systemstandard zurückgefallen. Eine abgelehnte Ausgabezuordnung erzeugt eine Warnung und
 bricht eine funktionierende Mikrofonaufnahme nicht ab.
 Die Aufnahme wird mit verbindlicher Geräte-ID angefordert und vor der Verwendung
 anhand des geöffneten Tracks geprüft. Ein vorübergehend für die Freigabe geöffneter

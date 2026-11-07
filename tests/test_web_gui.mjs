@@ -213,6 +213,9 @@ audio.devices=[
 ];
 let routed;
 audio.context={setSinkId:async id=>{routed=id;}};
+assert.equal(audio.deviceId('audioinput'),'default');
+assert.equal(audio.deviceId('audiooutput'),'default');
+audio.inputId='usb-in';audio.outputId='usb-out';
 assert.equal(audio.deviceId('audioinput'),'usb-in');
 assert.equal(audio.deviceId('audiooutput'),'usb-out');
 await audio.routeOutput();assert.equal(routed,'usb-out');
@@ -230,9 +233,10 @@ const freshDevices=audio.devices.filter(d=>d.deviceId!=='default');
 navigator.mediaDevices.enumerateDevices=async()=>freshDevices;
 const recovered=new RadioAudio(()=>{},()=>{});
 await recovered.refreshDevices();
-assert.equal(recovered.deviceId('audioinput'),'usb-in');assert.equal(recovered.deviceId('audiooutput'),'usb-out');
+assert.equal(recovered.deviceId('audioinput'),'default');assert.equal(recovered.deviceId('audiooutput'),'default');
 assert(!stored.has('qo100.audioInput'));assert(!stored.has('qo100.audioOutput'));
 // An invalid output sink is a playback warning; it must not abort input setup.
+recovered.outputId='usb-out';
 recovered.context={sinkId:'',setSinkId:async()=>{throw new DOMException('Invalid sink','NotFoundError');}};
 await recovered.routeOutput();assert.match(recovered.warning,/Wiedergabe/);
 let getCalls=0,stopped=false,startedAfterPermission=false;
@@ -240,6 +244,7 @@ const track={label:'USB Advanced Audio Device Analog Stereo',getSettings:()=>({d
 const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
 navigator.mediaDevices.getUserMedia=async constraints=>{getCalls++;assert.equal(constraints.audio.deviceId?.exact,'usb-in');return stream;};
 const capture=new RadioAudio(()=>{},()=>{});
+capture.inputId='usb-in';
 capture.context={sampleRate:44100,createMediaStreamSource:()=>({connect(){},disconnect(){}}),createBiquadFilter:()=>({frequency:{},Q:{},connect(){},disconnect(){}})};
 capture.node={};
 capture.start=async()=>{startedAfterPermission=getCalls>0;capture.enabled=true;};
@@ -249,6 +254,7 @@ assert.equal(getCalls,1);assert(startedAfterPermission);assert.equal(capture.mic
 freshDevices.find(d=>d.deviceId==='usb-in').groupId='usb-group';
 track.label='Standard';track.getSettings=()=>({deviceId:'default',groupId:'usb-group'});
 const defaultCapture=new RadioAudio(()=>{},()=>{});
+defaultCapture.inputId='usb-in';
 defaultCapture.context=capture.context;defaultCapture.node={};defaultCapture.start=async()=>{};
 await defaultCapture.enableMic();
 assert.equal(getCalls,2);assert(!stopped);
@@ -262,7 +268,7 @@ const inputStream=device=>{
   return {getTracks:()=>[track],getAudioTracks:()=>[track]};
 };
 const mic=()=>{
-  const audio=new RadioAudio(()=>{},()=>{});audio.inputId='';audio.outputId='';
+  const audio=new RadioAudio(()=>{},()=>{});audio.inputId='usb-in';audio.outputId='default';
   audio.context={...capture.context,state:'running'};audio.node={port:{postMessage(){}}};audio.start=async()=>{audio.enabled=true;};
   return audio;
 };
