@@ -1,4 +1,4 @@
-"""Real FT8 waveform -> RX2 UDP -> FT8 service -> adapter -> two WebSocket clients."""
+"""Real FT8 waveform -> RX3 UDP -> FT8 service -> adapter -> two WebSocket clients."""
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -26,11 +26,11 @@ def main():
         logs=[(root/name).open('w') for name in ['backend.log','adapter.log','receiver.log']]
         radio=subprocess.Popen([str(backend),'--config',str(config),'--source','synthetic'],stdout=logs[0],stderr=logs[0])
         proxy=Proxy(backend_port)
-        # Replace only the synthetic RX2 audio with a known FT8 slot; all other backend traffic stays live.
-        proxy.drop=lambda p:p[5]==5 and HEADER.unpack_from(p)[4]==2
+        # Replace only the synthetic RX3 audio with a known FT8 slot; all other backend traffic stays live.
+        proxy.drop=lambda p:p[5]==5 and HEADER.unpack_from(p)[4]==5
         proxy.drop_once=False
         bridge=subprocess.Popen([str(adapter),'--listen','127.0.0.1','--port',str(http_port),'--backend-port',str(proxy.port),
-            '--web-root',str(assets),'--decoder-audio-port',str(audio_port),'--decoder-text-port',str(text_port)],stdout=logs[1],stderr=logs[1])
+            '--web-root',str(assets),'--rx3-decoder-audio-port',str(audio_port),'--rx3-decoder-text-port',str(text_port)],stdout=logs[1],stderr=logs[1])
         decoder=subprocess.Popen([str(receiver),'--port',str(audio_port),'--time-offset-ms','0'],stdout=logs[2],stderr=logs[2])
         clients=[]
         try:
@@ -43,7 +43,7 @@ def main():
             wait(available)
             owner=Client(http_port);clients.append(owner);owner.role('operator');state=owner.state()
             viewer=Client(http_port);clients.append(viewer);viewer.role('viewer',True);viewer.state()
-            sid,epoch,frequency=state['session'],state['rx']['2']['epoch'],state['rx']['2']['frequency_hz']
+            sid,epoch,frequency=state['session'],state['rx']['3']['epoch'],state['rx']['3']['frequency_hz']
             assert frequency>2**32,'Test must cover the 10-GHz downlink frequency'
             slot_utc=1700000010
 
@@ -52,7 +52,7 @@ def main():
                 for start in range(0,180000,240):
                     if start==drop: continue
                     timestamp=seconds*10**9+(start+240)*10**9//12000
-                    packet=HEADER.pack(b'QTR2',1,5,64,2,epoch,timestamp,index+start,dial,12000,0,0,240,2,240,sid)
+                    packet=HEADER.pack(b'QTR2',1,5,64,5,epoch,timestamp,index+start,dial,12000,0,0,240,2,240,sid)
                     packet+=struct.pack('!240h',*values[start:start+240])
                     proxy.socket.sendto(packet,proxy.peer)
                     if start%3840==0: time.sleep(.004)
@@ -77,11 +77,11 @@ def main():
             feed(recorded,slot_utc+30,index=360000)
             for client in clients:
                 wait(lambda:all(message in text(client) for message in ['W1FC F5BZB -08','CQ F5RXL IN94','K1JT HA0DU KN07']),timeout=20)
-                assert not any(isinstance(p,bytes) and p[5]==5 and HEADER.unpack_from(p)[4]==2 for p in client.messages),'RX2 PCM leaked to browser'
+                assert not any(isinstance(p,bytes) and p[5]==5 and HEADER.unpack_from(p)[4]==5 for p in client.messages),'RX3 PCM leaked to browser'
             assert 'Discarded partial slot: audio sample gap' in (root/'receiver.log').read_text()
             assert decoder.poll() is None
             print('FT8 UDP: real generated message and WSJT-X recording decoded to operator/viewer; UTC labels, '
-                  '64-bit QO100 RF, duplicate rejection, packet-loss recovery and no RX2 PCM in browser passed')
+                  '64-bit QO100 RF, duplicate rejection, packet-loss recovery and no RX3 PCM in browser passed')
         finally:
             for client in clients: client.close()
             for process in [decoder,bridge,radio]:

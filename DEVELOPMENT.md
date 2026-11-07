@@ -33,16 +33,20 @@ Der Pluto-Treiber wird automatisch vom Backend gestartet.
 **Das Start-Terminal offen lassen; Strg+C beendet den gesamten Verbund.**
 Getrennte Logs liegen in `build/run/stack-DATUM-UHRZEIT-PID/`.
 Belegte Ports führen vor dem Start zum Abbruch: zuvor einzeln gestartete
-Programme müssen erst beendet werden. Endet später ein Dienst, werden auch
-die übrigen beendet. Für einen Test ohne Pluto: `./start_all.sh --source synthetic`.
+Programme müssen erst beendet werden. Endet später Backend oder Webadapter, werden auch
+die übrigen beendet. Einzelne Monitoringdecoder werden separat neu gestartet. Für einen Test ohne Pluto: `./start_all.sh --source synthetic`.
 Alternative Konfigurationen: `--backend-config DATEI --webbridge-config DATEI`.
 
-**RX2-Decoder:** Für digitale Betriebsarten reicht der Webadapter RX2-Audio lokal
-an ein externes Programm weiter. Nur dessen Textausgabe gelangt zum Browser.
-Mit `./start_all.sh` läuft der FT8-Empfänger bereits mit. Beim manuellen
-Einzelstart zusätzlich `./build/bin/qo100_ft8_decoder` aufrufen und RX2 auf den
-USB-Träger der FT8-Aktivität abstimmen. Der WSJT-X-Rechenkern wird mitgebaut; der bisherige
-Dummy-Name startet ebenfalls den FT8-Empfänger. [Start, Zeit und Tests](docs/ft8-decoder.md).
+**Monitoring:** RX3/FT8 und RX4/PSK besitzen eigene USB-Demodulatoren und feste,
+im WebGUI unter **Setup → Monitoring-Empfänger** als ganze Hz einstellbare Frequenzen.
+`./start_all.sh` startet beide externen Decoder. Die Webbridge leitet die getrennten
+Audioströme (Transport-IDs 5/6) lokal weiter und verteilt beide Textquellen gleichzeitig
+an die Browser. Radiobuttons wählen die sichtbare Quelle mit getrennten Textpuffern.
+RX2 bleibt unabhängig abstimmbar und besitzt keinen Monitoringdecoderanschluss.
+Das zugehörige TX2 und die virtuellen Audiogeräte für FLdigi/WSJT-X sind unter
+[RX2/TX2-Digitalbetrieb](docs/digital-audio.md) beschrieben. Die Browserauswahl
+RX1/RX2 wählt das bediente Paar und den hörbaren Audiokanal.
+[Architektur, Ports und Betrieb](docs/webbridge.md#monitoring-rx3-und-rx4).
 
 **Browser-GUI:** Der separate Adapter `qo100_webbridge` verbindet die GUI-UDP-Schnittstelle
 mit HTTP/WebSocket und liefert eine HTML/JS-Testseite aus. Ein Bediener, beliebig weitere

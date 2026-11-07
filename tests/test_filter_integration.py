@@ -57,7 +57,8 @@ def main():
                 elif f[2] == AUDIO:
                     p = audio_packet(packet)
                     assert p is not None
-                    audio[p.stream_id].append(p)
+                    if p.stream_id in audio:
+                        audio[p.stream_id].append(p)
                 elif f[2] == 2 and f[4] == 1:
                     zoom_ids.add(f[5])
 
@@ -87,9 +88,9 @@ def main():
 
         try:
             deadline = time.monotonic() + 3
-            while len(states) != 2 and time.monotonic() < deadline:
+            while not {1, 2}.issubset(states) and time.monotonic() < deadline:
                 pump(.1)
-            assert len(states) == 2, states
+            assert {1, 2}.issubset(states), states
             session = states[1][15]
             identity = {s: (f[15], f[7]) for s, f in states.items()}
             assert command() == (500, 1000), "Query must preserve configured startup filter"

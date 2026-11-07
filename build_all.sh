@@ -49,9 +49,9 @@ if ((install_deps)); then
         fi
         apt_command=(sudo apt-get)
     fi
-    packages=(build-essential cmake pkg-config gfortran python3 ca-certificates
+    packages=(build-essential cmake pkg-config gfortran python3 python3-numpy python3-scipy ca-certificates
         libiio-dev libad9361-dev libsamplerate0-dev libfftw3-dev
-        libboost-dev nlohmann-json3-dev)
+        libboost-dev nlohmann-json3-dev libpulse-dev pulseaudio-utils)
     "${apt_command[@]}" update
     "${apt_command[@]}" install -y --no-install-recommends "${packages[@]}"
 fi
@@ -80,7 +80,7 @@ cmake -S "$project_dir" -B "$project_dir/build" \
     -DCMAKE_BUILD_TYPE=Release -DQO100_BUILD_WEBBRIDGE=ON \
     -DPython3_EXECUTABLE=/usr/bin/python3
 cmake --build "$project_dir/build" --parallel "$jobs" \
-    --target qo100_backend qo100_webbridge qo100_ft8_decoder
+    --target qo100_backend qo100_webbridge qo100_ft8_decoder qo100_beacon_decoder qo100_digital_audio
 
-echo "Built backend, Pluto driver, WebSocket adapter and FT8 decoder."
+echo "Built backend, Pluto driver, WebSocket adapter, RX3 FT8, RX4 PSK and RX2/TX2 virtual audio interface."
 echo "Start with: $project_dir/start_all.sh"

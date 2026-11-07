@@ -9,7 +9,7 @@ find_package(Boost 1.74 REQUIRED)
 find_package(nlohmann_json 3.9 REQUIRED)
 find_package(Threads REQUIRED)
 add_executable(qo100_webbridge main.cpp bridge.cpp server.cpp)
-target_include_directories(qo100_webbridge PRIVATE ${Boost_INCLUDE_DIRS})
+target_include_directories(qo100_webbridge PRIVATE ${Boost_INCLUDE_DIRS} ../include)
 target_compile_definitions(qo100_webbridge PRIVATE BOOST_ERROR_CODE_HEADER_ONLY
     QO100_WEB_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web")
 target_compile_options(qo100_webbridge PRIVATE -Wall -Wextra -Wpedantic)

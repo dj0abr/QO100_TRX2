@@ -11,8 +11,9 @@ namespace qo100 {
 // One 20 ms block is clocked by the Pluto FIFO feedback, never by GUI arrival.
 class TxChannel {
 public:
+    enum class Profile { voice, digital };
     static constexpr size_t audio_block = 240, iq_block = 24000, target = 1440, capacity = 2880;
-    explicit TxChannel(int64_t offset = 150000, CompressorSettings compressor = {});
+    explicit TxChannel(int64_t offset = 150000, CompressorSettings compressor = {}, Profile profile = Profile::voice);
     ~TxChannel();
     TxChannel(const TxChannel&) = delete;
     TxChannel& operator=(const TxChannel&) = delete;
@@ -28,6 +29,7 @@ public:
     float limiting_db() const { return limiter_.reduction_db(); }
     uint64_t underruns = 0, overruns = 0, losses = 0;
 private:
+    Profile profile_;
     void clear_dsp();
     std::map<uint64_t, std::vector<int16_t>> packets_;
     std::vector<float> pending_;

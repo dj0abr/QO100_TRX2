@@ -21,62 +21,79 @@ cmake --build build-webbridge -j2
 ```
 
 `config/webbridge.conf`: Listen-Adresse, HTTP-Port, Backend-Port, Dokumentverzeichnis,
-lokale Decoder-Ports (Audio **40910**, Text **40911**), Inaktivitätslimit (Standard **300 s**), Verbindungslimit (**16**) und Sendepuffer je Browser
+lokale Decoder-Ports (RX3 **40910/40911**, RX4 **40912/40913**), Inaktivitätslimit (Standard **300 s**), Verbindungslimit (**16**) und Sendepuffer je Browser
 (**512 KiB**). Relative `web_root`-Pfade beziehen sich auf die Config-Datei.
 CLI überschreibt die Datei; Optionen zeigt `--help`.
 
 **Einziger UDP-Teilnehmer:** Während des Adapterbetriebs kein natives Test-GUI direkt
 am selben Backend betreiben, da eine neue UDP-Anmeldung die bisherige ersetzt.
 
-## RX2 zum externen Decoder
+## Monitoring RX3 und RX4
 
-RX2-Audio geht **nicht an Browser**. Der Adapter bleibt der einzige UDP-Abnehmer
-des Backends und reicht RX2 lokal weiter:
+RX3 und RX4 besitzen eigene USB-Demodulatoren ohne zusätzliche Zoom-FFTs.
+RX2 bleibt manuell abstimmbar und hat derzeit keinen Decoderanschluss.
+Der Adapter bleibt der einzige UDP-Abnehmer des Backends:
 
 ```text
-Backend -- UDP AUDIO/2 --> Adapter -- UDP :40910 --> externer Decoder
-Browser <-- WebSocket-Text -- Adapter :40911 <-- UDP UTF-8-Text -- Decoder
+Backend AUDIO/5 → Adapter → UDP :40910 → RX3 FT8-Decoder
+Backend AUDIO/6 → Adapter → UDP :40912 → RX4 PSK-Decoder
+Browser ← WebSocket ← Adapter :40911 / :40913 ← UDP UTF-8-Text
 ```
 
-FT8-Empfänger starten, zusätzlich zu Backend und Adapter (alten Dummy vorher beenden):
+`./start_all.sh` startet beide Decoder. Einzelstart zusätzlich zum Backend/Adapter:
 
 ```sh
-./build/bin/qo100_ft8_decoder
+./build/bin/qo100_ft8_decoder --port 40910
+./build/bin/qo100_beacon_decoder --port 40912
 ```
 
-Im WebGUI blendet **Decoder-Text anzeigen** bei der RX2-Frequenz die Ausgabe
-**RX2 · Decoder** unter dem Zoom-Wasserfall ein. Beide teilen dessen bisherigen
-Platz zur Hälfte. Ausgeblendet erhält der Wasserfall wieder die volle Höhe;
-die Auswahl wird in diesem Browser gespeichert. Text wird auch ausgeblendet
-weiter empfangen. Beim Zurückscrollen bleibt die Leseposition erhalten.
-RX2 auf den USB-Träger der gewünschten FT8-Aktivität abstimmen. Nach einem
-vollständigen UTC-Slot (15 s) und der Rechenzeit erscheinen die decodierten Zeilen.
-[FT8: Uhrzeit, Optionen und Tests](ft8-decoder.md). Der bisherige Dummy-Name
-startet ebenfalls den FT8-Empfänger.
+Unter **Setup → Monitoring-Empfänger** lassen sich `rx3_frequency_hz` und
+`rx4_frequency_hz` als ganze Hz einstellen und dauerhaft speichern.
+Startwerte: FT8 **10489540000 Hz**, PSK **10489748821 Hz** (USB-Träger).
+Nur der geänderte Monitoringkanal setzt Filter, Epoche und Samplezähler zurück;
+RX1, RX2 und der andere Monitor laufen weiter. Normales `tune` erlaubt nur RX1/RX2.
 
-`decoder_audio_port`/`decoder_text_port` in `config/webbridge.conf` konfigurieren
-die beiden lokalen Ports. Beide **0** deaktiviert den Decoder-Anschluss.
-Ohne Config sind beide deaktiviert. CLI: `--decoder-audio-port`, `--decoder-text-port`.
-Der FT8-Empfänger verwendet `--port` (Standard 40910) und optional `--time-offset-ms`.
-Decoder und Adapter dürfen in beliebiger Reihenfolge starten.
+**Decoder-Text anzeigen** über dem Zoom blendet den Monitoringbereich ein.
+Radiobuttons **RX3 · FT8** und **RX4 · PSK** wählen die sichtbare Quelle.
+Beide Textströme werden immer empfangen, mit getrennten Puffern und Lesepositionen.
+Quelle und Sichtbarkeit werden in diesem Browser gespeichert. **Text löschen**
+löscht ausschließlich die ausgewählte Quelle in diesem Browser.
 
-Ein eigener Decoder bindet **127.0.0.1:40910**, empfängt unveränderte **QTR2 AUDIO,
-Stream 2**, und schickt reinen **UTF-8-Text** an die Absenderadresse des Audiopakets
-zurück (Adapter-Port 40911). Ein Textdatagramm darf höchstens **4096 Byte** haben.
-Audio: **12 kHz, mono, PCM16 Big Endian**, 240 Samples je Paket, 64-Byte-Header +
-480 Byte PCM; Session, Epoche, Sample-Zähler und Frequenz bleiben erhalten.
-Details: [UDP-Protokoll](udp-protocol.md). Keine Backend-Anmeldung vom Decoder senden.
+Konfiguration in `config/webbridge.conf`:
 
-Der Adapter verteilt den Text an Bediener und Zuschauer:
+| Kanal | Audio zum Decoder | Text am Adapter |
+|---|---|---|
+| RX3 | `rx3_decoder_audio_port = 40910` | `rx3_decoder_text_port = 40911` |
+| RX4 | `rx4_decoder_audio_port = 40912` | `rx4_decoder_text_port = 40913` |
+
+Jeweils beide Ports auf **0** deaktiviert einen Anschluss; ohne Config sind beide
+Anschlüsse deaktiviert. Das Komplett-Startskript benötigt beide aktivierten Paare.
+CLI-Optionen entsprechend `--rx3-decoder-audio-port`, `--rx3-decoder-text-port`,
+`--rx4-decoder-audio-port` und `--rx4-decoder-text-port`.
+Die bisherigen `decoder_audio_port`/`decoder_text_port` werden dadurch ersetzt.
+Alle aktiven Decoder-Ports müssen untereinander und vom Backend-Port verschieden sein.
+
+Decoder binden an Loopback und antworten von ihrem Audioport an die Absenderadresse
+des Audiopakets. PCM: 12 kHz, Mono, PCM16 Big Endian, 240 Samples pro Paket,
+64-Byte-Header und 480 Byte Audio. Session, Epoche, Samplezähler und Frequenz bleiben
+unverändert. **Transport-IDs 5/6** bezeichnen RX3/RX4; 3/4 bleiben TX1/Audio-Echo.
+Kein Decoder meldet sich am Backend als GUI an.
+
+Textdatagramme dürfen höchstens 4096 Byte gültiges UTF-8 enthalten. Der Adapter
+prüft den Absender und verteilt beide Quellen an Bediener und Zuschauer:
 
 ```json
-{"type":"decoder_text","stream":2,"text":"133430  16   0.255 2571.375 ~ W1FC F5BZB -08\n"}
+{"type":"decoder_text","stream":3,"text":"FT8-Meldung\n"}
+{"type":"decoder_text","stream":4,"text":"PSK-Bakentext\n"}
 ```
 
-Decoder-Text wird ausschließlich angezeigt; er kann keine Backend-Kommandos auslösen.
-Fehlt oder stoppt der Decoder, laufen RX1, Wasserfälle und Bedienung weiter.
-Im Browser bleibt der Text auf die letzten 16384 Zeichen begrenzt; **Text löschen**
-betrifft nur den jeweiligen Browser.
+`stream` im JSON ist die **logische Empfängernummer**. Text kann keine
+Backend-Kommandos auslösen. Pro Quelle bleiben im Browser maximal 16384 Zeichen;
+bei FT8 (RX3) werden zusätzlich nur die letzten 50 Zeilen aufbewahrt.
+Ein fehlender Decoder unterbricht weder QSO noch den anderen Decoder. Das Startskript
+startet einen während des Betriebs beendeten Decoder nach spätestens etwa zwei Sekunden
+neu. Ein Ende von Backend oder Webadapter beendet weiterhin den Verbund.
+[FT8: Uhrzeit und Tests](ft8-decoder.md), [PSK-Bake](beacon-decoder.md).
 
 ## OPNsense und Webseite
 
@@ -146,42 +163,41 @@ verfügbar. Abstimmung, Zoom-Achse, Audio und Wasserfall-Historie bleiben erhalt
 
 | Eingabe in Spektrum oder Wasserfall | RX1 ausgewählt | RX2 ausgewählt |
 |---|---|---|
-| Linksklick | RX1 und TX um denselben Betrag verschieben; Versatz bleibt erhalten | Nur RX2 |
+| Linksklick | RX1 und TX1 gemeinsam; Versatz bleibt erhalten | RX2 und TX2 gemeinsam; eigener Versatz bleibt erhalten |
 | Rechtsklick | Nur RX1 | Nur RX2 |
 | Mausrad | Ausgewählten RX abstimmen | Ausgewählten RX abstimmen |
-| Shift + Mausrad | Nur TX | Nur TX |
-| Strg + Mausrad | RX1 und TX um denselben Betrag verschieben | RX2 und TX um denselben Betrag verschieben |
+| Shift + Mausrad | Nur TX1 | Nur TX2 |
+| Strg + Mausrad | RX1 und TX1 gemeinsam | RX2 und TX2 gemeinsam |
 
 **Mausrad-Schrittweite:** Fullband **250 Hz**, Zoom **25 Hz**. Die untere
 Anzeige folgt der Auswahl RX1/RX2 mit eigenem Spektrum, Wasserfall und
 Frequenzachse (±25 kHz). Klicks und Mausrad bedienen den ausgewählten RX gemäß
 obiger Tabelle. Beim Empfängerwechsel beginnt eine neue Zoom-Historie;
 Rauschpegelschätzung und Mittelung werden zurückgesetzt, damit sich RX1/RX2
-nicht vermischen. Der Decoder-Text gehört weiterhin RX2.
+nicht vermischen. Der Monitoringtext stammt unabhängig davon aus RX3/FT8 und RX4/PSK.
 Beim Abstimmen laufen Audio und Wasserfälle weiter. Die Zoom-Historie wird
 passend zur neuen Frequenzachse seitlich verschoben; auch Schritte kleiner als
 ein Bildpunkt summieren sich korrekt.
-Strg + Mausrad erhält den Versatz zwischen ausgewähltem RX und TX und hat bei
-gleichzeitig gedrückter Shift-Taste Vorrang. RX2 bleibt bei Klicks und Mausrad
-ohne Strg ein unabhängiger Monitoringempfänger. `RX1 → TX` setzt TX auf die zu
-RX1 passende Uplinkfrequenz; `TX → RX1` setzt RX1 auf die TX-Downlinkfrequenz.
-Beide Kopierrichtungen beseitigen den RX1/TX-Versatz. Zuordnung:
-Downlink = Uplink + 8 089 500 000 Hz. Hardware- und Umsetzerkorrekturen bleiben im Backend.
+Strg + Mausrad erhält den Versatz des ausgewählten RX/TX-Paars und hat bei
+Shift Vorrang. Die Kopiertasten und die TX-Anzeige gehören zum ausgewählten Paar.
+Zuordnung: Downlink = Uplink + 8 089 500 000 Hz. Hardwarekorrekturen bleiben im Backend.
+RX2-Audio geht gleichzeitig an den Browser und den lokalen Audioadapter für externe
+Programme. Die Lautstärke im Browser verändert den externen Audioweg nicht.
+[RX2/TX2: Geräte, Digitalprofil und gemeinsamer IQ-Ausgang](digital-audio.md).
 
-Mobil stehen die Bereiche untereinander. Ein Umschalter bestimmt, ob Tippen RX1
-und TX gemeinsam oder nur RX1 verstellt. Bei RX2 verstellt Tippen ausschließlich
-RX2. Horizontal auf einer der Frequenzanzeigen wischen stimmt diesen Kanal in
+Mobil bestimmt ein Umschalter für beide Paare, ob Tippen RX und TX gemeinsam oder
+nur RX verstellt. Horizontal auf einer Frequenzanzeige wischen stimmt diesen Kanal in
 **25-Hz-Schritten** fein ab; rechts erhöht, links verringert die Frequenz.
 Vertikales Wischen scrollt die Seite. Die QSO-Leiste bleibt am unteren Rand erreichbar.
 
 ### Audio, PTT und Einstellungen
 
-**Audio / Mikrofon** aktiviert die Wiedergabe und fragt beim Bediener die
+**Audio / Mikrofon** aktiviert bei RX1 die Wiedergabe und fragt beim Bediener die
 Mikrofonfreigabe ab. Das Mikrofon bleibt zusammen mit Audio aktiv; einen separaten
 Mikrofonschalter im Setup gibt es nicht. **Audio stoppen** beendet auch die Aufnahme.
 Nach einem Mikrofonfehler kann bei laufendem Audio ein Aufnahmegerät im Setup
 gewählt werden, um die Aufnahme erneut zu starten.
-Zuschauer aktivieren ausschließlich die Wiedergabe. **PTT**
+Bei RX2 startet die Audiotaste ausschließlich die Wiedergabe von RX2. Zuschauer aktivieren ausschließlich die Wiedergabe des ausgewählten Empfängers. **PTT**
 erfordert ein eingeschaltetes Mikrofon. Unter **Setup → PTT-Taste** stehen zwei
 Bedienarten zur Wahl: **Drücken/Halten** (Standard) oder **Anklicken zum Umschalten**.
 Im Schaltbetrieb beendet ein zweiter Klick die Aussendung; nach spätestens
@@ -300,7 +316,7 @@ die statische Entwurfsvorschau unter **`/layout-preview.html`**.
 
 - Eine **neue WebSocket-Verbindung** erhält bei freiem Steuerplatz die Rolle `operator`.
   Weitere sind `viewer`. Bestehende Zuschauer werden **nie automatisch befördert**.
-- Zuschauer erhalten FFT, RX1-Audio, RX2-Decoder-Text und Betriebszustand. Kommandos, Settings-Abfragen und
+- Zuschauer erhalten FFT, RX1-Audio, RX3-/RX4-Decoder-Text und Betriebszustand. Kommandos, Settings-Abfragen und
   TX-Audio von Zuschauern werden vor der UDP-Ausgabe abgewiesen. `state` liest nur den Cache.
 - Bediener meldet echte Maus-/Tastatur-/Touch-Aktivität mit `activity`, gedrosselt auf etwa
   einmal pro Sekunde. Der Adapter misst selbst: **300 s ohne Activity → Verbindung schließen**.
@@ -349,7 +365,7 @@ im JSON sind **Dezimalstrings**, um 64-Bit-Werte verlustfrei zu erhalten.
 | `heartbeat` | Keine; Verbindungsprüfung, keine Bedienaktivität |
 | `activity` | Keine; nur Bediener, echte GUI-Eingabe |
 | `tune` | `stream`: 1/2, `frequency_hz` |
-| `tx` | `frequency_hz`, `ptt`: true/false; neue bewusste Sendeaktion |
+| `tx` | `channel`: 1/2 (Standard 1), `frequency_hz`; bei TX1 `ptt`: true/false, bei TX2 nur `ptt:false` zur Abstimmung |
 | `ptt_keepalive` | Keine; nur solange PTT bewusst gehalten wird |
 | `filter` | `low_hz`, `high_hz` (Audio-Hz, 100…4000, mindestens 500 Abstand); alternativ bisherige `bandwidth_hz`, `center_hz` |
 | `nr` | `percent`: 0…100 |
@@ -366,19 +382,19 @@ Wertebereiche und Settings-Schlüssel entsprechen der [UDP-Referenz](udp-protoco
 | `role` | `role`: `operator`/`viewer`, `client_id`, `owner_present`, `clients`, `idle_seconds` |
 | `state` | `ready`, `session`, `settings`, `revision`, `flags`, `settings_status`, `rx`, `tx`, `filter`, `nr`, `compressor`, `loop` |
 | `ack` | `id`, `command`, `status` (Backend-Status), `revision`, `flags` |
-| `decoder_text` | `stream=2`, `text`: reine Decoder-Textausgabe für alle Browser |
+| `decoder_text` | `stream=3/4`, `text`: reine Decoder-Textausgabe für alle Browser |
 | `error` | `id`, `code`, `message`; z. B. `read_only`, `not_ready`, `busy`, `superseded`, `timeout`, `backend_reset`, `invalid` |
 | `closed` | `reason`: `idle` oder `heartbeat_timeout`; danach Verbindung geschlossen |
 
-`state` kommt beim Verbinden und bei Änderungen. `rx["1"]`/`rx["2"]` enthalten
-`frequency_hz`, `epoch`, `status`; `tx` zusätzlich `ptt`, `audio_fifo`, `pluto_fifo`, `ppm`.
+`state` kommt beim Verbinden und bei Änderungen. `rx["1"]` bis `rx["4"]` enthalten
+`frequency_hz`, `epoch`, `status`; `tx` zusätzlich `ptt`, `audio_fifo`, `pluto_fifo`, `ppm`. `tx2` enthält dieselben Felder für TX2; dort bedeutet `ptt` die Bereitschaft des externen Audiowegs.
 `loop` enthält `mode`, `target`, `generation`, `timestamp_ns`, `rx_lo_hz`, `status`.
 `filter` enthält `low_hz`, `high_hz` und abgeleitet `bandwidth_hz`, `center_hz`; NR/Kompressor `percent`, Kompressor zusätzlich
 `compression_db`/`limiting_db`. Noch nicht geladene Unterobjekte sind leer. Fehlerdetails bei
 Settings stehen im Snapshot (`error`/`hardware_error`). ACK-Status 0 bestätigt die Ausführung;
 Status 2 bei Settings bedeutet Revisionskonflikt: aktuellen Snapshot übernehmen und neu versuchen.
 
-**Binär RX:** FFT Typ 2 der Streams **0/1/2** (Fullband/RX1-Zoom/RX2-Zoom) und Audio Typ 5 der Streams **1/4**, unverändert an alle Browser. Die Zooms verwenden jeweils 8192 Bins bei 75 kHz, zentriert auf ihrer eigenen RX-Frequenz. Das WebGUI zeigt den ausgewählten RX als ±25-kHz-Ausschnitt; das einfache Test-GUI verwendet weiterhin RX1. **RX2-Audio (Stream 2)** geht ausschließlich an den lokalen Decoder. Fragment-, Session- und
+**Binär RX:** FFT Typ 2 der Streams **0/1/2** (Fullband/RX1-Zoom/RX2-Zoom) und Audio Typ 5 der Streams **1/2/4**, unverändert an alle Browser. Die Zooms verwenden jeweils 8192 Bins bei 75 kHz, zentriert auf ihrer eigenen RX-Frequenz. Das WebGUI zeigt den ausgewählten RX als ±25-kHz-Ausschnitt; das einfache Test-GUI verwendet weiterhin RX1. **RX2-Audio (Stream 2)** geht zusätzlich an den lokalen Digital-Audioadapter. **RX3/RX4-Audio (Stream 5/6)** geht ausschließlich an die jeweiligen lokalen Decoder. Fragment-, Session- und
 Epochenregeln aus der UDP-Referenz gelten auch hier. **Binär TX:** ausschließlich Typ 8,
 544 Byte mit 240 PCM16-Samples bei 12 kHz. Erst nach bestätigtem `tx.ptt=true` senden, mit
 aktueller Session/TX-Epoche und bestätigter TX-Frequenz; Sample-Index 0, 240, 480, … .
@@ -413,7 +429,10 @@ laufende Station zu:
 Geprüft werden Live-FFT, Split-Abstimmung, Rechtsklick, Mausrad/Shift/Strg, RX2,
 Wasserfall-Historie und weiterlaufende Zoom-Frames während zwölf Abstimmvorgängen.
 Eine zusätzliche AudioWorklet-Sonde prüft dabei die tatsächliche PCM-Ausgabe
-auf Stilleintervalle. PTT-Tests prüfen Halten, Schalten, die optionale Leertaste,
+auf Stilleintervalle, auch bei vier FT8-Textschüben mit jeweils 100 Zeilen und
+voller Texthistorie. Decodertexte werden im Browser für 50 ms gesammelt und
+gemeinsam dargestellt; das Textlayout bleibt auf das Monitorfeld begrenzt.
+PTT-Tests prüfen Halten, Schalten, die optionale Leertaste,
 Tastenwiederholung, ausgeschlossene Eingabefelder und den Fünf-Minuten-Timeout
 mit simulierter Zeit. Weitere Prüfungen:
 Kopiertasten, DSP, Settings, Mikrofonpakete, PTT-Loslassen/Fokusverlust, echte

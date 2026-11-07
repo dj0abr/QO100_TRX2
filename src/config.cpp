@@ -74,12 +74,15 @@ void set_config_value(Config& c,const std::string& k,const std::string& v) {
         else if (k == "spectrum_fps") c.spectrum_fps = u32(v);
         else if (k == "initial_rx_hz") c.initial_rx_hz = integer(v);
         else if (k == "initial_rx2_hz") c.initial_rx2_hz = integer(v);
+        else if (k == "rx3_frequency_hz") c.rx3_frequency_hz = integer(v);
+        else if (k == "rx4_frequency_hz") c.rx4_frequency_hz = integer(v);
         else if (k == "rx1_filter_low_hz") c.rx1_filter = RxFilterSettings::from_edges(real(v), c.rx1_filter.high_hz());
         else if (k == "rx1_filter_high_hz") c.rx1_filter = RxFilterSettings::from_edges(c.rx1_filter.low_hz(), real(v));
         else if (k == "rx1_filter_bandwidth_hz") c.rx1_filter.bandwidth_hz = u32(v);
         else if (k == "rx1_filter_center_hz") c.rx1_filter.center_hz = u32(v);
         else if (k == "rx1_nr_percent") c.rx1_nr_percent = u32(v);
         else if (k == "initial_tx_hz") c.initial_tx_hz = integer(v);
+        else if (k == "initial_tx2_hz") c.initial_tx2_hz = integer(v);
         else if (k == "tx1_compressor_percent") {
             size_t used=0;const double percent=std::stod(v,&used);
             if (used!=v.size() || !std::isfinite(percent) || percent<0 || percent>140)
@@ -135,8 +138,13 @@ void Config::validate() const {
         throw std::runtime_error("initial_rx_hz must leave room for the +/-25 kHz zoom");
     if (initial_rx2_hz + 275000 < rx_center_hz || initial_rx2_hz > rx_center_hz + 275000)
         throw std::runtime_error("initial_rx2_hz must remain inside the RX channel window");
+    for (const auto frequency : {rx3_frequency_hz, rx4_frequency_hz})
+        if (frequency < rx_center_hz - 275000 || frequency > rx_center_hz + 275000)
+            throw std::runtime_error("Monitoring frequency must remain inside the RX channel window (+/-275000 Hz)");
     if (tx_center_hz < 275000 || initial_tx_hz + 275000 < tx_center_hz || initial_tx_hz > tx_center_hz + 275000)
         throw std::runtime_error("initial_tx_hz must remain inside the TX channel window");
+    if(initial_tx2_hz < tx_center_hz-275000 || initial_tx2_hz > tx_center_hz+275000)
+        throw std::runtime_error("initial_tx2_hz must remain inside the TX channel window");
     if (!std::isfinite(tx_attenuation_db) || tx_attenuation_db < 0 || tx_attenuation_db > 40 || std::abs(tx_attenuation_db*4-std::round(tx_attenuation_db*4))>1e-6)
         throw std::runtime_error("tx_attenuation_db must be 0..40 in 0.25 dB steps");
     if (!rx1_filter.valid()) throw std::runtime_error("RX1 filter requires BW 500..3900 Hz and edges inside 100..4000 Hz");

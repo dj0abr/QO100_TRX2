@@ -5,6 +5,7 @@
 #include "qo100/spectrum.hpp"
 #include "qo100/rx_channel.hpp"
 #include "qo100/tx_channel.hpp"
+#include "qo100/channels.hpp"
 #include <arpa/inet.h>
 #include <algorithm>
 #include <array>
@@ -107,9 +108,11 @@ int main(int argc, char** argv) {
             std::unique_ptr<qo100::Spectrum> zoom;
             uint32_t zoom_frame_id = 0;
         };
-        std::array<ReceiverState,2> receivers;
+        std::array<ReceiverState,4> receivers;
         receivers[0].frequency=c.initial_rx_hz;
         receivers[1].frequency=c.initial_rx2_hz;
+        receivers[2].frequency=c.rx3_frequency_hz;
+        receivers[3].frequency=c.rx4_frequency_hz;
         qo100::TxChannel tx(150000,c.tx1_compressor);
         uint64_t tx_frequency=c.initial_tx_hz, tx_blocks=0;
         uint32_t tx_epoch=1,tx_request=0,tx_block_id=0,status_sequence=0;
@@ -122,6 +125,16 @@ int main(int argc, char** argv) {
         auto last_tx_feedback=Clock::now(),last_tx_state=last_tx_audio;
         auto mute_tx=[&] { if(tx_enabled) { tx_enabled=false;++tx_epoch;echo_seen.clear();echo_next=0;tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz)); } };
         tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
+        qo100::TxChannel tx2(int64_t(c.initial_tx2_hz)-int64_t(c.tx_center_hz),{},qo100::TxChannel::Profile::digital);
+        uint64_t tx2_frequency=c.initial_tx2_hz;
+        uint32_t tx2_epoch=1,tx2_request=0;
+        bool tx2_have_request=false;
+        uint16_t tx2_command_status=0;
+        auto last_tx2_audio=last_tx_audio,last_tx2_state=last_tx_audio;
+        auto reset_tx2=[&] {
+            ++tx2_epoch;tx2.reset(int64_t(tx2_frequency)-int64_t(c.tx_center_hz));
+            last_tx2_audio=Clock::now()-std::chrono::seconds(10);
+        };
         uint32_t filter_request=0;
         uint16_t filter_status=0;
         bool have_filter_request=false;
@@ -159,9 +172,15 @@ int main(int argc, char** argv) {
                 tx_enabled,tx.level(),pluto_fill,int32_t(std::lround(tx.ppm()))));
             last_tx_state=Clock::now();
         };
+        auto send_tx2_state=[&] {
+            send_packet(qo100::tx_state_packet(tx2_request,tx2_frequency,tx2_epoch,session_id,tx2_command_status,
+                hardware_online && !loop_pending && loop_mode==TestLoop::normal,tx2.level(),pluto_fill,
+                int32_t(std::lround(tx2.ppm())),qo100::tx2_stream));
+            last_tx2_state=Clock::now();
+        };
         auto send_rx_state=[&](size_t i,uint16_t status=0) {
             const auto& rx=receivers[i];
-            if(rx.have_request) send_packet(qo100::state_packet(rx.last_request,rx_frequency(i),rx.epoch,session_id,status,i+1));
+            if(rx.have_request || i>=2) send_packet(qo100::state_packet(rx.last_request,rx_frequency(i),rx.epoch,session_id,status,qo100::rx_streams[i]));
         };
         auto send_loop_state=[&]() {
             send_packet(qo100::loop_state_packet(loop_request,loop_mode,loop_target,current_rx_lo,
@@ -183,7 +202,15 @@ int main(int argc, char** argv) {
         auto render_tx=[&] {
             const bool recent=tx_enabled && active() && loop_mode!=TestLoop::audio && !loop_pending
                 && Clock::now()-last_tx_audio<std::chrono::milliseconds(200);
-            const auto samples=tx.render(recent);
+            auto samples=tx.render(recent);
+            const bool digital_recent=active() && hardware_online && !loop_pending && loop_mode==TestLoop::normal &&
+                Clock::now()-last_tx2_audio<std::chrono::milliseconds(200);
+            const auto digital=tx2.render(digital_recent);
+            float peak=1.f;
+            for(size_t i=0;i<samples.size();++i) {samples[i]+=digital[i];peak=std::max(peak,std::abs(samples[i]));}
+            // Fixed 6-dB summing reserve. Exceptional overload reduces a complete
+            // block uniformly rather than clipping individual digital samples.
+            for(auto& sample:samples) sample*=.5f/peak;
             if(tx_status) {
                 constexpr size_t chunk=12000;
                 for(size_t start=0;start<samples.size();start+=chunk) {
@@ -211,14 +238,14 @@ int main(int argc, char** argv) {
                 });
         };
         for(size_t i=0;i<receivers.size();++i) {
-            receivers[i].zoom=make_zoom(i);
+            if(i<2) receivers[i].zoom=make_zoom(i);
             receivers[i].dsp=std::make_unique<qo100::RxChannel>(
                 static_cast<int64_t>(receivers[i].frequency)-static_cast<int64_t>(c.rx_center_hz),
-                [&,i](std::complex<float> x) { receivers[i].zoom->push(x); },
+                [&,i](std::complex<float> x) { if(receivers[i].zoom) receivers[i].zoom->push(x); },
                 [&,i](const std::vector<int16_t>& audio,uint64_t index) {
                     if(!active()) return;
                     const auto& rx=receivers[i];
-                    qo100::FrameInfo f{rx.epoch,stamp(),index,rx_frequency(i),12000,0,session_id,static_cast<uint32_t>(i+1)};
+                    qo100::FrameInfo f{rx.epoch,stamp(),index,rx_frequency(i),12000,0,session_id,qo100::rx_streams[i]};
                     send_packet(qo100::audio_packet(f,audio));
                 }, i==0 ? c.rx1_filter : qo100::RxFilterSettings{},
                 i==0 ? std::optional<uint32_t>(c.rx1_nr_percent) : std::nullopt);
@@ -260,7 +287,7 @@ int main(int argc, char** argv) {
         auto reset_rx=[&](size_t i) {
             auto& rx=receivers[i];++rx.epoch;
             rx.dsp->tune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
-            rx.zoom=make_zoom(i);
+            if(i<2) rx.zoom=make_zoom(i);
             send_rx_state(i);
         };
         auto retune_rx=[&](size_t i) {
@@ -270,10 +297,10 @@ int main(int argc, char** argv) {
         };
         auto apply_runtime=[&](const qo100::Config& old,bool reset_all) {
             for(size_t i=0;i<receivers.size();++i) {
-                const auto hz=i?c.initial_rx2_hz:c.initial_rx_hz;
+                const auto hz=std::array<uint64_t,4>{c.initial_rx_hz,c.initial_rx2_hz,c.rx3_frequency_hz,c.rx4_frequency_hz}[i];
                 const bool changed=hz!=receivers[i].frequency;
                 receivers[i].frequency=hz;
-                if(reset_all) reset_rx(i);
+                if(reset_all || (i>=2 && changed)) reset_rx(i);
                 else if(changed) {retune_rx(i);send_rx_state(i);}
             }
             if(old.rx1_filter!=c.rx1_filter) receivers[0].dsp->set_filter(c.rx1_filter);
@@ -285,9 +312,13 @@ int main(int argc, char** argv) {
                 tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));send_tx_state();
                 if(loop_mode==TestLoop::rf) {retune_rx(0);send_rx_state(0);}
             }
+            if(reset_all || tx2_frequency!=c.initial_tx2_hz) {
+                tx2_frequency=c.initial_tx2_hz;reset_tx2();send_tx2_state();
+            }
             if(reset_all) spectrum.reset();
         };
         auto restart_driver=[&](const qo100::Config& next) {
+            reset_tx2();
             tx_enabled=false;++tx_epoch;echo_seen.clear();echo_next=0;
             tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));send_tx_state();
             pluto.reset();hardware_online=false;
@@ -324,6 +355,7 @@ int main(int argc, char** argv) {
         auto change_loop=[&](TestLoop target) {
             if(loop_target==target && (loop_pending || loop_mode==target)) return;
             loop_target=target;
+            reset_tx2();
             // Changing a test path always requires a fresh manual PTT press.
             tx_enabled=false;++tx_epoch;echo_seen.clear();echo_next=0;tx_command_status=0;
             tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));send_tx_state();
@@ -357,7 +389,8 @@ int main(int argc, char** argv) {
                             std::cout << "GUI subscriber " << inet_ntoa(from.sin_addr) << ':' << ntohs(from.sin_port) << '\n';
                         if (!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) {
                             for(auto& rx:receivers) rx.have_request=false;
-                            mute_tx();tx_have_request=false;have_filter_request=false;have_compressor_request=false;have_nr_request=false;
+                            mute_tx();tx_have_request=false;reset_tx2();tx2_have_request=false;tx2_request=0;
+                            have_filter_request=false;have_compressor_request=false;have_nr_request=false;
                             have_settings_request=false;
                         }
                         peer = from; subscribed = true; last_subscription = Clock::now();
@@ -365,6 +398,7 @@ int main(int argc, char** argv) {
                             have_loop_request=false;
                             change_loop(TestLoop::normal);
                         }
+                        send_rx_state(2);send_rx_state(3);send_tx2_state();
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
                         qo100::SettingsControl control_settings{};
                         if(qo100::parse_settings_control(buffer.data(),size_t(n),control_settings)) {
@@ -487,6 +521,19 @@ int main(int argc, char** argv) {
                         }
                         qo100::TxControl control{};qo100::TxAudio audio{};
                         if(qo100::parse_tx_control(buffer.data(),size_t(n),control)) {
+                            if(control.stream==qo100::tx2_stream) {
+                                if(control.session!=session_id || (tx2_have_request && control.request!=tx2_request && int32_t(control.request-tx2_request)<0)) continue;
+                                if(tx2_have_request && control.request==tx2_request) {send_tx2_state();continue;}
+                                tx2_request=control.request;tx2_have_request=true;
+                                const bool valid=control.frequency>=c.tx_center_hz-275000 && control.frequency<=c.tx_center_hz+275000;
+                                tx2_command_status=valid?0:1;
+                                if(valid && (control.frequency!=tx2_frequency || control.enabled)) {
+                                    if(control.frequency!=tx2_frequency) {tx2_frequency=control.frequency;c.initial_tx2_hz=tx2_frequency;settings.changed();}
+                                    // On TX2 the flag requests a fresh audio epoch, never a PTT change.
+                                    reset_tx2();
+                                }
+                                send_tx2_state();continue;
+                            }
                             if(control.session!=session_id || (tx_have_request && control.request!=tx_request && int32_t(control.request-tx_request)<0)) continue;
                             const bool valid=control.frequency>=c.tx_center_hz-275000 && control.frequency<=c.tx_center_hz+275000;
                             if(tx_have_request && control.request==tx_request &&
@@ -508,6 +555,12 @@ int main(int argc, char** argv) {
                             send_tx_state();continue;
                         }
                         if(qo100::parse_tx_audio(buffer.data(),size_t(n),audio)) {
+                            if(audio.stream==qo100::tx2_stream) {
+                                if(!hardware_online || loop_pending || loop_mode!=TestLoop::normal || audio.session!=session_id ||
+                                    audio.epoch!=tx2_epoch || audio.frequency!=tx2_frequency) continue;
+                                if(tx2.add(audio.index,audio.samples)) last_tx2_audio=Clock::now();
+                                continue;
+                            }
                             if(!tx_enabled || loop_pending || audio.session!=session_id || audio.epoch!=tx_epoch || audio.frequency!=tx_frequency) continue;
                             if(loop_mode==TestLoop::audio) {
                                 if(audio.index%240 || audio.index>std::numeric_limits<uint64_t>::max()-240 ||
@@ -599,6 +652,7 @@ int main(int argc, char** argv) {
                 render_tx();next_tx+=std::chrono::milliseconds(20);
             }
             if(tx_have_request && active() && Clock::now()-last_tx_state>std::chrono::milliseconds(250)) send_tx_state();
+            if(active() && Clock::now()-last_tx2_state>std::chrono::milliseconds(250)) send_tx2_state();
             if (source == "synthetic" && Clock::now() >= next_synthetic) {
                 // Exact-bin test tones at -150 kHz (-12.04 dBFS) and +75 kHz (-20 dBFS).
                 for (uint32_t i = 0; i < c.iq_rate() / 100; ++i) {
@@ -623,7 +677,7 @@ int main(int argc, char** argv) {
                     if(pending_settings) fail_settings(e.what());
                     else {
                         driver_error=e.what();std::cerr<<"Pluto offline: "<<driver_error<<'\n';
-                        pluto.reset();hardware_online=false;mute_tx();
+                        pluto.reset();hardware_online=false;mute_tx();reset_tx2();send_tx2_state();
                         loop_mode=loop_target=TestLoop::normal;loop_pending=false;loop_status=0;
                         next_hardware_retry=Clock::now()+std::chrono::seconds(5);
                     }

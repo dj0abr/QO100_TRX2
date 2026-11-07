@@ -416,19 +416,22 @@ legend { padding: 0 7px; color: #a5cedb; font-size: 12px; }
 
 .rx2-panel { border: 1px solid #34404a; border-radius: 6px; background: #151e27; min-width: 0; }
 .rx2-panel .rx-secondary { border: 0; background: transparent; padding-bottom: 0; }
-#decoder-toggle { margin: 9px 14px 11px; padding: 6px 9px; border: 1px solid #65583b; border-radius: 4px; background: transparent; color: var(--rx2); cursor: pointer; font-size: 11px; }
+#decoder-toggle { margin: 0; padding: 4px 6px; border: 1px solid #65583b; border-radius: 4px; background: transparent; color: var(--rx2); cursor: pointer; font-size: 10px; }
 #decoder-toggle[aria-expanded="true"] { background: #3b3322; }
 .zoom-output { display: grid; grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; height: clamp(100px, 14.4vh, 175px); overflow: hidden; }
 .zoom-output.decoder-visible { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
 .zoom-output > .waterfall { height: 100%; min-height: 0; }
 .decoder-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: #111b23; border-top: 1px solid #65583b; }
-.decoder-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 10px; flex-shrink: 0; }
+.decoder-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; padding: 3px 10px; flex-shrink: 0; }
+.decoder-sources { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.decoder-sources label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+.decoder-sources input { margin: 0; accent-color: var(--rx2); }
 .decoder-heading h2 { margin: 0; color: var(--rx2); font-size: 10px; font-weight: 600; letter-spacing: .04em; }
 #decoder-clear { padding: 0 3px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; }
-#decoder-text { flex: 1; min-width: 0; min-height: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 0 10px 4px; color: var(--text); font: 12px/1.5 var(--mono); scrollbar-width: thin; }
-#decoder-text:empty::before { content: "Warte auf RX2-Decoder-Text …"; color: var(--muted); }
-html[lang="en"] #decoder-text:empty::before { content: "Waiting for RX2 decoder text …"; }
-#decoder-toggle:focus-visible, #decoder-clear:focus-visible, #decoder-text:focus-visible { outline: 2px solid var(--rx2); outline-offset: -2px; }
+.decoder-text { flex: 1; min-width: 0; min-height: 0; contain: strict; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 0 10px 4px; color: var(--text); font: 12px/1.5 var(--mono); scrollbar-width: thin; }
+.decoder-text:empty::before { content: "Warte auf Decoder-Text …"; color: var(--muted); }
+html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text …"; }
+#decoder-toggle:focus-visible, #decoder-clear:focus-visible, .decoder-text:focus-visible { outline: 2px solid var(--rx2); outline-offset: -2px; }
 @media (min-width: 801px) { .zoom-output { height: 100%; } }
 @media (max-width: 800px) { .zoom-output { height: 130px; } }
 @media (max-width: 560px) { .zoom-output { height: 105px; } }

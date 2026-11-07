@@ -67,7 +67,7 @@ The first browser gets control; additional browsers can watch and listen. After 
 
 ### The two waterfalls
 
-**Fullband** shows the entire QO-100 narrowband transponder. **Zoom** shows ±25 kHz around the selected receiver for fine tuning. Click **RX1** or **RX2** to select it; the zoom follows your selection.
+**Fullband** shows the entire QO-100 narrowband transponder. **Zoom** shows ±25 kHz around the selected receiver for fine tuning. Click **RX1** or **RX2** to select its RX/TX pair; zoom and audio follow your selection.
 
 ### Mouse tuning
 
@@ -75,7 +75,7 @@ Works in both the spectrum and waterfall:
 
 | Action | Result |
 |---|---|
-| Left-click | Tune RX1 and move TX by the same amount, keeping the offset. With RX2 selected, tune RX2 only. |
+| Left-click | Move the selected receiver and its TX by the same amount, keeping the offset. |
 | Right-click | Tune only the selected receiver. |
 | Mouse wheel | Tune the selected receiver: 250 Hz steps in Fullband, 25 Hz in Zoom. |
 | Ctrl + wheel | Move the selected receiver and TX together. |
@@ -113,13 +113,19 @@ The bandplan identifies the operating areas. Click **↻** at the right of the F
 
 ![Bandplan display switch](docs/bandplan.png)
 
-## Two Receivers
+## Four Receivers
 
 - **RX1:** normal QO-100 voice operation, with adjustable audio filter and noise reduction.
-- **RX2:** independent FT8 reception while you continue your RX1 QSO. Select RX2, tune to FT8 activity and click **Decoder-Text anzeigen**. Decoded messages appear below the zoom.
+- **RX2/TX2:** independent digital pair for FLdigi/WSJT-X, with virtual audio devices and additional RX2 monitoring in the browser. [Setup and levels](docs/digital-audio.md).
+- **RX3:** FT8 monitor.
+- **RX4:** PSK beacon monitor.
+
+Set both USB carrier frequencies in whole Hz under **Setup → Monitoring receivers** and save. **Show decoder text** above the zoom opens the output; radio buttons select **RX3 · FT8** or **RX4 · PSK**. Both sources are received concurrently and buffered separately. `./start_all.sh` starts both decoders.
 
 ![FT8 decoded messages](docs/decoderoutput.png)
 
 Allow about 15–30 seconds plus decoding time for the first messages. Keep the SBC/PC clock synchronized.
 
 For technical details, see [DEVELOPMENT.md](DEVELOPMENT.md).
+
+PSK beacon reception via RX4: [instructions](docs/beacon-decoder.md).

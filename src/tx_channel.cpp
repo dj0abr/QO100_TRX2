@@ -11,10 +11,10 @@ void process(SRC_STATE* state, SRC_DATA& data) {
     if (error) throw std::runtime_error(src_strerror(error));
 }
 }
-TxChannel::TxChannel(int64_t offset, CompressorSettings compressor)
-    : clock_(make_audio_resampler(SRC_SINC_FASTEST, 1)),
+TxChannel::TxChannel(int64_t offset, CompressorSettings compressor, Profile profile)
+    : profile_(profile), clock_(make_audio_resampler(SRC_SINC_FASTEST, 1)),
       // Fixed TX voice band; independent of the wider RX defaults/settings.
-      usb_filter_(make_usb_filter(2, RxFilterSettings::from_edges(100, 3000))),
+      usb_filter_(make_usb_filter(2, RxFilterSettings::from_edges(100, profile==Profile::digital?4000:3000))),
       interpolator_(firinterp_crcf_create_kaiser(100, 16, 100)),
       compressor_(compressor) {
     if (!interpolator_) throw std::runtime_error("Cannot create liquid TX interpolator");
@@ -96,10 +96,10 @@ std::vector<std::complex<float>> TxChannel::render(bool recent) {
     std::vector<std::complex<float>> result(iq_block);
     if(audio.empty()) return result;
     std::vector<std::complex<float>> input(audio_block), analytic(audio_block);
-    for(size_t i=0;i<audio.size();++i) input[i]={compressor_.execute(audio[i]),0};
+    for(size_t i=0;i<audio.size();++i) input[i]={profile_==Profile::digital?audio[i]:compressor_.execute(audio[i]),0};
     check_liquid(firfilt_cccf_execute_block(usb_filter_.get(),input.data(),audio_block,analytic.data()));
     check_liquid(firinterp_crcf_execute_block(interpolator_.get(),analytic.data(),audio_block,result.data()));
-    for(auto& sample:result) sample=limiter_.execute(sample*.5f);
+    for(auto& sample:result) sample=profile_==Profile::digital?sample*.5f:limiter_.execute(sample*.5f);
     mixer_.execute_block(result.data(),result.size());
     return result;
 }

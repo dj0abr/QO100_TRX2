@@ -3,10 +3,12 @@
 #include <cmath>
 #include <iostream>
 #include <sstream>
+#include <set>
+#include <algorithm>
 
 namespace bridge {
 namespace {
-unsigned group(uint8_t type,unsigned stream) {return unsigned(type)*8+stream;}
+uint64_t group(uint8_t type,unsigned stream) {return (uint64_t(type)<<32)|stream;}
 uint64_t integer(const Json& j,const char* key,uint64_t maximum=UINT32_MAX) {
     const auto& value=j.at(key);uint64_t result=0;
     if(value.is_string()) {
@@ -32,41 +34,81 @@ std::shared_ptr<const Bytes> encoded(const Json& j) {
     const auto s=j.dump();return std::make_shared<const Bytes>(s.begin(),s.end());
 }
 }
-Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp_(io),decoder_(io),timer_(io) {
+Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp_(io),digital_(io),timer_(io) {
     udp_.open(net::ip::udp::v4());
     udp_.set_option(net::socket_base::receive_buffer_size(4*1024*1024));
     udp_.bind({net::ip::make_address_v4("127.0.0.1"),0});
     udp_.connect({net::ip::make_address_v4("127.0.0.1"),config_.backend_port});
-    if(config_.decoder_audio_port || config_.decoder_text_port) {
-        if(!config_.decoder_audio_port || !config_.decoder_text_port ||
-           config_.decoder_audio_port==config_.decoder_text_port ||
-           config_.decoder_audio_port==config_.backend_port || config_.decoder_text_port==config_.backend_port)
-            throw std::runtime_error("Decoder audio/text ports must both be enabled and distinct from each other and backend_port");
-        decoder_.open(net::ip::udp::v4());
-        decoder_.bind({net::ip::make_address_v4("127.0.0.1"),config_.decoder_text_port});
+    std::set<uint16_t> ports{config_.backend_port};
+    for(size_t i=0;i<config_.decoders.size();++i) {
+        const auto& config=config_.decoders[i];
+        if(!config.audio_port && !config.text_port) continue;
+        if(!config.audio_port || !config.text_port || !ports.insert(config.audio_port).second || !ports.insert(config.text_port).second)
+            throw std::runtime_error("Decoder audio/text ports must be enabled in pairs and distinct across all links and backend_port");
+        decoders_[i]=std::make_unique<DecoderLink>(io);
+        auto& socket=decoders_[i]->socket;
+        socket.open(net::ip::udp::v4());
+        socket.bind({net::ip::make_address_v4("127.0.0.1"),config.text_port});
         // A connected loopback socket accepts text only from the configured decoder's audio port.
-        decoder_.connect({net::ip::make_address_v4("127.0.0.1"),config_.decoder_audio_port});
+        socket.connect({net::ip::make_address_v4("127.0.0.1"),config.audio_port});
+    }
+    if(config_.digital_audio_port || config_.digital_bridge_port) {
+        if(!config_.digital_audio_port || !config_.digital_bridge_port ||
+            !ports.insert(config_.digital_audio_port).second || !ports.insert(config_.digital_bridge_port).second)
+            throw std::runtime_error("Digital audio/bridge ports must both be enabled and distinct from all other UDP ports");
+        digital_.open(net::ip::udp::v4());
+        digital_.bind({net::ip::make_address_v4("127.0.0.1"),config_.digital_bridge_port});
+        digital_.connect({net::ip::make_address_v4("127.0.0.1"),config_.digital_audio_port});
     }
     state_={{"type","state"},{"session",0},{"ready",false},{"settings",Json::object()},
         {"revision","0"},{"flags",0},{"rx",Json::object()},{"tx",Json::object()},
-        {"filter",Json::object()},{"compressor",Json::object()},{"nr",Json::object()},{"loop",Json::object()}};
+        {"filter",Json::object()},{"compressor",Json::object()},{"nr",Json::object()},{"loop",Json::object()},{"tx2",Json::object()}};
 }
-void Bridge::start() {receive();if(decoder_.is_open()) receive_decoder();tick();}
-void Bridge::send_decoder(Bytes p) {
-    if(!decoder_.is_open()) return;
+void Bridge::start() {receive();if(digital_.is_open()) receive_digital();for(size_t i=0;i<decoders_.size();++i) if(decoders_[i]) receive_decoder(i);tick();}
+void Bridge::send_digital(Bytes p) {
+    if(!digital_.is_open()) return;
+    auto data=std::make_shared<Bytes>(std::move(p));
+    digital_.async_send(net::buffer(*data),[data](auto,size_t){});
+}
+void Bridge::receive_digital() {
+    digital_.async_receive(net::buffer(digital_buffer_),[this](auto ec,size_t n) {
+        if(!ec && ready()) {
+            const Bytes p(digital_buffer_.begin(),digital_buffer_.begin()+n);
+            if(valid(p) && get(p,8,4)==qo100::tx2_stream && state_["tx2"].contains("epoch")) {
+                if(p[5]==19 && n==64 && !get(p,12,4) && get(p,16,8) &&
+                    std::all_of(p.begin()+24,p.end(),[](uint8_t b){return b==0;})) {
+                    // Adapter restart: establish a new epoch before accepting index zero.
+                    if(digital_nonce_!=get(p,16,8)) {
+                        digital_nonce_=get(p,16,8);
+                        auto reset=header(6,qo100::tx2_stream);put(reset,32,state_["tx2"]["frequency_hz"].get<uint64_t>(),8);
+                        put(reset,54,1,2);control(std::move(reset),7);
+                    }
+                } else if(p[5]==8 && n==544 && !(state_["flags"].get<unsigned>()&6) && state_["loop"].value("mode",0)==0 &&
+                    get(p,60,4)==session_ && get(p,12,4)==state_["tx2"]["epoch"].get<uint32_t>() &&
+                    get(p,32,8)==state_["tx2"]["frequency_hz"].get<uint64_t>() && !get(p,16,8) && !get(p,44,8) &&
+                    get(p,40,4)==12000 && get(p,52,2)==240 && get(p,54,2)==2 && get(p,56,4)==240 &&
+                    get(p,24,8)%240==0 && get(p,24,8)<=UINT64_MAX-240) send_udp(p);
+            }
+        }
+        if(!stopping_ && ec!=net::error::operation_aborted) receive_digital();
+    });
+}
+void Bridge::send_decoder(size_t index,Bytes p) {
+    if(!decoders_[index] || !decoders_[index]->socket.is_open()) return;
     auto data=std::make_shared<Bytes>(std::move(p));
     // UDP delivery never waits for a decoder; RX1/HTTP/WS continue if it is absent.
-    decoder_.async_send(net::buffer(*data),[data](auto,size_t){});
+    decoders_[index]->socket.async_send(net::buffer(*data),[data](auto,size_t){});
 }
-void Bridge::receive_decoder() {
-    decoder_.async_receive(net::buffer(decoder_buffer_),[this](auto ec,size_t n) {
+void Bridge::receive_decoder(size_t index) {
+    auto& link=*decoders_[index];
+    link.socket.async_receive(net::buffer(link.buffer),[this,index](auto ec,size_t n) {
         if(!ec && n && n<=4096 && session_ && initialized_ && !stopping_) {
             try {
                 // JSON encoding validates UTF-8. Decoder input is always text data, never a GUI command.
-                broadcast({{"type","decoder_text"},{"stream",2},{"text",std::string(decoder_buffer_.data(),n)}});
+                broadcast({{"type","decoder_text"},{"stream",index+3},{"text",std::string(decoders_[index]->buffer.data(),n)}});
             } catch(const std::exception& e) {std::cerr<<"Ignored decoder text: "<<e.what()<<'\n';}
         }
-        if(!stopping_ && ec!=net::error::operation_aborted) receive_decoder();
+        if(!stopping_ && ec!=net::error::operation_aborted) receive_decoder(index);
     });
 }
 void Bridge::send_udp(Bytes p) {
@@ -83,7 +125,10 @@ void Bridge::receive() {
         if(ec!=net::error::operation_aborted) receive();
     });
 }
-bool Bridge::ready() const {return initialized_ && !barrier_ && !hardware_change_ && !stopping_;}
+bool Bridge::ready() const {
+    return initialized_ && !barrier_ && !hardware_change_ && !stopping_ &&
+        state_["rx"].contains("3") && state_["rx"].contains("4") && state_["tx2"].contains("epoch");
+}
 void Bridge::text(uint64_t client,const Json& j) {
     const auto it=clients_.find(client);if(it!=clients_.end()) it->second.peer->send(encoded(j),false);
 }
@@ -152,11 +197,17 @@ void Bridge::reset_backend() {
     pending_.clear();last_controls_.clear();session_=0;initialized_=false;
     ptt_requested_=false;hardware_change_=false;barrier_=true;off_ack_=normal_ack_=false;
     state_["session"]=0;state_["ready"]=false;
-    for(const auto& key:{"rx","tx","filter","compressor","nr","loop"}) state_[key]=Json::object();
+    for(const auto& key:{"rx","tx","tx2","filter","compressor","nr","loop"}) state_[key]=Json::object();
     next_settings_={};dirty_=true;
 }
 void Bridge::bootstrap() {
     initialized_=true;
+    // Request monitor STATE again after discovery; their first unsolicited states
+    // may have arrived before this backend session was known.
+    send_udp(header(1));
+    auto digital_query=header(6,qo100::tx2_stream);
+    put(digital_query,32,std::stoull(state_["settings"].at("initial_tx2_hz").get<std::string>()),8);
+    control(std::move(digital_query),7);
     for(unsigned stream:{1u,2u}) {
         const auto key=stream==1?"initial_rx_hz":"initial_rx2_hz";
         auto p=header(3,stream);put(p,32,std::stoull(state_["settings"].at(key).get<std::string>()),8);
@@ -178,11 +229,11 @@ void Bridge::update_state(const Bytes& p) {
     }
     if(type==4 || type==7) {
         v["frequency_hz"]=get(p,32,8);v["epoch"]=get(p,24,8);
-        if(type==4) state_["rx"][std::to_string(stream)]=v;
+        if(type==4) state_["rx"][std::to_string(qo100::receiver_number(stream))]=v;
         else {
             v["ptt"]=get(p,48,4)!=0;v["audio_fifo"]=get(p,44,4);v["pluto_fifo"]=get(p,52,2);
             const auto raw=get(p,56,4);v["ppm"]=raw>=0x80000000ULL?int64_t(raw)-0x100000000LL:int64_t(raw);
-            state_["tx"]=v;
+            state_[stream==qo100::tx2_stream?"tx2":"tx"]=v;
         }
     } else if(type==10) {
         const double low=get(p,48,4) ? get(p,48,4)/1000. : double(get(p,32,8))-get(p,44,4)/2.;
@@ -214,9 +265,12 @@ void Bridge::packet(Bytes p) {
     if(type==2 || type==5) {
         if(!initialized_) return;
         if(type==2 && (stream>2 || get(p,54,2)!=1 || !get(p,52,2) || p.size()!=64+2*get(p,52,2))) return;
-        if(type==5 && ((stream!=1 && stream!=2 && stream!=4) || p.size()!=544 ||
+        if(type==5 && ((stream!=1 && stream!=2 && stream!=4 && stream!=qo100::rx3_stream && stream!=qo100::rx4_stream) || p.size()!=544 ||
             get(p,40,4)!=12000 || get(p,52,2)!=240 || get(p,54,2)!=2 || get(p,56,4)!=240)) return;
-        if(type==5 && stream==2) {send_decoder(std::move(p));return;}
+        if(type==5 && stream==2) send_digital(p); // Fan out to external audio AND browser monitoring.
+        if(type==5 && (stream==qo100::rx3_stream || stream==qo100::rx4_stream)) {
+            send_decoder(stream==qo100::rx3_stream?0:1,std::move(p));return;
+        }
         auto bytes=std::make_shared<const Bytes>(std::move(p));const auto copy=clients_;
         for(const auto& c:copy) c.second.peer->send(bytes,true);
         return;
@@ -234,7 +288,7 @@ void Bridge::packet(Bytes p) {
         const auto q=found->second;pending_.erase(found);
         if(q.client && q.client==owner_) text(q.client,{{"type","ack"},{"id",q.id},{"command",q.command},
             {"status",get(p,54,2)},{"revision",state_["revision"]},{"flags",state_["flags"]}});
-        if(q.safety && type==7 && !get(p,54,2) && !get(p,48,4)) off_ack_=true;
+        if(q.safety && type==7 && stream==3 && !get(p,54,2) && !get(p,48,4)) off_ack_=true;
         if(q.safety && type==14 && !get(p,54,2) && !get(p,44,4)) normal_ack_=true;
     }
     if(type==18 && !initialized_ && !(get(p,48,4)&2) && state_["settings"].contains("initial_rx_hz")) bootstrap();
@@ -249,9 +303,15 @@ void Bridge::packet(Bytes p) {
             }
         }
     }
-    if(type==7 && get(p,54,2) && ptt_requested_) tx_off();
-    if(type==7 && !pending_.count(group(6,3)) && !get(p,48,4)) ptt_requested_=false;
+    if(type==7 && stream==3 && get(p,54,2) && ptt_requested_) tx_off();
+    if(type==7 && stream==3 && !pending_.count(group(6,3)) && !get(p,48,4)) ptt_requested_=false;
     if(barrier_ && off_ack_ && normal_ack_ && initialized_) {barrier_=false;dirty_=true;}
+    if(type==7 && stream==qo100::tx2_stream) {
+        auto status=p;
+        put(status,16,digital_nonce_,8); // Acknowledge the adapter's fresh-epoch handshake.
+        if(!ready() || (state_["flags"].get<unsigned>()&6) || state_["loop"].value("mode",0)!=0) put(status,48,0,4);
+        send_digital(std::move(status));
+    }
     if(type==4 || type==7 || type==14) {
         // Publish the confirmed media epoch before forwarding its first PCM/FFT.
         // Waiting for the 100-ms status tick would make clients discard fresh audio.
@@ -286,6 +346,13 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             const auto stream=integer(j,"stream",2);if(!stream) throw std::runtime_error("RX stream must be 1 or 2");
             p=header(3,stream);put(p,32,integer(j,"frequency_hz",UINT64_MAX),8);reply=4;
         } else if(type=="tx") {
+            const auto channel=j.contains("channel")?integer(j,"channel",2):1;
+            if(channel==0) throw std::runtime_error("TX channel must be 1 or 2");
+            if(channel==2) {
+                if(j.value("ptt",false)) throw std::runtime_error("TX2 uses external audio, no browser PTT");
+                p=header(6,qo100::tx2_stream);put(p,32,integer(j,"frequency_hz",6000000000ULL),8);
+                control(std::move(p),7,client,id,type);return;
+            }
             p=header(6,3);put(p,32,integer(j,"frequency_hz",6000000000ULL),8);
             const auto enabled=j.at("ptt").get<bool>();
             if(enabled && (state_["flags"].get<unsigned>()&6)) throw std::runtime_error("Hardware offline or changing");
@@ -365,6 +432,8 @@ void Bridge::tick() {
             const auto key=group(3,stream);
             if(last_controls_.count(key) && !pending_.count(key)) send_udp(last_controls_.at(key));
         }
+        const auto digital_key=group(6,qo100::tx2_stream);
+        if(last_controls_.count(digital_key) && !pending_.count(digital_key)) send_udp(last_controls_.at(digital_key));
         next_rx_=now+std::chrono::seconds(1);
     }
     if(ptt_requested_ && now>=next_tx_ && !pending_.count(group(6,3))) {
@@ -385,7 +454,7 @@ void Bridge::tick() {
 }
 void Bridge::stop() {
     stopping_=true;
-    boost::system::error_code ec;decoder_.close(ec);
+    boost::system::error_code ec;digital_.close(ec);for(auto& decoder:decoders_) if(decoder) decoder->socket.close(ec);
     revoke("shutdown");
     const auto copy=clients_;for(const auto& c:copy) c.second.peer->close("Server shutdown");
 }

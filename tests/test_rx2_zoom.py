@@ -21,14 +21,14 @@ def main():
         config=root/'backend.conf';config.write_text(private_config(defaults,backend_port))
         logs=[(root/name).open('w') for name in ['backend.log','adapter.log']]
         radio=subprocess.Popen([str(backend),'--config',str(config),'--source','synthetic'],stdout=logs[0],stderr=logs[0])
-        proxy=Proxy(backend_port);udp_rx2=set()
+        proxy=Proxy(backend_port);udp_rx2=set();audio={1:[],2:[]}
         def observe(packet):
             if packet[5]==2 and HEADER.unpack_from(packet)[4]==2: udp_rx2.add(packet)
+            if packet[5]==5 and HEADER.unpack_from(packet)[4]==2: audio[2].append(HEADER.unpack_from(packet))
             return False
         proxy.drop=observe
-        tap=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);tap.bind(('127.0.0.1',audio_port));tap.setblocking(False)
         bridge=subprocess.Popen([str(adapter),'--listen','127.0.0.1','--port',str(http_port),'--backend-port',str(proxy.port),
-            '--web-root',str(assets),'--decoder-audio-port',str(audio_port),'--decoder-text-port',str(text_port)],stdout=logs[1],stderr=logs[1])
+            '--web-root',str(assets)],stdout=logs[1],stderr=logs[1])
         clients=[]
         try:
             def available():
@@ -40,14 +40,8 @@ def main():
             positions={c:0 for c in clients}
             assemblers={c:{s:Assembler(s) for s in (0,1,2)} for c in clients}
             frames={c:{s:[] for s in (0,1,2)} for c in clients}
-            received_rx2={c:set() for c in clients};audio={1:[],2:[]}
+            received_rx2={c:set() for c in clients}
             def pump():
-                while True:
-                    try: p,_=tap.recvfrom(65536)
-                    except BlockingIOError: break
-                    f=HEADER.unpack_from(p)
-                    assert len(p)==544 and (f[2],f[4],f[9])==(5,2,12000),f
-                    audio[2].append(f)
                 for c in clients:
                     messages=list(c.messages)
                     for p in messages[positions[c]:]:
@@ -61,7 +55,7 @@ def main():
                             frame=assemblers[c][f[4]].push(p)
                             if frame is not None: frames[c][f[4]].append(frame)
                         elif f[2]==5:
-                            assert f[4]!=2,'RX2 PCM leaked to browser'
+                            assert f[4] in (1,2,4),'Monitoring PCM reached browser'
                             if c is owner and f[4]==1: audio[1].append(f)
                     positions[c]=len(messages)
             def until(predicate):
@@ -107,12 +101,12 @@ def main():
             assert received_rx2[owner]&received_rx2[viewer],'Operator/viewer did not share RX2 spectrum fragments'
             assert not owner.state()['tx']['ptt']
             print('RX2 zoom: 8192 bins/75 kHz, carrier and retuned tone position, full frames at operator/viewer, '
-                  'byte-identical UDP/WS, independent tuning/frame clocks, continuous dual PCM and decoder-only RX2 audio passed')
+                  'byte-identical UDP/WS, independent tuning/frame clocks and continuous dual PCM passed')
         finally:
             for c in clients: c.close()
             for process in [bridge,radio]:
                 if process.poll() is None: process.terminate();process.wait(timeout=6)
-            proxy.close();tap.close()
+            proxy.close()
             for log in logs: log.close()
             if sys.exc_info()[0]: print((root/'backend.log').read_text());print((root/'adapter.log').read_text())
         assert bridge.returncode==0 and radio.returncode==0

@@ -1,5 +1,6 @@
 #include "utc_slots.hpp"
 #include "wire.hpp"
+#include "qo100/channels.hpp"
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -18,7 +19,7 @@ int64_t elapsed_ns(uint64_t samples) {
 bool parse_ft8_audio(const uint8_t* data,size_t size,Ft8PcmBlock& block) {
     if(size!=544) return false;
     const bridge::Bytes p(data,data+size);
-    if(!bridge::valid(p) || p[5]!=5 || bridge::get(p,8,4)!=2 || bridge::get(p,40,4)!=12000 ||
+    if(!bridge::valid(p) || p[5]!=5 || bridge::get(p,8,4)!=rx3_stream || bridge::get(p,40,4)!=12000 ||
        bridge::get(p,44,8) || bridge::get(p,52,2)!=240 || bridge::get(p,54,2)!=2 ||
        bridge::get(p,56,4)!=240 || !bridge::get(p,60,4)) return false;
     block.session=bridge::get(p,60,4);block.epoch=bridge::get(p,12,4);
@@ -45,7 +46,7 @@ void Ft8UtcSlots::push(const Ft8PcmBlock& block) {
     const char* reason=nullptr;
     if(!started_) reason="startup";
     else if(block.session!=session_ || block.epoch!=epoch_) reason="session/epoch changed";
-    else if(block.frequency!=frequency_) reason="RX2 frequency changed";
+    else if(block.frequency!=frequency_) reason="RX3 frequency changed";
     else if(block.index!=expected_) reason="audio sample gap";
     else {
         const auto predicted=int64_t(anchor_ns_)+elapsed_ns(block.index-anchor_index_);

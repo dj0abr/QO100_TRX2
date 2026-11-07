@@ -1,4 +1,5 @@
 #include "qo100/protocol.hpp"
+#include "qo100/channels.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -9,9 +10,9 @@ namespace {
 uint64_t get(const uint8_t* p,size_t offset,size_t width) {
     uint64_t value=0;for(size_t i=0;i<width;++i) value=(value<<8)|p[offset+i];return value;
 }
-bool tx_header(const uint8_t* p,size_t n,uint8_t type) {
+bool tx_header(const uint8_t* p,size_t n,uint8_t type,bool digital=false) {
     return n>=64 && n<=max_datagram && !std::memcmp(p,"QTR2",4) && p[4]==1 &&
-        p[5]==type && get(p,6,2)==64 && get(p,8,4)==3;
+        p[5]==type && get(p,6,2)==64 && (get(p,8,4)==3 || (digital && get(p,8,4)==tx2_stream));
 }
 void put(std::vector<uint8_t>& bytes, size_t offset, uint64_t value, size_t width) {
     for (size_t i = 0; i < width; ++i) bytes[offset + width - i - 1] = (value >> (i * 8)) & 255;
@@ -94,21 +95,22 @@ std::vector<uint8_t> filter_state_packet(uint32_t request, double bandwidth, dou
     return p;
 }
 bool parse_tx_control(const uint8_t* p,size_t n,TxControl& c) {
-    if(n!=64 || !tx_header(p,n,tx_control_type) || get(p,54,2)>1 ||
+    if(n!=64 || !tx_header(p,n,tx_control_type,true) || get(p,54,2)>1 ||
        get(p,16,8) || get(p,24,8) || get(p,40,8) || get(p,48,6) || get(p,56,4)) return false;
-    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),get(p,32,8),get(p,54,2)!=0};return true;
+    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),get(p,32,8),get(p,54,2)!=0,uint32_t(get(p,8,4))};return true;
 }
 bool parse_tx_audio(const uint8_t* p,size_t n,TxAudio& a) {
-    if(!tx_header(p,n,tx_audio_type) || n!=544 || get(p,40,4)!=12000 || get(p,44,8) ||
+    if(!tx_header(p,n,tx_audio_type,true) || n!=544 || get(p,40,4)!=12000 || get(p,44,8) ||
        get(p,52,2)!=240 || get(p,54,2)!=2 || get(p,56,4)!=240) return false;
     a.epoch=get(p,12,4);a.session=get(p,60,4);a.index=get(p,24,8);a.frequency=get(p,32,8);
+    a.stream=get(p,8,4);
     a.samples.resize(240);
     for(size_t i=0;i<240;++i) { const int value=get(p,64+2*i,2);a.samples[i]=value>=32768?value-65536:value; }
     return true;
 }
 std::vector<uint8_t> tx_state_packet(uint32_t request,uint64_t frequency,uint32_t epoch,
-    uint32_t session,uint16_t status,bool enabled,uint32_t audio_fill,uint16_t pluto_fill,int32_t ppm) {
-    auto p=state_packet(request,frequency,epoch,session,status,3);p[5]=tx_state_type;
+    uint32_t session,uint16_t status,bool enabled,uint32_t audio_fill,uint16_t pluto_fill,int32_t ppm,uint32_t stream) {
+    auto p=state_packet(request,frequency,epoch,session,status,stream);p[5]=tx_state_type;
     put(p,44,audio_fill,4);put(p,48,enabled?1:0,4);put(p,52,pluto_fill,2);put(p,56,uint32_t(ppm),4);
     return p;
 }
@@ -165,7 +167,8 @@ std::vector<uint8_t> state_packet(uint32_t request, uint64_t frequency, uint32_t
 }
 std::vector<uint8_t> audio_packet(const FrameInfo& f, const std::vector<int16_t>& audio) {
     if (audio.empty() || audio.size()>568) throw std::runtime_error("Invalid audio packet size");
-    if (f.stream_id!=1 && f.stream_id!=2 && f.stream_id!=4) throw std::runtime_error("Invalid audio stream ID");
+    if (f.stream_id!=1 && f.stream_id!=2 && f.stream_id!=4 &&
+        f.stream_id!=rx3_stream && f.stream_id!=rx4_stream) throw std::runtime_error("Invalid audio stream ID");
     auto p=state_packet(f.frame_id,f.center_hz,0,f.session_id,2,f.stream_id);
     p[5]=audio_type;put(p,16,f.timestamp_ns,8);put(p,24,f.sample_index,8);
     put(p,52,audio.size(),2);put(p,56,audio.size(),4);p.resize(64+2*audio.size());

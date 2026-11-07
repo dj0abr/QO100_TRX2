@@ -32,8 +32,8 @@ function connect() {
       operator=message.role==='operator';$('role').textContent=operator?'Bediener':'Zuschauer';
       if(!operator) {stopPtt();stopMic();}controls();
     } else if(message.type==='state') update(message);
-    else if(message.type==='decoder_text' && message.stream===2 && typeof message.text==='string') {
-      const output=$('decoder-text');output.textContent=(output.textContent+message.text).slice(-16384);output.scrollTop=output.scrollHeight;
+    else if(message.type==='decoder_text' && [3,4].includes(message.stream) && typeof message.text==='string') {
+      const output=$('decoder-text');output.textContent=(output.textContent+`[RX${message.stream}] `+message.text).slice(-16384);output.scrollTop=output.scrollHeight;
     }
     else if(message.type==='error') status(`${message.code}: ${message.message}`,true);
     else if(message.type==='ack' && message.status) status(`${message.command}: Backend-Status ${message.status}`,true);

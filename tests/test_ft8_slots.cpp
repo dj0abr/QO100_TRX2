@@ -47,16 +47,16 @@ void slots() {
     const auto generation=out[0].generation;s.reset();require(s.generation()!=generation,"Old result generation not invalidated");
 }
 void wire() {
-    auto p=bridge::header(5,2,7,9);p.resize(544);
+    auto p=bridge::header(5,5,7,9);p.resize(544);
     bridge::put(p,16,utc*1000000000+20000000,8);bridge::put(p,32,frequency,8);bridge::put(p,40,12000,4);
     bridge::put(p,52,240,2);bridge::put(p,54,2,2);bridge::put(p,56,240,4);
     bridge::put(p,64,32768,2);bridge::put(p,66,65535,2);bridge::put(p,70,32767,2);
-    qo100::Ft8PcmBlock b;require(qo100::parse_ft8_audio(p.data(),p.size(),b),"Valid QTR2 RX2 audio rejected");
+    qo100::Ft8PcmBlock b;require(qo100::parse_ft8_audio(p.data(),p.size(),b),"Valid QTR2 RX3 audio rejected");
     require(b.frequency==frequency && b.audio[0]==-1 && b.audio[1]==-1/32768.f && b.audio[2]==0 && b.audio[3]==32767/32768.f,"Big-endian PCM16 conversion failed");
-    for(const auto change:std::vector<std::pair<size_t,uint64_t>>{{8,1},{40,48000},{52,239},{54,1},{60,0},{16,0},{24,UINT64_MAX}}) {
+    for(const auto change:std::vector<std::pair<size_t,uint64_t>>{{8,2},{40,48000},{52,239},{54,1},{60,0},{16,0},{24,UINT64_MAX}}) {
         auto bad=p;const size_t width=change.first==16 || change.first==24?8:change.first==52 || change.first==54?2:4;
         bridge::put(bad,change.first,change.second,width);
-        require(!qo100::parse_ft8_audio(bad.data(),bad.size(),b),"Malformed RX2 packet accepted");
+        require(!qo100::parse_ft8_audio(bad.data(),bad.size(),b),"Malformed RX3 packet accepted");
     }
     require(!qo100::parse_ft8_audio(p.data(),543,b),"Short packet accepted");
 }

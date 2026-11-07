@@ -46,7 +46,7 @@
             <span class="touch-hint" data-en="← Swipe: fine-tune RX1 →">← Wischen: RX1 fein abstimmen →</span>
           </button>
           <div class="tx-row">
-            <button id="frequencytx" type="button" class="tx-uplink" title="TX-Frequenz eingeben · auf Touchgeräten zum Feinabstimmen wischen"><span class="tx-tag">TX</span><span id="tx" class="tx-value">—</span><span class="unit">MHz</span></button>
+            <button id="frequencytx" type="button" class="tx-uplink" title="TX-Frequenz eingeben · auf Touchgeräten zum Feinabstimmen wischen"><span id="tx-label" class="tx-tag">TX1</span><span id="tx" class="tx-value">—</span><span class="unit">MHz</span></button>
             <div class="tx-return"><span>↳ Downlink</span><span id="tx-downlink" class="downlink-value">—</span><span class="unit">MHz</span></div>
           </div>
           <span class="touch-hint tx-touch-hint" data-en="← Swipe on TX: fine-tune TX →">← Wischen auf TX: TX fein abstimmen →</span>
@@ -57,7 +57,6 @@
           <span class="frequency-value"><strong id="rx2">—</strong><span class="unit">MHz</span></span>
           <span class="touch-hint" data-en="← Swipe: fine-tune RX2 →">← Wischen: RX2 fein abstimmen →</span>
         </button>
-          <button id="decoder-toggle" type="button" aria-expanded="false" aria-controls="decoder-panel">Decoder-Text anzeigen</button>
         </div>
       </div>
       <p id="audio-message" class="audio-message" role="alert" hidden></p>
@@ -86,6 +85,8 @@
         </div>
         <button id="filter-toggle" type="button" class="menu-button active" aria-expanded="true" aria-controls="filter-content"><svg class="icon" aria-hidden="true"><use href="#filter-icon"/></svg>Filter<svg class="icon chevron" aria-hidden="true"><use href="#chevron"/></svg></button>
         <div id="filter-content" class="filter-content">
+          <p id="rx2-filter-note" class="filter-note" hidden data-en="RX2 uses the fixed digital passband 100–4000 Hz, without noise reduction.">RX2 verwendet den festen Digitaldurchlass 100–4000 Hz, ohne Rauschreduktion.</p>
+          <div id="rx1-filter-controls">
           <div class="field-label" data-en="RX1 · USB filter">RX1 · USB-Filter</div>
           <div class="filter-presets"><button type="button" class="preset" data-bandwidth="3900" data-control>3.9 k</button><button type="button" class="preset" data-bandwidth="2700" data-control>2.7 k</button><button type="button" class="preset" data-bandwidth="2400" data-control>2.4 k</button></div>
           <label class="field-label" for="filter-lower" data-en="Lower edge">Untere Grenze<output id="filter-lower-value">—</output></label>
@@ -96,6 +97,7 @@
           <label class="field-label nr-label" for="nr" data-en="Noise reduction">Rauschreduktion<output id="nr-value">—</output></label>
           <input id="nr" class="range" type="range" min="0" max="100" step="1" value="0" data-control>
           <p class="filter-note" data-en="The passband is marked in the RX1 zoom. NR affects RX1 only.">Der Durchlassbereich ist im RX1-Zoom markiert. NR wirkt nur auf RX1.</p>
+          </div>
         </div>
         <span id="mobile-filter-summary" class="mobile-filter-summary">USB</span>
       </aside>
@@ -109,14 +111,15 @@
           <footer class="display-footer"><span id="wide-help" class="desktop-note">Links: RX1 + TX · Rechts: nur RX1 · Shift + Rad: TX</span><span id="touch-help" class="mobile-note">Tippen: RX1 + TX</span><span>600 kHz</span></footer>
         </section>
         <section id="zoom-display" class="display" aria-labelledby="zoom-title">
-          <header class="display-heading"><div class="display-title"><h2 id="zoom-title">RX1-ZOOM</h2><span>±25 kHz</span></div><div class="display-meta"><span id="zoom-filter" class="desktop-note">USB</span><span class="wheel-step" data-en="Mouse wheel">Mausrad <b>25 Hz</b></span></div></header>
+          <header class="display-heading"><div class="display-title"><h2 id="zoom-title">RX1-ZOOM</h2><span>±25 kHz</span></div><div class="display-meta"><button id="decoder-toggle" type="button" aria-expanded="false" aria-controls="decoder-panel">Decoder-Text anzeigen</button><span id="zoom-filter" class="desktop-note">USB</span><span class="wheel-step" data-en="Mouse wheel">Mausrad <b>25 Hz</b></span></div></header>
           <div class="plot-body"><canvas id="zoom-spectrum" class="spectrum" data-spectrum data-tune aria-label="RX1-Zoom-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty">Warte auf RX1-Zoom …</span></div>
           <div class="frequency-axis" aria-label="RX1-Zoom-Frequenzen in MHz"></div>
           <div id="zoom-output" class="zoom-output">
             <div class="waterfall"><canvas id="zoom" data-waterfall data-tune aria-label="RX1-Zoom-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas><span id="zoom-waterfall-caption" class="waterfall-caption">WASSERFALL · RX1</span></div>
             <section id="decoder-panel" class="decoder-panel" aria-labelledby="decoder-title" hidden>
-              <header class="decoder-heading"><h2 id="decoder-title">RX2 · Decoder</h2><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den Text in diesem Browser löschen" data-en-title="Clear text in this browser only">Text löschen</button></header>
-              <pre id="decoder-text" role="log" aria-live="polite" aria-label="RX2 Decoder-Text" tabindex="0"></pre>
+              <header class="decoder-heading"><h2 id="decoder-title">Monitoring</h2><div class="decoder-sources" role="radiogroup" aria-label="Decoderquelle" data-en-aria-label="Decoder source"><label><input id="decoder-source3" type="radio" name="decoder-source" value="3" checked>RX3 · FT8</label><label><input id="decoder-source4" type="radio" name="decoder-source" value="4">RX4 · PSK</label></div><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den ausgewählten Text in diesem Browser löschen" data-en-title="Clear only the selected text in this browser">Text löschen</button></header>
+              <pre id="decoder-text" class="decoder-text" role="log" aria-live="polite" aria-label="RX3 FT8 Decoder-Text" tabindex="0"></pre>
+              <pre id="decoder-text-4" class="decoder-text" role="log" aria-live="polite" aria-label="RX4 PSK Decoder-Text" tabindex="0" hidden></pre>
             </section>
           </div>
           <footer class="display-footer"><span id="filter-caption">RX1 · Filter —</span><span class="desktop-note" data-en="Fine tuning · 25 Hz">Feinabstimmung · 25 Hz</span><span id="zoom-mobile-caption" class="mobile-note">RX1-Zoom · 50 kHz</span></footer>
@@ -126,8 +129,9 @@
     <section class="qso-controls" aria-label="Direkte QSO-Bedienung">
       <div class="copy-buttons"><button id="copy-rx-tx" type="button" class="copy-button" data-control title="TX auf die zu RX1 gehörende Uplinkfrequenz setzen"><span>RX1</span><span class="arrow">→</span><span>TX</span></button><button id="copy-tx-rx" type="button" class="copy-button" data-control title="RX1 auf die zu TX gehörende Downlinkfrequenz setzen"><span>TX</span><span class="arrow">→</span><span>RX1</span></button></div>
       <div class="qso-control"><label class="control-heading" for="volume"><svg class="icon" aria-hidden="true"><use href="#speaker"/></svg><span data-en="Volume">Lautstärke</span><output id="volume-value">20 %</output></label><input id="volume" class="range" type="range" min="0" max="20" step="0.05" value="4"><div class="slider-labels"><span>0</span><span>100 %</span></div></div>
-      <div class="qso-control"><label class="control-heading" for="compressor"><svg class="icon" aria-hidden="true"><use href="#mic"/></svg><span data-en="Compressor">Kompressor</span><output id="compressor-value">—</output></label><input id="compressor" class="range" type="range" min="0" max="140" step="0.1" value="100" data-control><div class="slider-labels"><span>0 · Bypass</span><span>140 %</span></div></div>
-      <button id="ptt" type="button" class="ptt" data-control aria-pressed="false" title="Zuerst Audio und Mikrofon einschalten, dann zum Senden gedrückt halten"><svg class="icon" aria-hidden="true"><use href="#transmit"/></svg><strong>PTT</strong><small id="ptt-hint">Mikrofon fehlt</small></button>
+      <div id="voice-compressor-control" class="qso-control"><label class="control-heading" for="compressor"><svg class="icon" aria-hidden="true"><use href="#mic"/></svg><span data-en="Compressor">Kompressor</span><output id="compressor-value">—</output></label><input id="compressor" class="range" type="range" min="0" max="140" step="0.1" value="100" data-control><div class="slider-labels"><span>0 · Bypass</span><span>140 %</span></div></div>
+      <div id="digital-audio-control" class="qso-control" hidden><strong>TX2 · QO100 TX2</strong><p data-en="External audio · set the level in the digital program.">Externes Audio · Pegel im Digitalprogramm einstellen.</p></div>
+      <button id="ptt" type="button" class="ptt" data-control aria-pressed="false" title="Zuerst Audio und Mikrofon einschalten, dann zum Senden gedrückt halten"><svg class="icon" aria-hidden="true"><use href="#transmit"/></svg><strong id="ptt-label">PTT</strong><small id="ptt-hint">Mikrofon fehlt</small></button>
     </section>
     <footer class="page-footer"><span id="status" role="status" aria-live="polite">Verbindung wird hergestellt …</span><span id="offset-status">RX1 ausgewählt</span></footer>
   </div>
@@ -137,7 +141,7 @@
     <div class="dialog-scroll">
       <fieldset><legend data-en="Language">Sprache</legend><label class="field-label" for="language" data-en="Display language">Anzeigesprache</label><select id="language" class="menu-select"><option value="auto" data-en="Automatic · Browser language">Automatisch · Browsersprache</option><option value="de">Deutsch</option><option value="en">English</option></select></fieldset>
       <fieldset><legend>Audio</legend><div class="form-grid">
-        <p class="field-help" data-en="Receive: RX1 · Voice. RX2 provides decoder text.">Empfang: RX1 · Sprache. RX2 liefert Decoder-Text.</p>
+        <p class="field-help" data-en="Audio: RX1. Monitoring: RX3 · FT8 and RX4 · PSK.">Audio: RX1. Monitoring: RX3 · FT8 und RX4 · PSK.</p>
         <div class="form-action"><span id="audio-details">Audio ausgeschaltet</span></div>
         <label data-en="Playback device">Wiedergabegerät<select id="audio-output"><option value="">Automatisch · USB Advanced bevorzugen</option><option value="default">Systemstandard</option></select></label>
         <label data-en="Recording device">Aufnahmegerät<select id="audio-input"><option value="">Automatisch · USB Advanced bevorzugen</option><option value="default">Systemstandard</option></select></label>
@@ -151,6 +155,10 @@
         <p class="field-help" data-en="Toggle mode: automatic stop after 5 minutes at the latest. This also applies to Space and is saved immediately in this browser.">Schaltbetrieb: automatische Abschaltung nach spätestens 5 Minuten. Die Auswahl gilt auch für die Leertaste und wird sofort in diesem Browser gespeichert.</p>
       </fieldset>
       <form id="settings-form">
+        <fieldset><legend data-en="Monitoring receivers">Monitoring-Empfänger</legend><div class="form-grid">
+          <label>RX3 · FT8 (Hz)<input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx3_frequency_hz" data-control></label>
+          <label>RX4 · PSK (Hz)<input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx4_frequency_hz" data-control></label>
+        </div><p class="field-help" data-en="USB carrier frequencies in whole Hz. Both receivers decode continuously. Save changes below.">USB-Trägerfrequenzen in ganzen Hz. Beide Empfänger dekodieren laufend. Änderungen unten speichern.</p></fieldset>
         <fieldset><legend data-en="Pluto and frequency correction">Pluto und Frequenzkorrektur</legend><div class="form-grid">
           <label data-en="Pluto connection">Pluto-Verbindung<select data-setting="pluto_connection" data-control><option value="usb">USB</option><option value="network" data-en="Network">Netzwerk</option></select></label>
           <label data-en="Pluto IPv4 address">Pluto IPv4-Adresse<input type="text" data-setting="pluto_ip" autocomplete="off" data-control></label>

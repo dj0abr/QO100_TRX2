@@ -12,9 +12,19 @@ int main() {
     try {
         std::filesystem::create_directory(directory);
         qo100::Config base;base.derive();base.validate();
+        auto monitors=qo100::patch_settings(base,{{"rx3_frequency_hz","10489540321"},{"rx4_frequency_hz","10489748821"}});
+        require(monitors.rx3_frequency_hz==10489540321ULL && monitors.rx4_frequency_hz==10489748821ULL,"Monitoring RF lost precision");
+        require(!qo100::hardware_settings_changed(base,monitors),"Monitoring frequency must not restart hardware");
+        for(const auto& invalid:{"0","-1","10489000000","10489540321.5","18446744073709551615"})
+            rejects([&]{qo100::patch_settings(base,{{"rx3_frequency_hz",invalid}});});
         auto next=qo100::patch_settings(base,{{"rx_correction_hz","123"},{"tx_correction_hz","-456"},{"lnb_reference_hz","24999999"}});
         require(next.pluto_rx_hz==739750513 && next.pluto_tx_hz==1290249544,"Incorrect LNB/calibration calculation");
         next=qo100::patch_settings(next,{{"pluto_connection","usb"},{"gui_audio_gain","5.5"},{"initial_rx_hz","10489897327"}});
+        auto digital=qo100::patch_settings(next,{{"initial_tx2_hz","2400103123"}});
+        require(!qo100::hardware_settings_changed(next,digital) && digital.initial_tx_hz==next.initial_tx_hz,"TX2 tuning changed hardware/TX1");
+        next=digital;
+        for(const auto& invalid:{"0","2400600000","-1","2400103123.5"})
+            rejects([&]{qo100::patch_settings(base,{{"initial_tx2_hz",invalid}});});
         require(next.pluto_uri=="usb:","USB selection failed");
         for(const auto& patch:{qo100::SettingsMap{{"tx_attenuation_db","41"}},{{"tx_attenuation_db","1.1"}},
             {{"pluto_ip","999.0.0.1"}},{{"rx_correction_hz","-9223372036854775808"}},{{"lnb_reference_hz","30000000"}},

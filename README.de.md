@@ -67,7 +67,7 @@ Der erste Browser erhält die Steuerung; weitere Browser können zuschauen und m
 
 ### Die beiden Wasserfälle
 
-**Fullband** zeigt den gesamten QO-100-Schmalbandtransponder. **Zoom** zeigt zur Feinabstimmung ±25 kHz um den ausgewählten Empfänger. **RX1** oder **RX2** anklicken, um den Empfänger auszuwählen; der Zoom folgt der Auswahl.
+**Fullband** zeigt den gesamten QO-100-Schmalbandtransponder. **Zoom** zeigt zur Feinabstimmung ±25 kHz um den ausgewählten Empfänger. **RX1** oder **RX2** anklicken, um das zugehörige RX/TX-Paar auszuwählen; Zoom und Audio folgen der Auswahl.
 
 ### Abstimmen mit der Maus
 
@@ -75,7 +75,7 @@ Funktioniert im Spektrum und im Wasserfall:
 
 | Aktion | Wirkung |
 |---|---|
-| Linksklick | RX1 abstimmen und TX um denselben Betrag verschieben; der Versatz bleibt erhalten. Bei ausgewähltem RX2 wird nur RX2 abgestimmt. |
+| Linksklick | Den ausgewählten Empfänger und seinen TX um denselben Betrag verschieben; der Versatz bleibt erhalten. |
 | Rechtsklick | Nur den ausgewählten Empfänger abstimmen. |
 | Mausrad | Den ausgewählten Empfänger abstimmen: 250-Hz-Schritte im Fullband, 25 Hz im Zoom. |
 | Strg + Mausrad | Den ausgewählten Empfänger und TX gemeinsam verschieben. |
@@ -113,13 +113,19 @@ Der Bandplan zeigt die Bereiche für die verschiedenen Betriebsarten. Mit **↻*
 
 ![Umschalter für Bandplan und Frequenzanzeige](docs/bandplan.png)
 
-## Zwei Empfänger
+## Vier Empfänger
 
 - **RX1:** normaler QO-100-Sprechfunk mit einstellbarem Audiofilter und Rauschreduktion.
-- **RX2:** unabhängiger FT8-Empfang, während das QSO über RX1 weiterläuft. RX2 auswählen, auf FT8-Aktivität abstimmen und **Decoder-Text anzeigen** anklicken. Die decodierten Nachrichten erscheinen unter dem Zoom.
+- **RX2/TX2:** unabhängiges Digitalpaar für FLdigi/WSJT-X mit virtuellen Audiogeräten und zusätzlicher RX2-Audiokontrolle im Browser. [Einrichtung und Pegel](docs/digital-audio.md).
+- **RX3:** FT8-Monitor.
+- **RX4:** PSK-Bakenmonitor.
+
+Beide Monitoringfrequenzen unter **Setup → Monitoring-Empfänger** als ganze Hz einstellen und speichern. **Decoder-Text anzeigen** über dem Zoom öffnet die Ausgabe; Radiobuttons wählen **RX3 · FT8** oder **RX4 · PSK**. Beide Quellen werden gleichzeitig empfangen und getrennt gepuffert. `./start_all.sh` startet beide Decoder.
 
 ![Decodierte FT8-Nachrichten](docs/decoderoutput.png)
 
 Die ersten Nachrichten erscheinen nach etwa 15–30 Sekunden zuzüglich Rechenzeit. Die Uhr des SBC/PC muss synchronisiert sein.
 
 Technische Einzelheiten stehen in [DEVELOPMENT.md](DEVELOPMENT.md).
+
+PSK-Bakenempfang über RX4: [Kurzanleitung](docs/beacon-decoder.md).

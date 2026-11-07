@@ -69,6 +69,11 @@ target_compile_options(qo100_backend PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_definitions(qo100_backend PRIVATE
     QO100_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf")
 add_dependencies(qo100_backend pluto)
+pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple)
+add_executable(qo100_digital_audio audio/digital_audio.cpp)
+target_include_directories(qo100_digital_audio PRIVATE webbridge)
+target_link_libraries(qo100_digital_audio PRIVATE qo100_core PkgConfig::PULSE Threads::Threads)
+target_compile_options(qo100_digital_audio PRIVATE -Wall -Wextra -Wpedantic)
 
 include(CTest)
 option(QO100_BUILD_WEBBRIDGE "Build standalone HTTP/WebSocket GUI adapter" ON)
@@ -97,6 +102,9 @@ if(BUILD_TESTING)
     add_executable(test_tx_channel tests/test_tx_channel.cpp)
     target_link_libraries(test_tx_channel PRIVATE qo100_core)
     add_test(NAME tx_usb_dsp COMMAND test_tx_channel)
+    add_executable(test_tx2_profile tests/test_tx2_profile.cpp)
+    target_link_libraries(test_tx2_profile PRIVATE qo100_core)
+    add_test(NAME tx2_digital_profile COMMAND test_tx2_profile)
     add_executable(test_speech_compressor tests/test_speech_compressor.cpp)
     target_link_libraries(test_speech_compressor PRIVATE qo100_core)
     add_test(NAME speech_compressor_dsp COMMAND test_speech_compressor)
@@ -107,6 +115,9 @@ if(BUILD_TESTING)
     target_link_libraries(test_rx_channel PRIVATE qo100_core)
     add_test(NAME usb_dsp COMMAND test_rx_channel)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME digital_virtual_audio COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_digital_audio.py $<TARGET_FILE:qo100_digital_audio>)
+    set_tests_properties(digital_virtual_audio PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
     if(TARGET qo100_webbridge)
         add_test(NAME webbridge_udp COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_webbridge.py
@@ -118,12 +129,22 @@ if(BUILD_TESTING)
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
             ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
         set_tests_properties(rx2_zoom_websocket PROPERTIES TIMEOUT 25)
-        add_test(NAME rx2_decoder_udp COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rx2_decoder.py
+        add_test(NAME monitor_decoders_udp COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_monitor_decoders.py
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
             $<TARGET_FILE:test_udp_text_decoder> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf
             ${CMAKE_CURRENT_SOURCE_DIR}/web)
-        set_tests_properties(rx2_decoder_udp PROPERTIES TIMEOUT 25)
+        set_tests_properties(monitor_decoders_udp PROPERTIES TIMEOUT 40)
+        add_test(NAME monitor_supervisor COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_monitor_supervisor.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/start_all.sh $<TARGET_FILE_DIR:qo100_backend>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(monitor_supervisor PROPERTIES TIMEOUT 45)
+        add_test(NAME tx2_iq_udp COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tx2_integration.py
+            $<TARGET_FILE:qo100_backend> $<TARGET_FILE:qo100_webbridge>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(tx2_iq_udp PROPERTIES TIMEOUT 35 RUN_SERIAL TRUE)
     endif()
     add_test(NAME cpp_gui_udp COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cpp_gui.py

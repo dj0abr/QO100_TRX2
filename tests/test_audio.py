@@ -62,6 +62,8 @@ class AudioTest(unittest.TestCase):
         self.assertEqual(a.center_hz,10489600000)
         np.testing.assert_array_equal(a.samples,np.arange(240)/32768)
         self.assertIsNone(audio_packet(wire(3)))
+        for stream in (5, 6):
+            self.assertEqual(audio_packet(wire(stream)).stream_id, stream)
         with self.assertRaises(ValueError): tune(1,10489600000,3)
 
 

@@ -1,4 +1,4 @@
-// RX2 UDP audio -> UTC slots -> independent WSJT-X process -> UDP text.
+// RX3 UDP audio -> UTC slots -> independent WSJT-X process -> UDP text.
 #include "utc_slots.hpp"
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -36,7 +36,7 @@ int main(int argc,char** argv) {
             if(option=="--help") {
                 std::cout<<"qo100_ft8_decoder [--port 40910] [--time-offset-ms 0]\n"
                     "                  [--decoder FILE] [--decode-timeout-ms 45000]\n"
-                    "RX2 QTR2 AUDIO (12 kHz) on loopback UDP; replies with decoded FT8 text.\n"
+                    "RX3 QTR2 AUDIO (12 kHz) on loopback UDP; replies with decoded FT8 text.\n"
                     "Collects complete UTC-aligned 15-second slots; ft8-decoder must be beside this program.\n";
                 return 0;
             }
@@ -68,7 +68,7 @@ int main(int argc,char** argv) {
             }
         });
         worker=&decoder;
-        std::cerr<<"FT8 receiver: RX2 UDP 127.0.0.1:"<<port<<"; 12000 samples/s; UTC offset "<<offset/1e6<<" ms\n";
+        std::cerr<<"FT8 receiver: RX3 UDP 127.0.0.1:"<<port<<"; 12000 samples/s; UTC offset "<<offset/1e6<<" ms\n";
         std::cerr<<"FT8 core: "<<executable<<"; waiting for a complete UTC slot (00/15/30/45 s)\n";
         std::array<uint8_t,1201> buffer{};uint64_t packets=0,malformed=0;
         while(running) {

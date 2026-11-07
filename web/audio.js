@@ -222,7 +222,7 @@ export class RadioAudio {
     if (!this.running || buffer.byteLength !== 544) return;
     const v = new DataView(buffer);
     if (v.getUint32(0) !== 0x51545232 || v.getUint8(4) !== 1 || v.getUint8(5) !== 5 || v.getUint16(6) !== 64 || v.getUint32(60) !== state.session || v.getBigUint64(16) < cutoff || v.getUint32(40) !== 12000 || v.getUint16(52) !== 240 || v.getUint16(54) !== 2 || v.getUint32(56) !== 240) return;
-    const desired = state.loop?.mode === 1 ? 4 : stream;
+    const desired = state.loop?.mode === 1 && stream === 1 ? 4 : stream;
     const epoch = desired === 4 ? state.tx?.epoch : state.rx?.[String(desired)]?.epoch;
     if (v.getUint32(8) !== desired || v.getUint32(12) !== epoch) return;
     const samples = new Float32Array(240);

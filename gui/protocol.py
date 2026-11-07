@@ -59,7 +59,7 @@ def audio_packet(packet):
     if len(packet) < 64 or len(packet) > MAX_DATAGRAM:
         return None
     f = HEADER.unpack_from(packet)
-    if (f[:4] != (MAGIC, VERSION, AUDIO, 64) or f[4] not in (1, 2, 4) or f[9] != 12000
+    if (f[:4] != (MAGIC, VERSION, AUDIO, 64) or f[4] not in (1, 2, 4, 5, 6) or f[9] != 12000
         or f[10] or f[11] or f[13] != 2 or f[12] != f[14]
         or not 0 < f[12] <= 568 or len(packet) != 64 + 2*f[12]):
         return None

@@ -21,7 +21,7 @@ RX = QO-100-Downlink, TX = QO-100-Uplink. Hardware-/Umsetzerkorrekturen macht da
 | 4 | 1 | version | `1` |
 | 5 | 1 | type | Nachrichtentyp, siehe unten |
 | 6 | 2 | header_size | `64` |
-| 8 | 4 | stream | `0` Gesamt-FFT/Settings/Loop, `1` RX1/Zoom, `2` RX2/Zoom, `3` TX, `4` Audio-Echo |
+| 8 | 4 | stream | `0` Gesamt-FFT/Settings/Loop, `1` RX1/Zoom, `2` RX2/Zoom, `3` TX, `4` Audio-Echo, `5` RX3/FT8, `6` RX4/PSK, `7` TX2 |
 | 12 | 4 | id | Request-ID, FFT-Frame-ID oder Audio-Epoche |
 | 16 | 8 | timestamp | Sendezeit Unix-ns bei FFT/Audio/Loop-State; sonst 0 |
 | 24 | 8 | index | Sample-Index, bestätigte Epoche oder Settings-Revision |
@@ -174,3 +174,34 @@ if (get(txAck,54,2)==0 && get(txAck,48,4)==1)
     udp.send(tx_audio(uint32_t(get(txAck,24,8)), 0, get(txAck,32,8), sid, pcm));
 // Nächster Audioblock: Index 240. Beim Loslassen neue Control-ID, format=0.
 ```
+
+## Monitoring-Empfänger RX3 und RX4
+
+Die Transport-IDs **5** und **6** kennzeichnen RX3 und RX4 in `AUDIO`/`STATE`.
+Die bestehenden IDs 3/4 für TX/Audio-Echo bleiben unverändert. Kein zusätzlicher Zoom.
+`TUNE` erlaubt weiterhin nur RX1/RX2. Monitoringfrequenzen werden mit den persistenten
+Settings `rx3_frequency_hz` und `rx4_frequency_hz` gesetzt, jeweils ganze USB-Träger-Hz
+innerhalb der RX-Mitte ±275000 Hz. Startwerte: 10489540000 / 10489748821 Hz.
+Ein geänderter Monitor setzt ausschließlich seinen DSP, seine Epoche und den Samplezähler
+zurück. Andere Kanäle laufen weiter. Bei Anmeldung und nach einem Reset sendet das Backend
+Monitoring-`STATE` mit Request-ID 0; ein Abonnent kann diese Zustände direkt übernehmen.
+Der Webadapter verwendet in `state.rx` und `decoder_text.stream` die logischen Nummern 3/4.
+
+## TX2 und gemeinsame IQ-Ausgabe
+
+TX2 verwendet `TX_CONTROL`/`TX_STATE`/`TX_AUDIO` mit Stream **7**. Frequenz-,
+Session-, Epochen-, PCM- und Sampleindexfelder entsprechen TX1. Bei TX2 bedeutet
+`TX_STATE.first` (Offset 48) **Audioweg bereit**, unabhängig von einer PTT.
+`TX_CONTROL.format=0` stimmt TX2 ab; `format=1` fordert bei einem Adapterneustart
+zusätzlich eine neue Audio-Epoche an. Wiederholte Request-IDs lösen keinen weiteren
+Reset aus. Alte Sessions, Epochen oder Frequenzen werden für TX2 ebenfalls verworfen.
+Ein fehlender Browser/PTT-Keepalive schaltet TX2 im Normalbetrieb nicht ab. Ausfall
+des Audioadapters, Hardwarewechsel oder Test-Loops verwerfen ungeeignetes Audio.
+
+Die zwei Modulatoren werden im selben Pluto-FIFO-Takt berechnet und gemeinsam als
+ein IQ-Strom übertragen. Die Summe hat eine feste Verstärkung von 0,5 (6 dB Reserve).
+TX1 hat dadurch gegenüber der Version mit einem Sender einen um 6 dB kleineren
+IQ-Pegel. Die Hardware-Dämpfung bleibt unverändert.
+
+Der separate Audioadapter meldet sich ausschließlich bei der Webbridge an, nicht
+als Backend-Abonnent. [Geräte, UDP-Handschlag und Digitalprofil](digital-audio.md).

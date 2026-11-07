@@ -25,11 +25,11 @@ export function validateFrequency(hz, center, label = 'Frequenz') {
   return hz;
 }
 
-export function tuneTargets({selected, frequency, rx1, tx, rxCenter, txCenter, together}) {
+export function tuneTargets({selected, frequency, rx1, rx = rx1, tx, rxCenter, txCenter, together}) {
   validateFrequency(frequency, rxCenter, selected === 2 ? 'RX2' : 'RX1');
   const result = {rx: selected, frequency};
-  if (selected === 1 && together) {
-    result.tx = validateFrequency(tx + frequency - rx1, txCenter, 'TX');
+  if (together) {
+    result.tx = validateFrequency(tx + frequency - rx, txCenter, `TX${selected}`);
   }
   return result;
 }

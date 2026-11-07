@@ -1,4 +1,4 @@
-// Standalone decoder placeholder: receive RX2 PCM, return slow plain UTF-8 text.
+// Standalone decoder placeholder: receive RX3 PCM, return slow plain UTF-8 text.
 // This program never subscribes to or controls the backend.
 #include "wire.hpp"
 #include <arpa/inet.h>
@@ -33,7 +33,7 @@ int main(int argc,char** argv) {
             const std::string option=argv[i];
             if(option=="--help") {
                 std::cout<<"test_udp_text_decoder [--port 40910] [--interval-ms 1000]\n"
-                    "Receives QTR2 RX2 AUDIO at 12 kHz on loopback UDP; replies with abcdef, one letter per interval.\n";
+                    "Receives QTR2 RX3 AUDIO at 12 kHz on loopback UDP; replies with abcdef, one letter per interval.\n";
                 return 0;
             }
             if(++i==argc) throw std::runtime_error("Missing value for "+option);
@@ -47,7 +47,7 @@ int main(int argc,char** argv) {
         if(bind(audio.fd,reinterpret_cast<sockaddr*>(&local),sizeof(local))<0)
             throw std::runtime_error("Cannot bind decoder UDP port "+std::to_string(port));
         std::signal(SIGINT,stop);std::signal(SIGTERM,stop);
-        std::cerr<<"Dummy decoder: RX2 QTR2 audio on 127.0.0.1:"<<port<<"; one letter every "<<interval_ms<<" ms\n";
+        std::cerr<<"Dummy decoder: RX3 QTR2 audio on 127.0.0.1:"<<port<<"; one letter every "<<interval_ms<<" ms\n";
         using Clock=std::chrono::steady_clock;
         Clock::time_point last_rx{},next_text{};
         std::array<uint8_t,1201> buffer{};sockaddr_in peer{};
@@ -63,7 +63,7 @@ int main(int argc,char** argv) {
             if(n<0) {if(errno==EINTR) continue;throw std::runtime_error("Decoder UDP receive failed");}
             if(n!=544 || from.sin_addr.s_addr!=htonl(INADDR_LOOPBACK)) continue;
             const bridge::Bytes p(buffer.begin(),buffer.begin()+n);
-            if(!bridge::valid(p) || p[5]!=5 || bridge::get(p,8,4)!=2 || bridge::get(p,40,4)!=12000 ||
+            if(!bridge::valid(p) || p[5]!=5 || bridge::get(p,8,4)!=5 || bridge::get(p,40,4)!=12000 ||
                bridge::get(p,52,2)!=240 || bridge::get(p,54,2)!=2 || bridge::get(p,56,4)!=240 || !bridge::get(p,60,4)) continue;
             ++packets;
             const auto now=Clock::now();

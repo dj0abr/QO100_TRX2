@@ -326,6 +326,8 @@ class Receiver:
                             sink=self.channels[1].sink
                             if sink: sink(audio)
                         continue
+                    if audio.stream_id not in self.channels:
+                        continue  # RX3/RX4 belong to the webbridge monitoring decoders.
                     state = self.channels[audio.stream_id]
                     if (audio.session_id, audio.epoch) == state.identity:
                         state.received += 1

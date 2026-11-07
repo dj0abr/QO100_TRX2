@@ -420,7 +420,8 @@ export class RadioDisplay {
     }
     ctx.save();
     if (!this.zoom) ctx.globalAlpha = 0.5;
-    const markers = [[rx1, COLORS.rx1, false], [this.state.rx?.['2']?.frequency_hz, COLORS.rx2, false], [this.state.tx?.frequency_hz + 8089500000, COLORS.tx, true]];
+    const markers = [[rx1, COLORS.rx1, false], [this.state.rx?.['2']?.frequency_hz, COLORS.rx2, false],
+      [(this.selected === 2 ? this.state.tx2 : this.state.tx)?.frequency_hz + 8089500000, COLORS.tx, true]];
     for (const [hz, color, dashed] of markers) if (Number.isSafeInteger(hz) && x(hz) >= 0 && x(hz) <= w) {
       ctx.strokeStyle = color; ctx.lineWidth = this.dpr || 1;
       ctx.setLineDash(dashed ? [4 * this.dpr, 4 * this.dpr] : []);

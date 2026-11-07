@@ -127,7 +127,7 @@ def main():
                 time.sleep(.02)
             decoded=np.concatenate([p.samples for p in delivered[-25:] if p.stream_id==1])
             tone=2*abs(np.mean(decoded*np.exp(-2j*np.pi*1000*np.arange(len(decoded))/12000)))
-            assert .06<tone<.10,('HF USB loop amplitude',tone)
+            assert .03<tone<.05,('HF USB loop amplitude with shared IQ headroom',tone)
             mode(0)
             wait(lambda:receiver.applied_hz==10489760000)
             assert receiver.loop_rx_lo==739750000
@@ -146,7 +146,7 @@ def main():
             assert history[-1][1]==739750000,'Expired subscription left RX on TX band'
             audio_records=[row for row in history if audio_start+.05<row[0]<audio_end]
             assert audio_records and max(row[2] for row in audio_records)==0,'Audio echo transmitted RF IQ'
-            assert any(row[1]==1290250000 and row[2]>.05 for row in history),'HF test did not traverse TX IQ'
+            assert any(row[1]==1290250000 and row[2]>.025 for row in history),'HF test did not traverse TX IQ'
             print('Bit-exact 12-kHz echo, RF mute, source isolation, stale rejection; actual TX-IQ -> RX USB loop, '
                   'TX following, LO restore and lost-client restore verified')
         finally:
