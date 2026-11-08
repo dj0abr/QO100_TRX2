@@ -112,7 +112,7 @@ Choose an RX1 bandwidth preset or adjust the **lower/upper cutoff** separately. 
 
 - **RX1 → TX:** move TX to RX1's matching uplink frequency.
 - **TX → RX1:** move RX1 to TX's matching downlink frequency.
-- **Lautstärke:** speaker/headphone volume.
+- **RX volume:** speaker/headphone volume while receiving. The smaller red **TX slider** below controls receive audio during TX1 PTT and defaults to mute. The speaker button toggles between zero and the previous TX level. The TX monitoring level is saved in this browser.
 - **Kompressor:** raises average speech loudness. **100%** is the normal starting point; **0%** bypasses it.
 - **PTT:** transmit by holding the button. In **Setup**, you can choose click-on/click-off operation and optionally enable the spacebar.
 

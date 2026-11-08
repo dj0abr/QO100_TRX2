@@ -112,7 +112,7 @@ Eine Bandbreitenvorgabe für RX1 wählen oder **untere und obere Filtergrenze** 
 
 - **RX1 → TX:** TX auf die zu RX1 passende Uplinkfrequenz setzen.
 - **TX → RX1:** RX1 auf die zu TX passende Downlinkfrequenz setzen.
-- **Lautstärke:** Wiedergabelautstärke von Lautsprecher/Kopfhörer.
+- **Lautstärke RX:** Wiedergabelautstärke bei Empfang. Der kleinere rote **TX-Regler** darunter bestimmt die Empfangslautstärke während TX1-PTT, standardmäßig stumm. Das Lautsprechersymbol daneben schaltet auf 0 und beim nächsten Klick auf den vorherigen TX-Wert zurück. Die TX-Mithörlautstärke wird in diesem Browser gespeichert.
 - **Kompressor:** hebt die mittlere Sprachlautstärke an. **100 %** ist der normale Ausgangswert; **0 %** schaltet den Kompressor aus.
 - **PTT:** Zum Senden die Taste gedrückt halten. Unter **Setup** lassen sich alternativ Ein-/Ausschalten per Klick und optional die Leertaste aktivieren.
 

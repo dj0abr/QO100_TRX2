@@ -12,6 +12,7 @@ let noticeUntil = 0, settingsBase = {}, editingFrequency = '1', settingsTail = P
 let filterBusy = 0;
 let menuDismissedAt = -Infinity;
 let cursor = null, cursorFrame = 0;
+let txMonitorPrevious = 0;
 const pending = new Map(), wanted = new Map(), timers = new Map(), stateWaiters = new Set();
 const views = [new RadioDisplay($('fullband')), new RadioDisplay($('zoom-display'), true)];
 const frames = new FrameAssembler(frame => {
@@ -335,6 +336,7 @@ function controls() {
   if (selected === 2) $('tx-status').textContent = 'RX2 / TX2 · Digital';
   $('tx-dot').className = `live-dot${transmitting ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
   $('ptt').classList.toggle('sending', transmitting); $('ptt').setAttribute('aria-pressed', String(transmitting));
+  applyMonitorGain();
   renderPttHint();
   $('audio-details').textContent = radio.starting ? t('Audio wird gestartet …', 'Starting audio …') : radio.micBusy ? t('Mikrofon wird geöffnet …', 'Opening microphone …') : radio.running ? t(`Audio aktiv · Gerät ${radio.context.sampleRate / 1000} kHz · Funk 12 kHz · Mikrofon ${radio.microphone ? 'aktiv' : 'aus'}`, `Audio active · Device ${radio.context.sampleRate / 1000} kHz · Radio 12 kHz · Microphone ${radio.microphone ? 'active' : 'off'}`) : t('Audio ausgeschaltet', 'Audio off');
   $('audio-message').hidden = !(radio.error || radio.warning);
@@ -370,11 +372,13 @@ function stopPtt() {
   ptt.reset();
   const held = pttHeld; pttHeld = false; pttAcked = false; pttIntent++;
   radio.setCapture(null);
+  applyMonitorGain();
   if (held && operator && isOpen() && Number.isSafeInteger(state.tx?.frequency_hz)) send({type: 'tx', id: request = (request + 1) >>> 0, frequency_hz: state.tx.frequency_hz, ptt: false});
 }
 function startPtt() {
   if (selected !== 1 || pttHeld || !canControl() || (state.flags & 6) || !radio.microphone || !radio.running || wanted.has('tx')) return false;
   pttHeld = true; pttAcked = false;
+  applyMonitorGain();
   const intent = ++pttIntent;
   command('tx', {frequency_hz: state.tx.frequency_hz, ptt: true}).then(answer => {
     if (intent !== pttIntent || !pttHeld) return;
@@ -427,9 +431,36 @@ async function saveSettings(values) {
   return task;
 }
 function volumeChanged(persist = true) {
-  const gain = Number($('volume').value); radio.setGain(gain); rangePaint($('volume'));
+  const gain = Number($('volume').value); rangePaint($('volume'));
   $('volume-value').textContent = `${Math.round(gain / 20 * 100)} %`; $('volume').title = `Audioverstärkung ${gain.toFixed(2)}×`;
+  applyMonitorGain();
   if (persist && canControl()) debounce('volume', () => saveSettings({gui_audio_gain: gain}).catch(report), 350);
+}
+function applyMonitorGain() {
+  const transmitting = selected === 1 && (operator ? pttHeld : !!state.tx?.ptt);
+  const gain = Number($(transmitting ? 'volume-tx' : 'volume').value);
+  if (radio.gain !== gain) radio.setGain(gain);
+  $('listen-volume').dataset.mode = transmitting ? 'tx' : 'rx';
+}
+function txVolumeChanged(persist = true) {
+  const input = $('volume-tx'), gain = Number(input.value), muted = gain === 0;
+  if (!muted) txMonitorPrevious = gain;
+  rangePaint(input); $('volume-tx-value').textContent = `${Math.round(gain / 20 * 100)} %`;
+  const button = $('tx-listen-mute');
+  button.setAttribute('aria-pressed', String(muted));
+  button.title = muted ? t('TX-Mithören einschalten', 'Unmute TX monitoring') : t('TX-Mithören stummschalten', 'Mute TX monitoring');
+  button.setAttribute('aria-label', button.title);
+  button.querySelector('use').setAttribute('href', muted ? '#speaker-muted' : '#speaker');
+  if (persist) {
+    writePreference('txMonitorVolume', gain);
+    writePreference('txMonitorPrevious', txMonitorPrevious);
+  }
+  applyMonitorGain();
+}
+function toggleTxMonitorMute() {
+  const input = $('volume-tx');
+  input.value = Number(input.value) > 0 ? 0 : txMonitorPrevious || Number($('volume').value) || 4;
+  txVolumeChanged();
 }
 function compressorLabel() { const value = Number($('compressor').value); $('compressor-value').textContent = value === 0 ? 'Bypass' : `${value.toLocaleString('de-DE', {maximumFractionDigits: 1})} %`; rangePaint($('compressor')); }
 function openSetup() {
@@ -594,6 +625,11 @@ for (const button of document.querySelectorAll('[data-bandwidth]')) button.oncli
 $('nr').oninput = () => { $('nr-value').textContent = `${$('nr').value} %`; rangePaint($('nr')); debounce('nr', () => checked('nr', {percent: Number($('nr').value)}).catch(report)); };
 $('compressor').oninput = () => { compressorLabel(); debounce('compressor', () => checked('compressor', {percent: Number($('compressor').value)}).catch(report)); };
 $('volume').oninput = () => volumeChanged();
+$('volume-tx').oninput = () => txVolumeChanged();
+$('tx-listen-mute').onclick = toggleTxMonitorMute;
+$('tx-listen-mute').addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') e.stopPropagation();
+});
 let decoderSource = readPreference('decoderSource') === '4' ? 4 : 3;
 const decoderScroll = {3: {top: 0, follow: true}, 4: {top: 0, follow: true}};
 const decoderPending = {3: '', 4: ''};
@@ -715,6 +751,7 @@ setInterval(() => { if (!ptt.checkTimeout() && pttHeld && operator) send({type: 
 $('language').value = languagePreference();
 $('language').onchange = () => {
   setLanguagePreference($('language').value);
+  txVolumeChanged(false);
   views.forEach(view => view.setLanguage(language));
   selectReceiver(selected); renderFilter(); renderNoiseLevels();
   setFullbandAxis(views[0].axisMode); decoderLabel(); controls();
@@ -722,4 +759,8 @@ $('language').onchange = () => {
 applyLanguage(); views.forEach(view => view.setLanguage(language));
 bindPlots(views[0], 250); bindPlots(views[1], 25);
 bindFrequency(1, $('frequency1')); bindFrequency(2, $('frequency2')); bindFrequency('tx', $('frequencytx'));
-volumeChanged(false); renderFilter(); renderWaterfallSettings(); setSpectrumAverage(readPreference('spectrumAverage') ?? 1); setDisplayColor(readPreference('displayColor') ?? 'blue'); setFullbandAxis('bandplan'); selectReceiver(1); controls(); connect();
+const savedTxMonitorVolume = Number(readPreference('txMonitorVolume') ?? 0);
+$('volume-tx').value = Number.isFinite(savedTxMonitorVolume) ? savedTxMonitorVolume : 0;
+const savedTxMonitorPrevious = Number(readPreference('txMonitorPrevious') ?? 0);
+txMonitorPrevious = Number.isFinite(savedTxMonitorPrevious) ? Math.max(0, Math.min(20, savedTxMonitorPrevious)) : 0;
+txVolumeChanged(false); volumeChanged(false); renderFilter(); renderWaterfallSettings(); setSpectrumAverage(readPreference('spectrumAverage') ?? 1); setDisplayColor(readPreference('displayColor') ?? 'blue'); setFullbandAxis('bandplan'); selectReceiver(1); controls(); connect();

@@ -330,6 +330,31 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .qso-control .range { height: 6px; margin: 24px 4px 12px; }
 .qso-control .range::-webkit-slider-thumb { width: 17px; height: 17px; }
 #compressor { --range-color: #e8bd68; }
+.volume-control .control-heading { flex-wrap: nowrap; }
+.qso-control.volume-control > .range { height: 5px; margin: 6px 4px; }
+.tx-volume-heading { display: flex; align-items: center; justify-content: space-between; color: var(--tx); font-size: 10px; line-height: 13px; }
+.tx-volume-heading output { font: 10px var(--mono); white-space: nowrap; }
+.tx-volume-slider { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 7px; height: 24px; }
+.tx-listen-mute { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 3px; border: 1px solid #824a4c; border-radius: 4px; background: #34242a; color: var(--tx); }
+.tx-listen-mute .icon { width: 16px; height: 16px; }
+.tx-listen-mute .mute-tag { display: none; }
+.tx-listen-mute[aria-pressed="true"] { background: #73333b; color: #ffe9e6; }
+.qso-control.volume-control #volume-tx { --range-color: var(--tx); height: 4px; width: 100%; margin: 0; }
+.qso-control.volume-control #volume-tx::-webkit-slider-thumb { width: 12px; height: 12px; background: #fac1ba; border-color: #ffe3df; }
+.qso-control.volume-control #volume-tx::-moz-range-thumb { width: 9px; height: 9px; background: #fac1ba; border-color: #ffe3df; }
+@media (max-width: 800px) {
+  .qso-control.volume-control { display: grid; grid-template-columns: 24px minmax(0, 1fr) 28px; grid-template-rows: 20px 20px; align-content: start; align-items: center; gap: 2px 4px; }
+  .volume-control .control-heading, .tx-volume-heading, .tx-volume-slider { display: contents; }
+  .volume-control .control-heading > .icon, .volume-control .volume-word, .tx-volume-heading label { display: none; }
+  .volume-control .control-heading > span { grid-column: 1; grid-row: 1; font-size: 9px; }
+  .volume-control .control-heading output { grid-column: 3; grid-row: 1; width: auto; margin: 0; text-align: right; font-size: 10px; }
+  .qso-control.volume-control > #volume { grid-column: 2; grid-row: 1; width: 100%; margin: 0; min-height: 0; height: 5px; }
+  .volume-control .tx-volume-heading output { grid-column: 3; grid-row: 2; text-align: right; }
+  .volume-control .tx-listen-mute { grid-column: 1; grid-row: 2; height: 20px; padding: 1px; gap: 1px; }
+  .volume-control .tx-listen-mute .icon { width: 11px; height: 11px; }
+  .volume-control .tx-listen-mute .mute-tag { display: inline; font-size: 7px; }
+  .qso-control.volume-control #volume-tx { grid-column: 2; grid-row: 2; min-height: 0; }
+}
 .field-label output { color: #c5d5df; font: 11px var(--mono); }
 .nr-label { margin-top: 21px; }
 .filter-note { margin-top: 11px; }

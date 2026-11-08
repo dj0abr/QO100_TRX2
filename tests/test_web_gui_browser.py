@@ -91,7 +91,13 @@ def main():
             call('POST',f'/session/{session}/actions',{'actions':[{'type':'key','id':'keyboard','actions':[{'type':action,'value':value}]}]})
         def expect_ptt(enabled):
             observer.messages.clear()
-            return snapshot(lambda s:s.get('tx',{}).get('ptt') is enabled)
+            state=snapshot(lambda s:s.get('tx',{}).get('ptt') is enabled)
+            mode='tx' if enabled and execute('return document.getElementById("zoom-display").dataset.receiver')=='1' else 'rx'
+            wait(lambda:execute('return document.getElementById("listen-volume").dataset.mode')==mode)
+            if execute('return !!window.__radioNode'):
+                slider='volume-tx' if mode=='tx' else 'volume'
+                wait(lambda:execute('return window.__playbackGain===Number(document.getElementById(arguments[0]).value)',slider))
+            return state
         def zoom_follows_rx():
             return execute('''const zoom=document.getElementById('zoom-display'),rx=zoom.dataset.receiver;
                 const label=zoom.querySelector('.frequency-axis span');
@@ -147,6 +153,7 @@ def main():
                         const post=node.port.postMessage.bind(node.port);
                         node.port.postMessage=(message,...rest)=>{
                             if(message.type==='samples'){window.__audioSource=message.source;window.__audioPeak=Math.max(...message.samples.map(Math.abs));}
+                            if(message.type==='gain')window.__playbackGain=message.value;
                             return post(message,...rest);
                         };
                     }
@@ -162,6 +169,8 @@ def main():
             wait(lambda:execute('return document.getElementById("decoder-text").textContent')==decoder_probe)
             assert execute('return document.querySelector("#decoder-text b")===null'),'Decoder text became HTML'
             assert execute('return document.getElementById("audio-stream")===null'),'RX2 browser audio selector remained'
+            assert execute('return document.getElementById("volume-tx").value')=='0'
+            assert execute('return document.getElementById("tx-listen-mute").getAttribute("aria-pressed")')=='true'
             assert execute('return document.getElementById("decoder-panel").hidden'),'Decoder should initially be optional'
             original_zoom_height=execute('return document.getElementById("zoom").getBoundingClientRect().height')
             original_display_height=execute('return document.getElementById("zoom-display").getBoundingClientRect().height')
@@ -521,6 +530,13 @@ def main():
             assert execute('return document.getElementById("ptt-hold").checked')
             click('[data-close="setup-dialog"]')
             key('keyDown');expect_ptt(True);key('keyUp');expect_ptt(False)
+            # Clicking the monitor button while Space is held must not swallow PTT release.
+            execute('document.activeElement.blur()')
+            key('keyDown');expect_ptt(True)
+            click('#tx-listen-mute');expect_ptt(True)
+            key('keyUp');expect_ptt(False)
+            click('#tx-listen-mute')
+            execute('document.activeElement.blur()')
             execute('document.getElementById("decoder-toggle").focus()')
             key('keyDown');key('keyUp');expect_ptt(False)
             assert not execute('return document.getElementById("decoder-panel").hidden')
@@ -545,7 +561,38 @@ def main():
             click('[data-close="setup-dialog"]')
             click('#ptt');expect_ptt(True);time.sleep(.3);expect_ptt(True)
             assert 'Klick: aus' in execute('return document.getElementById("ptt-hint").textContent')
+            # Measure actual playback in the microphone audio loop, independently of TX samples.
+            execute('''const node=window.__radioNode,analyser=node.context.createAnalyser();
+                analyser.fftSize=2048;node.connect(analyser);window.__monitorAnalyser=analyser;
+                window.__monitorRms=()=>{const samples=new Float32Array(analyser.fftSize);
+                    analyser.getFloatTimeDomainData(samples);return Math.sqrt(samples.reduce((sum,v)=>sum+v*v,0)/samples.length);};''')
+            wait(lambda:execute('return window.__monitorRms()')<1e-9)
+            original_rx_gain=execute('return document.getElementById("volume").value')
+            changed('#volume-tx',3.5);expect_ptt(True)
+            wait(lambda:execute('return window.__monitorRms()')>1e-6)
+            changed('#volume',6);expect_ptt(True)
+            assert execute('return window.__playbackGain')==3.5,'RX slider changed TX monitoring'
+            click('#tx-listen-mute');expect_ptt(True)
+            wait(lambda:execute('return window.__monitorRms()')<1e-9)
+            mic_packets=len([p for p in proxy.log if p[5]==8])
+            time.sleep(.3)
+            assert len([p for p in proxy.log if p[5]==8])>mic_packets+5,'Monitor mute stopped microphone transmission'
+            click('#tx-listen-mute');expect_ptt(True)
+            assert execute('return document.getElementById("volume-tx").value')=='3.5'
+            wait(lambda:execute('return window.__monitorRms()')>1e-6)
+            changed('#volume',0);expect_ptt(True)
+            assert execute('return window.__playbackGain')==3.5
+            changed('#volume',original_rx_gain)
+            changed('#volume-tx',7.5);click('#tx-listen-mute');expect_ptt(True)
+            assert execute('return localStorage.getItem("qo100.txMonitorPrevious")')=='7.5'
+            execute('window.__radioNode.disconnect(window.__monitorAnalyser)')
             click('#ptt');expect_ptt(False)
+            # Native keyboard activation of the mute button must never key the transmitter.
+            execute('document.getElementById("tx-listen-mute").focus()')
+            key('keyDown');key('keyUp');expect_ptt(False)
+            assert execute('return document.getElementById("volume-tx").value')=='7.5'
+            click('#tx-listen-mute')
+            execute('document.activeElement.blur()')
             key('keyDown');expect_ptt(True)
             cdp('Input.dispatchKeyEvent',{'type':'keyDown','key':' ','code':'Space','windowsVirtualKeyCode':32,'autoRepeat':True})
             key('keyUp');time.sleep(.2);expect_ptt(True)
@@ -760,6 +807,10 @@ def main():
             assert execute('return document.documentElement.lang==="en" && document.getElementById("language").value==="en"')
             changed('#language','de')
             assert execute('return document.getElementById("ptt-toggle").checked && document.getElementById("ptt-space").checked')
+            assert execute('return document.getElementById("volume-tx").value')=='0'
+            click('#tx-listen-mute')
+            assert execute('return document.getElementById("volume-tx").value')=='7.5'
+            click('#tx-listen-mute')
             assert execute('return [document.getElementById("waterfall-floor").value,document.getElementById("waterfall-ceiling").value]')==['-7','37']
             assert execute('return document.getElementById("spectrum-average").value')=='20'
             assert execute('return document.getElementById("display-color").value')=='green'
