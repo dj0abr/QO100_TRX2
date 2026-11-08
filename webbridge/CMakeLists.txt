@@ -11,6 +11,7 @@ find_package(Threads REQUIRED)
 add_executable(qo100_webbridge main.cpp bridge.cpp server.cpp)
 target_include_directories(qo100_webbridge PRIVATE ${Boost_INCLUDE_DIRS} ../include)
 target_compile_definitions(qo100_webbridge PRIVATE BOOST_ERROR_CODE_HEADER_ONLY
+    QO100_SOFTWARE_VERSION="${PROJECT_VERSION}"
     QO100_WEB_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web")
 target_compile_options(qo100_webbridge PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(qo100_webbridge PRIVATE nlohmann_json::nlohmann_json Threads::Threads)

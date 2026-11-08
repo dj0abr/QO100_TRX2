@@ -50,7 +50,6 @@
             <div class="tx-return"><span>↳ Downlink</span><span id="tx-downlink" class="downlink-value">—</span><span class="unit">MHz</span></div>
             <div class="cursor-frequency" title="Frequenz unter dem Mauszeiger im Spektrum oder Wasserfall" data-en-title="Frequency under the pointer in the spectrum or waterfall">
               <div><span data-en="Cursor · Downlink">Maus · Downlink</span><output id="cursor-downlink" class="cursor-value">—</output><span class="unit">MHz</span></div>
-              <div><span>Pluto RX</span><output id="cursor-pluto-rx" class="cursor-value">—</output><span class="unit">MHz</span></div>
             </div>
           </div>
           <span class="touch-hint tx-touch-hint" data-en="← Swipe on TX: fine-tune TX →">← Wischen auf TX: TX fein abstimmen →</span>
@@ -111,7 +110,7 @@
           <header class="display-heading"><div class="display-title"><h2 id="fullband-title">FULLBAND</h2><span id="fullband-axis-mode">600 kHz · Bandplan</span></div><div class="display-meta"><div class="legend"><span class="rx1-color"><i></i>RX1</span><span class="rx2-color"><i></i>RX2</span><span class="tx-color"><i></i>TX</span></div><span class="wheel-step" data-en="Mouse wheel">Mausrad <b>250 Hz</b></span></div></header>
           <div class="plot-body"><canvas id="wide-spectrum" class="spectrum" data-spectrum data-tune aria-label="Fullband-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty" data-en="Waiting for spectrum …">Warte auf Spektrum …</span></div>
           <div class="fullband-axis-row"><div id="fullband-axis" class="frequency-axis fullband-frequency-axis" aria-label="Fullband-Frequenzen in MHz"></div><button id="fullband-axis-switch" type="button" class="axis-switch" aria-label="Frequenzdarstellung wechseln" title="Frequenzdarstellung wechseln">↻</button></div>
-          <div class="waterfall"><canvas id="wide" data-waterfall data-tune aria-label="Fullband-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas><span class="waterfall-caption" data-en="WATERFALL · FULLBAND">WASSERFALL · FULLBAND</span></div>
+          <div class="waterfall"><canvas id="wide" data-waterfall data-tune aria-label="Fullband-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas></div>
           <footer class="display-footer"><span id="wide-help" class="desktop-note">Links: RX1 + TX · Rechts: nur RX1 · Shift + Rad: TX</span><span id="touch-help" class="mobile-note">Tippen: RX1 + TX</span><span>600 kHz</span></footer>
         </section>
         <section id="zoom-display" class="display" aria-labelledby="zoom-title">
@@ -119,7 +118,7 @@
           <div class="plot-body"><canvas id="zoom-spectrum" class="spectrum" data-spectrum data-tune aria-label="RX1-Zoom-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty">Warte auf RX1-Zoom …</span></div>
           <div class="frequency-axis" aria-label="RX1-Zoom-Frequenzen in MHz"></div>
           <div id="zoom-output" class="zoom-output">
-            <div class="waterfall"><canvas id="zoom" data-waterfall data-tune aria-label="RX1-Zoom-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas><span id="zoom-waterfall-caption" class="waterfall-caption">WASSERFALL · RX1</span></div>
+            <div class="waterfall"><canvas id="zoom" data-waterfall data-tune aria-label="RX1-Zoom-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas></div>
             <section id="decoder-panel" class="decoder-panel" aria-labelledby="decoder-title" hidden>
               <header class="decoder-heading"><h2 id="decoder-title">Monitoring</h2><div class="decoder-sources" role="radiogroup" aria-label="Decoderquelle" data-en-aria-label="Decoder source"><label><input id="decoder-source3" type="radio" name="decoder-source" value="3" checked>RX3 · FT8</label><label><input id="decoder-source4" type="radio" name="decoder-source" value="4">RX4 · PSK</label></div><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den ausgewählten Text in diesem Browser löschen" data-en-title="Clear only the selected text in this browser">Text löschen</button></header>
               <pre id="decoder-text" class="decoder-text" role="log" aria-live="polite" aria-label="RX3 FT8 Decoder-Text" tabindex="0"></pre>
@@ -174,12 +173,12 @@
           <div class="field-help" id="hardware-details">Hardwarewerte werden geladen.</div>
         </div><p class="field-help" data-en="Hardware changes turn PTT off. Controls are locked during reconfiguration.">Hardwareänderungen schalten PTT aus. Während der Umstellung ist die Bedienung gesperrt.</p>
           <p id="settings-message" class="form-message" role="status"></p>
-          <div class="form-footer"><span id="settings-revision"></span><button id="save" type="submit" class="primary-button" data-en="Save changes" data-control>Änderungen speichern</button></div>
+          <div class="form-footer"><span id="software-version">Version —</span><button id="save" type="submit" class="primary-button" data-en="Save changes" data-control>Änderungen speichern</button></div>
         </fieldset>
       </form>
       <fieldset><legend data-en="Test and diagnostics">Test und Diagnose</legend><div class="form-grid"><label>Test-Loop<select id="loop" data-control><option value="0" data-en="Normal operation">Normalbetrieb</option><option value="1" data-en="Audio loop · no RF">Audio-Loop · ohne HF</option><option value="2" data-en="RF loop">HF-Loop</option></select></label><div class="field-help" id="compressor-details">Kompressorwerte werden geladen.</div></div><p class="field-help" data-en="Audio loop plays back the microphone while PTT is pressed. RF loop requires an RF coupling.">Audio-Loop gibt das Mikrofon bei gedrückter PTT zurück. HF-Loop benötigt eine HF-Kopplung.</p></fieldset>
     </div>
-    <div class="dialog-footer"><a href="/test.html" target="_blank" rel="noopener" data-en="Technical test GUI">Technisches Test-GUI</a><button type="button" class="small-button" data-close="setup-dialog" data-en="Close">Schließen</button></div>
+    <div class="dialog-footer"><button type="button" class="small-button" data-close="setup-dialog" data-en="Close">Schließen</button></div>
   </dialog>
   <dialog id="frequency-dialog" class="frequency-dialog" aria-labelledby="frequency-title"><form id="frequency-form"><div class="dialog-heading"><h2 id="frequency-title">Frequenz eingeben</h2><button type="button" class="dialog-close" data-close="frequency-dialog" aria-label="Schließen" data-en-aria-label="Close">×</button></div><label data-en="Frequency (MHz)">Frequenz (MHz)<input id="frequency-input" type="text" inputmode="decimal" autocomplete="off" required></label><p id="frequency-error" class="form-message" role="status"></p><div class="dialog-footer"><button type="button" class="small-button" data-close="frequency-dialog" data-en="Cancel">Abbrechen</button><button type="submit" class="primary-button" data-control data-en="Tune">Abstimmen</button></div></form></dialog>
   <script type="module" src="/app.js"></script>

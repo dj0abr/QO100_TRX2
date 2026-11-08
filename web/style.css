@@ -127,7 +127,6 @@
     .waterfall { position: relative; overflow: hidden; height: clamp(100px, 14.4vh, 175px); background: #071522; }
     .waterfall > img { display: block; width: 100%; height: 100%; object-fit: fill; }
     .waterfall-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
-    .waterfall-caption { position: absolute; bottom: 7px; right: 8px; color: #7698ae; font: 8px var(--mono); text-shadow: 0 1px 2px #000; }
     .display-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 11px; background: #111b24; color: #7f99ac; font-size: 9px; border-top: 1px solid #223443; }
     .display-footer .filter-caption { color: #9cb8c9; }
     .qso-controls { margin-top: 16px; display: grid; grid-template-columns: 194px minmax(0, 1fr) minmax(0, 1fr) 154px; gap: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
@@ -348,9 +347,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .sidebar { scrollbar-width: thin; scrollbar-color: #3b5366 #111c26; }
 .display [data-tune] { cursor: crosshair; touch-action: pan-y; }
 .waterfall > canvas[data-waterfall] { display: block; width: 100%; height: 100%; }
-.waterfall-overlay, .waterfall-caption, .display-empty { pointer-events: none; }
+.waterfall-overlay, .display-empty { pointer-events: none; }
 .display-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #7c98ac; }
-#zoom-display[data-receiver="2"] #zoom-title, #zoom-display[data-receiver="2"] #zoom-waterfall-caption { color: var(--rx2); }
+#zoom-display[data-receiver="2"] #zoom-title { color: var(--rx2); }
 .ptt { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .ptt:disabled { opacity: .55; }
 .ptt.sending { background: #a93740; border-color: #ff9b91; box-shadow: 0 0 0 2px #e55f6140; }

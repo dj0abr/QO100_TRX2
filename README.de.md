@@ -61,7 +61,7 @@ Das Terminal offen lassen. **Strg+C** beendet alle Programme.
 
 </details>
 
-Der erste Browser erhält die Steuerung; weitere Browser können zuschauen und mithören. Nach fünf Minuten ohne Bedienung neu verbinden, um die Steuerung wieder zu erhalten, sofern sie frei ist.
+Der erste Browser erhält die Steuerung; weitere Browser können zuschauen und mithören. Die Verbindung bleibt auch ohne Bedienung bestehen. PTT wird nach spätestens fünf Minuten automatisch ausgeschaltet.
 
 ## Bedienung
 
@@ -82,6 +82,8 @@ Funktioniert im Spektrum und im Wasserfall:
 | Umschalt + Mausrad | Nur TX abstimmen. |
 
 Ein Doppelklick auf eine RX-Frequenz öffnet die direkte Frequenzeingabe; für TX genügt ein Klick auf die TX-Frequenz.
+
+Rechts neben der Downlink-Anzeige steht die Downlink-Frequenz unter dem Mauszeiger. Die Anzeige funktioniert über Spektrum, Wasserfall und Frequenzachse im Fullband sowie im RX1-/RX2-Zoom.
 
 ![Empfangs- und Sendefrequenzen](docs/frequency.png)
 

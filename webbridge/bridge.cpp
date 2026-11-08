@@ -60,7 +60,7 @@ Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp
         digital_.bind({net::ip::make_address_v4("127.0.0.1"),config_.digital_bridge_port});
         digital_.connect({net::ip::make_address_v4("127.0.0.1"),config_.digital_audio_port});
     }
-    state_={{"type","state"},{"session",0},{"ready",false},{"settings",Json::object()},
+    state_={{"type","state"},{"software_version",QO100_SOFTWARE_VERSION},{"session",0},{"ready",false},{"settings",Json::object()},
         {"revision","0"},{"flags",0},{"rx",Json::object()},{"tx",Json::object()},
         {"filter",Json::object()},{"compressor",Json::object()},{"nr",Json::object()},{"loop",Json::object()},{"tx2",Json::object()}};
 }

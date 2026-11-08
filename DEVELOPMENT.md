@@ -50,8 +50,9 @@ RX1/RX2 wählt das bediente Paar und den hörbaren Audiokanal.
 
 **Browser-GUI:** Der separate Adapter `qo100_webbridge` verbindet die GUI-UDP-Schnittstelle
 mit HTTP/WebSocket und liefert eine HTML/JS-Testseite aus. Ein Bediener, beliebig weitere
-Zuschauer bis zum konfigurierten Verbindungslimit; nach fünf Minuten ohne Bedienung wird
-der Bediener abgemeldet. [Start und WebSocket-Protokoll](docs/webbridge.md).
+Zuschauer bis zum konfigurierten Verbindungslimit. Empfang bleibt ohne Bedienaktivität
+verbunden; die fünfminütige PTT-Abschaltung gilt unabhängig davon.
+[Start und WebSocket-Protokoll](docs/webbridge.md).
 
 ```sh
 # Zusätzliche Header-Pakete unter Debian/Ubuntu:

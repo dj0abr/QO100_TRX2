@@ -477,7 +477,8 @@ def main():
             changed('#compressor',112.5);snapshot(lambda s:s.get('compressor',{}).get('percent')==112.5)
             # Settings snapshots arrive separately from DSP acknowledgements; wait for their revision.
             settled=snapshot(lambda s:float(s.get('settings',{}).get('tx1_compressor_percent',0))==112.5 and float(s.get('settings',{}).get('rx1_nr_percent',0))==47)
-            wait(lambda:execute('return document.getElementById("settings-revision").textContent')==f'Revision {settled["revision"]}')
+            wait(lambda:execute('return document.getElementById("settings-form").dataset.revision')==settled['revision'])
+            assert execute('return document.getElementById("software-version").textContent')==f'Version {settled["software_version"]}'
             click('#setup')
             assert execute('return !document.querySelector("#setup-dialog [data-setting=gui_display_floor]")')
             changed('[data-setting="rx3_frequency_hz"]',10489540321)

@@ -1,5 +1,5 @@
 import {DOWNLINK_UPLINK_HZ, frequencyText, parseMHz, validateFrequency, tuneTargets, wheelTurns, wheelTargets, filterValues} from './tuning.js';
-import {FrameAssembler, RadioDisplay, displayOffsets, axisFrequency, AXIS_MODES} from './radio-display.js';
+import {FrameAssembler, RadioDisplay, displayOffsets, AXIS_MODES} from './radio-display.js';
 import {RadioAudio} from './audio.js';
 import {PttControl} from './ptt-control.js';
 import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
@@ -195,12 +195,9 @@ function queueCursorUpdate() {
   cursorFrame = requestAnimationFrame(() => {
     cursorFrame = 0;
     const downlink = cursor?.view.frequencyAt({currentTarget: cursor.canvas, clientX: cursor.x});
-    const pluto = Number.isSafeInteger(downlink) ? axisFrequency(downlink, 'pluto-rx', state.settings) : undefined;
-    for (const [id, hz] of [['cursor-downlink', downlink], ['cursor-pluto-rx', pluto]]) {
-      const node = $(id), text = frequencyText(hz);
-      if (node.textContent !== text) node.textContent = text;
-      node.dataset.hz = Number.isSafeInteger(hz) ? String(hz) : '';
-    }
+    const node = $('cursor-downlink'), text = frequencyText(downlink);
+    if (node.textContent !== text) node.textContent = text;
+    node.dataset.hz = Number.isSafeInteger(downlink) ? String(downlink) : '';
   });
 }
 function rangePaint(input) {
@@ -274,7 +271,6 @@ function renderZoomLabels() {
   view.spectrum.setAttribute('aria-label', t(`${rx}-Zoom-Spektrum, zum Abstimmen anklicken`, `${rx} zoom spectrum, click to tune`));
   view.waterfall.setAttribute('aria-label', t(`${rx}-Zoom-Wasserfall, zum Abstimmen anklicken`, `${rx} zoom waterfall, click to tune`));
   view.axis.setAttribute('aria-label', t(`${rx}-Zoom-Frequenzen in MHz`, `${rx} zoom frequencies in MHz`));
-  $('zoom-waterfall-caption').textContent = `${t('WASSERFALL', 'WATERFALL')} · ${rx}`;
 }
 function applyFilter(values) {
   filterBusy++;
@@ -313,7 +309,8 @@ function update(next) {
   if (document.activeElement !== $('loop')) $('loop').value = next.loop?.mode ?? 0;
   $('hardware-details').textContent = next.settings?.pluto_rx_hz ? `Pluto RX: ${frequencyText(Number(next.settings.pluto_rx_hz))} MHz · Pluto TX: ${frequencyText(Number(next.settings.pluto_tx_hz))} MHz` : t('Hardwarewerte werden geladen.', 'Loading hardware values.');
   $('compressor-details').textContent = `${t('Verdichtung', 'Compression')}: ${Number(next.compressor?.compression_db || 0).toFixed(1)} dB · ${t('Begrenzung', 'Limiting')}: ${Number(next.compressor?.limiting_db || 0).toFixed(1)} dB`;
-  $('settings-revision').textContent = next.revision ? `Revision ${next.revision}` : '';
+  $('software-version').textContent = next.software_version ? `Version ${next.software_version}` : 'Version —';
+  $('settings-form').dataset.revision = next.revision || '';
   renderWaterfallSettings(); views.forEach(view => view.update(next, selected)); controls();
   for (const waiter of stateWaiters) waiter(next);
 }

@@ -61,7 +61,7 @@ Leave the terminal open. **Ctrl+C** stops all programs.
 
 </details>
 
-The first browser gets control; additional browsers can watch and listen. After five minutes without user activity, reconnect to regain control if it is free.
+The first browser gets control; additional browsers can watch and listen. The connection stays open without user activity. PTT turns off automatically after five minutes at the latest.
 
 ## Operation
 
@@ -82,6 +82,8 @@ Works in both the spectrum and waterfall:
 | Shift + wheel | Tune TX only. |
 
 Double-click an RX frequency to enter it directly; click the TX frequency for direct TX entry.
+
+The readout to the right of the downlink display shows the downlink frequency under the mouse pointer. It works over the spectrum, waterfall and frequency axis in Fullband and the RX1/RX2 zoom.
 
 ![Receiver and transmitter frequencies](docs/frequency.png)
 
