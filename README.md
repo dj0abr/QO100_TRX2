@@ -10,7 +10,7 @@ This project is a fully functional software-based transceiver for QO-100, operat
 
 ## System Overview
 
-![QO100 Multichannel Web Transceiver block diagram](docs/blockschaltbild.png)
+![QO100 Multichannel Web Transceiver block diagram](docs/blockschaltbild_english.png)
 
 A single Pluto serves four parallel receive channels and two transmit paths.
 **RX1/TX1** provide voice operation in the browser, while **RX2/TX2** connect external digital programs such as WSJT-X or fldigi through virtual audio devices.
