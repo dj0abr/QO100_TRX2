@@ -30,6 +30,15 @@ cd QO100_TRX2
 The script installs the required packages and builds everything. On an SBC, missing libraries are built automatically for its processor.
 For later builds, just run `./build_all.sh`.
 
+### Pluto over Ethernet
+
+- Connect a Pluto-compatible USB Ethernet adapter using a **USB OTG cable**. Supply **5 V** through an OTG Y-cable or Pluto's separate power connector.
+- In Pluto's `config.txt`, leave **`ipaddr_eth` empty** under `[USB_ETHERNET]` to obtain an IP via DHCP. Safely eject the virtual USB drive after editing.
+- Find the IP in your router, preferably reserve it via DHCP, and enter it under **Setup → Pluto connection: Network**.
+- **Avoid address conflicts:** Pluto's USB network (default `192.168.2.x`) and Ethernet LAN must use different subnets.
+
+Details: [AMSAT-DL: Pluto networking](https://wiki.amsat-dl.org/doku.php?id=de:tricks:pluto_network).
+
 ## Run the Software
 
 From the project folder:
