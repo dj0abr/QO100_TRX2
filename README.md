@@ -8,6 +8,15 @@ This project is a fully functional software-based transceiver for QO-100, operat
 
 ![QO100_TRX2 WebGUI](docs/WebGUI.png)
 
+## System Overview
+
+![QO100 Multichannel Web Transceiver block diagram](docs/blockschaltbild.png)
+
+A single Pluto serves four parallel receive channels and two transmit paths.
+**RX1/TX1** provide voice operation in the browser, while **RX2/TX2** connect external digital programs such as WSJT-X or fldigi through virtual audio devices.
+**RX3** monitors FT8 and **RX4** the PSK beacon on fixed frequencies configurable in Setup; both decoders run independently of normal radio operation and send their text to the WebGUI.
+The two transmit paths are combined into a shared IQ signal for the Pluto.
+
 ## Hardware Requirements
 
 - Pluto SDR, connected via USB or a USB-to-Ethernet adapter.
