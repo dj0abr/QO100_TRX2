@@ -147,7 +147,7 @@ void Bridge::roles() {
 }
 uint64_t Bridge::join(std::shared_ptr<Peer> peer) {
     if(stopping_ || clients_.size()>=config_.max_clients) {peer->close("Server full");return 0;}
-    const auto id=++next_client_;const auto now=Clock::now();clients_[id]={std::move(peer),now,now};
+    const auto id=++next_client_;const auto now=Clock::now();clients_[id]={std::move(peer),now};
     if(!owner_) owner_=id; // Only a NEW connection can acquire a vacant seat.
     roles();state_["ready"]=ready();text(id,state_);
     std::cout<<"Browser "<<id<<" joined as "<<(owner_==id?"operator":"viewer")<<'\n'<<std::flush;
@@ -336,7 +336,9 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
         id=j.value("id",Json(nullptr));if(!id.is_null()) integer(j,"id");
         const auto type=j.at("type").get<std::string>();
         if(type=="state") {state_["ready"]=ready();text(client,state_);return;}
-        if(type=="heartbeat") {clients_.at(client).heartbeat=Clock::now();return;}
+        // Retained for existing GUIs. WebSocket ping/pong checks liveness without
+        // depending on JavaScript timers in a background or briefly busy tab.
+        if(type=="heartbeat") return;
         if(client!=owner_) {error(client,id,"read_only","Only the operator can send commands");return;}
         if(type=="activity") {clients_.at(client).activity=Clock::now();return;}
         if(type=="ptt_keepalive") {if(ptt_requested_) ptt_until_=Clock::now()+std::chrono::milliseconds(750);return;}
@@ -419,11 +421,10 @@ void Bridge::tick() {
     if(now>=next_settings_) {discover();next_settings_=now+std::chrono::seconds(2);}
     if(owner_ && clients_.count(owner_)) {
         const auto c=clients_.at(owner_);
-        const bool idle=now-c.activity>=std::chrono::seconds(config_.idle_seconds);
-        if(idle || now-c.heartbeat>std::chrono::seconds(6)) {
-            const auto id=owner_;revoke(idle?"idle":"heartbeat_timeout");
-            text(id,{{"type","closed"},{"reason",idle?"idle":"heartbeat_timeout"}});
-            c.peer->close(idle?"idle":"heartbeat_timeout");
+        if(config_.idle_seconds && now-c.activity>=std::chrono::seconds(config_.idle_seconds)) {
+            const auto id=owner_;revoke("idle");
+            text(id,{{"type","closed"},{"reason","idle"}});
+            c.peer->close("idle");
         }
     }
     if(ptt_requested_ && now>ptt_until_) tx_off();

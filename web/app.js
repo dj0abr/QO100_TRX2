@@ -1,5 +1,5 @@
 import {DOWNLINK_UPLINK_HZ, frequencyText, parseMHz, validateFrequency, tuneTargets, wheelTurns, wheelTargets, filterValues} from './tuning.js';
-import {FrameAssembler, RadioDisplay, displayOffsets, AXIS_MODES} from './radio-display.js';
+import {FrameAssembler, RadioDisplay, displayOffsets, axisFrequency, AXIS_MODES} from './radio-display.js';
 import {RadioAudio} from './audio.js';
 import {PttControl} from './ptt-control.js';
 import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
@@ -11,9 +11,14 @@ let pttHeld = false, pttAcked = false, pttIntent = 0, txIdentity = '', txIndex =
 let noticeUntil = 0, settingsBase = {}, editingFrequency = '1', settingsTail = Promise.resolve();
 let filterBusy = 0;
 let menuDismissedAt = -Infinity;
+let cursor = null, cursorFrame = 0;
 const pending = new Map(), wanted = new Map(), timers = new Map(), stateWaiters = new Set();
 const views = [new RadioDisplay($('fullband')), new RadioDisplay($('zoom-display'), true)];
-const frames = new FrameAssembler(frame => views[frame.stream === 0 ? 0 : 1].accept(frame));
+const frames = new FrameAssembler(frame => {
+  const view = views[frame.stream === 0 ? 0 : 1];
+  view.accept(frame);
+  if (cursor?.view === view) queueCursorUpdate();
+});
 const radio = new RadioAudio(transmitSamples, mediaChanged);
 const ptt = new PttControl({start: startPtt, stop: stopPtt, isActive: () => pttHeld,
   mode: readPreference('pttMode'), spaceEnabled: readPreference('pttSpace') === 'true',
@@ -71,6 +76,7 @@ function connect() {
   if (socket && socket.readyState < WebSocket.CLOSING) return;
   operator = false; state = {}; wanted.clear(); guiLoaded = false; session = 0; clearTimers();
   frames.reset(); views.forEach(view => view.clear()); radio.reset();
+  cursor = null; queueCursorUpdate();
   const url = new URL('/ws', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = socket = new WebSocket(url); ws.binaryType = 'arraybuffer';
   notify('Verbindung wird hergestellt …', false, 0); controls();
@@ -87,7 +93,7 @@ function connect() {
     if (message.type === 'role') {
       const wasOperator = operator; operator = message.role === 'operator';
       $('role').textContent = operator ? t('Bediener', 'Operator') : t('Zuschauer', 'Viewer');
-      $('role').title = `${message.clients} Verbindung(en) · Inaktivitätslimit ${message.idle_seconds} s`;
+      $('role').title = `${message.clients} Verbindung(en) · ${message.idle_seconds ? `Inaktivitätslimit ${message.idle_seconds} s` : t('Keine Abmeldung bei Inaktivität', 'No inactivity logout')}`;
       if (wasOperator && !operator) { stopPtt(); radio.stopMic(); clearTimers(); }
       controls();
     } else if (message.type === 'state') update(message);
@@ -103,14 +109,18 @@ function connect() {
       notify(message.reason === 'idle' ? 'Wegen Inaktivität abgemeldet. Mit „Verbinden“ erneut anmelden.' : 'Verbindung wegen fehlendem Heartbeat beendet. Bitte erneut verbinden.', true, Infinity);
     }
   };
-  ws.onerror = () => { if (ws === socket) notify('WebSocket-Verbindung fehlgeschlagen.', true, Infinity); };
-  ws.onclose = () => {
+  ws.onerror = () => { if (ws === socket) notify('WebSocket-Verbindung fehlgeschlagen.', true); };
+  ws.onclose = event => {
     if (ws !== socket) return;
     stopPtt(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset();
     for (const item of pending.values()) { clearTimeout(item.timeout); item.reject(fail('Verbindung getrennt.', 'closed')); }
     pending.clear(); frames.reset(); views.forEach(view => view.clear());
+    cursor = null; queueCursorUpdate();
     $('role').textContent = t('Getrennt', 'Disconnected'); controls();
-    if (noticeUntil !== Infinity) notify('Verbindung getrennt. Mit „Verbinden“ erneut anmelden.', false, Infinity);
+    if (noticeUntil !== Infinity) {
+      const detail = event.reason || ([1000, 1005].includes(event.code) ? '' : `WebSocket-Code ${event.code}`);
+      notify(`Verbindung getrennt${detail ? ` (${detail})` : ''}. Mit „Verbinden“ erneut anmelden.`, !!detail, Infinity);
+    }
   };
 }
 
@@ -178,6 +188,20 @@ function renderFrequencies() {
   $('tx-downlink').textContent = frequencyText(Number.isSafeInteger(tx) ? tx + DOWNLINK_UPLINK_HZ : undefined);
   const offset = tx - (rx - DOWNLINK_UPLINK_HZ);
   $('offset-status').textContent = t(`RX${selected} ausgewählt`, `RX${selected} selected`) + (Number.isSafeInteger(offset) ? ` · ${t('TX-Versatz', 'TX offset')} ${offset >= 0 ? '+' : '−'}${Math.abs(offset).toLocaleString('de-DE')} Hz` : '');
+  queueCursorUpdate();
+}
+function queueCursorUpdate() {
+  if (cursorFrame) return;
+  cursorFrame = requestAnimationFrame(() => {
+    cursorFrame = 0;
+    const downlink = cursor?.view.frequencyAt({currentTarget: cursor.canvas, clientX: cursor.x});
+    const pluto = Number.isSafeInteger(downlink) ? axisFrequency(downlink, 'pluto-rx', state.settings) : undefined;
+    for (const [id, hz] of [['cursor-downlink', downlink], ['cursor-pluto-rx', pluto]]) {
+      const node = $(id), text = frequencyText(hz);
+      if (node.textContent !== text) node.textContent = text;
+      node.dataset.hz = Number.isSafeInteger(hz) ? String(hz) : '';
+    }
+  });
 }
 function rangePaint(input) {
   input.style.setProperty('--fill', `${100 * (Number(input.value) - Number(input.min)) / Math.max(1, Number(input.max) - Number(input.min))}%`);
@@ -440,6 +464,15 @@ function setMenuOpen(name, open) {
 }
 
 function bindPlots(view, step) {
+  for (const canvas of [...view.element.querySelectorAll('[data-tune]'), view.axis]) {
+    canvas.addEventListener('pointermove', event => {
+      if (event.pointerType !== 'mouse') return;
+      cursor = {view, canvas, x: event.clientX}; queueCursorUpdate();
+    });
+    canvas.addEventListener('pointerleave', () => {
+      if (cursor?.canvas === canvas) { cursor = null; queueCursorUpdate(); }
+    });
+  }
   for (const canvas of view.element.querySelectorAll('[data-tune]')) {
     let touch, touchEndedAt = -Infinity;
     canvas.addEventListener('click', event => {

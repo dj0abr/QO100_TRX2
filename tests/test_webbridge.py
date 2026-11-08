@@ -104,7 +104,8 @@ def main():
         process = start_backend()
         proxy = Proxy(backend_port)
         bridge = subprocess.Popen([str(adapter), '--listen', '127.0.0.1', '--port', str(http_port),
-                                   '--backend-port', str(proxy.port), '--web-root', str(assets), '--idle-seconds', '4'],
+                                   '--backend-port', str(proxy.port), '--web-root', str(assets), '--idle-seconds', '4',
+                                   '--heartbeat-seconds', '3'],
                                   stdout=adapter_log, stderr=adapter_log)
         def browser(**kwargs):
             c = Client(http_port, **kwargs)
@@ -194,12 +195,27 @@ def main():
             viewer.state(lambda s: s.get('ready') and s.get('settings', {}).get('tx_attenuation_db') == '9'
                          and s.get('tx', {}).get('ptt') is False and s.get('loop', {}).get('mode') == 0)
             # A stalled spectator must not hold up audio/control for the other clients.
+            paused = browser(read=False)
+            paused.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            time.sleep(1.8)  # The former 750-ms send-queue cutoff closed this client.
+            paused.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024*1024)
+            paused.start_reading()
+            command(owner, 'nr', percent=62)
+            paused.state(lambda s: s.get('nr', {}).get('percent') == 62)
+            assert not paused.closed, 'A short read pause disconnected the viewer'
+            viewer.messages.clear()
+            paused.close()
+            viewer.wait(lambda s: isinstance(s, dict) and s.get('type') == 'role' and s.get('clients') == 2)
             command(owner, 'nr', percent=61)
             viewer.messages.clear()
             slow = browser(read=False)
             slow.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
             viewer.wait(lambda s: isinstance(s, dict) and s.get('type') == 'role' and s.get('clients') == 3)
-            viewer.wait(lambda s: isinstance(s, dict) and s.get('type') == 'role' and s.get('clients') == 2, 4)
+            end=time.monotonic()+8
+            while time.monotonic()<end and not any(isinstance(s,dict) and s.get('type')=='role' and s.get('clients')==2 for s in viewer.messages):
+                owner.send({'type':'activity'})
+                time.sleep(.2)
+            viewer.wait(lambda s: isinstance(s, dict) and s.get('type') == 'role' and s.get('clients') == 2)
             command(owner, 'nr', percent=60)
             # Audio-loop TX is observable byte-for-byte by all clients, with no RF.
             # State is now published immediately, including the earlier PTT test.
@@ -257,15 +273,12 @@ def main():
             viewer.send({'type': 'state'})
             viewer.state()
             viewer.role('viewer', False)
-            final = browser(heartbeat=False)
+            final = browser(heartbeat=False, pong=False)
             final.role('operator')
             final.state()
-            for _ in range(35):
-                final.send({'type': 'activity'})
-                time.sleep(.2)
-                if final.closed:
-                    break
-            final.wait(lambda s: isinstance(s, dict) and s.get('type') == 'closed' and s.get('reason') == 'heartbeat_timeout')
+            wait(lambda: final.closed, 4)
+            assert final.pings>0, 'No native WebSocket liveness probe was sent'
+            assert 'disconnected: heartbeat_timeout' in (root/'adapter.log').read_text()
             print('HTTP assets/HEAD/traversal; roles; viewer isolation; FFT/RX audio; command retries; settings; '
                   'slow viewer; TX audio loop; PTT watchdog; confirmed-safe ownership transfer; fresh-login ownership; '
                   'backend restart; inactivity and heartbeat timeout passed')

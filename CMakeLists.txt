@@ -124,6 +124,10 @@ if(BUILD_TESTING)
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
             ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
         set_tests_properties(webbridge_udp PROPERTIES TIMEOUT 60)
+        add_test(NAME webbridge_liveness COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_webbridge_liveness.py
+            $<TARGET_FILE:qo100_webbridge> ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(webbridge_liveness PROPERTIES TIMEOUT 20)
         add_test(NAME rx2_zoom_websocket COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rx2_zoom.py
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>

@@ -19,9 +19,9 @@ class WebSocket final: public Peer,public std::enable_shared_from_this<WebSocket
     uint64_t id_=0;
     bool closed_=false,closing_=false;
     std::string reason_;
-    void abort_later() {
+    void abort_later(const std::string& reason) {
         if(closed_ || closing_) return;
-        closing_=true;
+        closing_=true;reason_=reason;
         // Do not re-enter Bridge::leave() from inside a bridge broadcast/control.
         net::post(ws_.get_executor(),[self=shared_from_this()]{self->finish();});
     }
@@ -30,12 +30,25 @@ class WebSocket final: public Peer,public std::enable_shared_from_this<WebSocket
         closed_=true;boost::system::error_code ec;
         beast::get_lowest_layer(ws_).socket().shutdown(Tcp::socket::shutdown_both,ec);
         beast::get_lowest_layer(ws_).socket().close(ec);
-        if(id_) {const auto id=id_;id_=0;bridge_.leave(id);}
+        if(id_) {
+            const auto id=id_;id_=0;
+            std::cout<<"Browser "<<id<<" disconnected: "<<(reason_.empty()?"disconnected":reason_)
+                <<"; queued="<<queued_<<" bytes\n"<<std::flush;
+            bridge_.leave(id);
+        }
         queue_.clear();queued_=0;
+    }
+    void failed(const char* operation,boost::system::error_code ec) {
+        if(reason_.empty()) {
+            if(ec==beast::error::timeout) reason_="heartbeat_timeout";
+            else if(ec==websocket::error::closed) reason_=ws_.reason().reason.empty()?"client_closed":std::string(ws_.reason().reason);
+            else reason_=std::string(operation)+": "+ec.message();
+        }
+        finish();
     }
     void read() {
         ws_.async_read(incoming_,[self=shared_from_this()](auto ec,size_t) {
-            if(ec) {self->finish();return;}
+            if(ec) {self->failed("read",ec);return;}
             const auto buffers=self->incoming_.data();Bytes bytes(self->incoming_.size());
             net::buffer_copy(net::buffer(bytes),buffers);
             self->bridge_.message(self->id_,bytes,!self->ws_.got_text());
@@ -54,7 +67,8 @@ class WebSocket final: public Peer,public std::enable_shared_from_this<WebSocket
         }
         const auto out=queue_.front();ws_.binary(out.binary);
         ws_.async_write(net::buffer(*out.bytes),[self=shared_from_this(),keep=out.bytes](auto ec,size_t) {
-            if(ec || self->closed_) {self->finish();return;}
+            if(ec) {self->failed("write",ec);return;}
+            if(self->closed_) return;
             self->queued_-=self->queue_.front().bytes->size();self->queue_.pop_front();self->write();
         });
     }
@@ -62,7 +76,7 @@ public:
     WebSocket(beast::tcp_stream stream,Bridge& bridge):ws_(std::move(stream)),bridge_(bridge) {}
     void accept(http::request<http::string_body> request) {
         beast::get_lowest_layer(ws_).expires_never();
-        ws_.set_option(websocket::stream_base::timeout{std::chrono::seconds(10),std::chrono::seconds(15),true});
+        ws_.set_option(websocket::stream_base::timeout{std::chrono::seconds(10),std::chrono::seconds(bridge_.config().heartbeat_seconds),true});
         ws_.read_message_max(8192);
         auto keep=std::make_shared<http::request<http::string_body>>(std::move(request));
         ws_.async_accept(*keep,[self=shared_from_this(),keep](auto ec) {
@@ -77,7 +91,18 @@ public:
     void send(std::shared_ptr<const Bytes> bytes,bool binary) override {
         if(closed_ || closing_) return;
         const auto limit=bridge_.config().queue_bytes;
-        if(!queue_.empty() && Clock::now()-queue_.front().time>std::chrono::milliseconds(750)) {abort_later();return;}
+        const auto now=Clock::now();
+        if(!queue_.empty() && now-queue_.front().time>std::chrono::seconds(5)) {abort_later("slow_client");return;}
+        // Recover from short browser/network stalls without replaying old audio
+        // and spectra. Never erase the buffer held by the active async_write.
+        if(!queue_.empty()) {
+            for(auto it=std::next(queue_.begin());it!=queue_.end();) {
+                if(it->binary && it->bytes->size()>=6 && ((*it->bytes)[5]==2 || (*it->bytes)[5]==5)
+                    && now-it->time>std::chrono::milliseconds(200)) {
+                    queued_-=it->bytes->size();it=queue_.erase(it);
+                } else ++it;
+            }
+        }
         if(binary && bytes->size()>=6 && (*bytes)[5]==2 && queued_>limit/2) {
             // Keep the active async_write buffer, discard only queued FFT fragments.
             for(auto it=std::next(queue_.begin());it!=queue_.end();) {
@@ -86,7 +111,7 @@ public:
                 } else ++it;
             }
         }
-        if(queued_+bytes->size()>limit) {abort_later();return;}
+        if(queued_+bytes->size()>limit) {abort_later("queue_limit");return;}
         const bool idle=queue_.empty();queued_+=bytes->size();queue_.push_back({std::move(bytes),binary});
         if(idle) write();
     }

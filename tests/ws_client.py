@@ -11,13 +11,15 @@ import time
 
 
 class Client:
-    def __init__(self, port, heartbeat=True, read=True, origin=None):
+    def __init__(self, port, heartbeat=True, read=True, origin=None, pong=True):
         self.socket = socket.create_connection(('127.0.0.1', port), timeout=5)
         self.socket.settimeout(1)
         self.lock = threading.Lock()
         self.messages = deque(maxlen=30000)
         self.closed = False
         self.reader = None
+        self.pong = pong
+        self.pings = 0
         key = base64.b64encode(os.urandom(16)).decode()
         request = (f'GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n'
                    f'Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n')
@@ -32,10 +34,13 @@ class Client:
         accept = base64.b64encode(hashlib.sha1((key+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest())
         assert accept.lower() in response.lower()
         if read:
-            self.reader = threading.Thread(target=self._read, daemon=True)
-            self.reader.start()
+            self.start_reading()
         if heartbeat:
             threading.Thread(target=self._heartbeat, daemon=True).start()
+
+    def start_reading(self):
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
 
     def _heartbeat(self):
         while not self.closed:
@@ -72,7 +77,9 @@ class Client:
                     self._frame(8, data)
                     break
                 if opcode == 9:
-                    self._frame(10, data)
+                    self.pings += 1
+                    if self.pong:
+                        self._frame(10, data)
                 elif opcode == 1:
                     self.messages.append(json.loads(data))
                 elif opcode == 2:

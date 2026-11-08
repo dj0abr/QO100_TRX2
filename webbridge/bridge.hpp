@@ -18,7 +18,7 @@ struct Config {
     struct Decoder { uint16_t audio_port=0,text_port=0; }; // Both zero disables this link.
     std::array<Decoder,2> decoders;
     uint16_t digital_audio_port=0,digital_bridge_port=0;
-    unsigned idle_seconds=300,max_clients=16;
+    unsigned idle_seconds=0,heartbeat_seconds=60,max_clients=16;
     size_t queue_bytes=524288;
 };
 struct Peer {
@@ -27,7 +27,7 @@ struct Peer {
     virtual void close(const std::string& reason)=0;
 };
 class Bridge {
-    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity,heartbeat;};
+    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;};
     struct Pending {
         Bytes packet;uint8_t reply;uint64_t client=0;Json id;std::string command;
         Clock::time_point sent{},started=Clock::now();bool safety=false;

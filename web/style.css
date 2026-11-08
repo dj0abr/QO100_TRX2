@@ -52,6 +52,9 @@
     .tx-value { font-size: 18px; }
     .tx-return { color: var(--muted); display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; font-size: 11px; }
     .tx-return .downlink-value { font-size: 14px; color: #d5b6b0; }
+    .cursor-frequency { color: var(--muted); font-size: 10px; display: grid; gap: 3px; }
+    .cursor-frequency > div { display: grid; grid-template-columns: 90px 112px auto; align-items: baseline; gap: 5px; white-space: nowrap; }
+    .cursor-value { color: var(--rx1); font: 13px var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
     .rx-secondary { padding: 11px 14px; border: 1px solid #34404a; border-radius: 6px; margin-top: 0; background: #151e27; }
     .rx-secondary .frequency-label { color: var(--rx2); }
     .rx-secondary .frequency-value { gap: 8px; margin-top: 10px; }

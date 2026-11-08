@@ -24,7 +24,8 @@ void setting(bridge::Config& c,const std::string& k,const std::string& v,const s
     else if(k=="rx4_decoder_text_port") c.decoders[1].text_port=number(v,0,65535);
     else if(k=="digital_audio_port") c.digital_audio_port=number(v,0,65535);
     else if(k=="digital_bridge_port") c.digital_bridge_port=number(v,0,65535);
-    else if(k=="idle_seconds") c.idle_seconds=number(v,1,86400);
+    else if(k=="idle_seconds") c.idle_seconds=number(v,0,86400);
+    else if(k=="heartbeat_seconds") c.heartbeat_seconds=number(v,2,3600);
     else if(k=="max_clients") c.max_clients=number(v,1,256);
     else if(k=="queue_bytes") c.queue_bytes=number(v,65536,4194304);
     else if(k=="web_root") c.web_root=(base/std::filesystem::path(v)).lexically_normal().string();
@@ -53,7 +54,8 @@ int main(int argc,char** argv) {
                     "                [--rx3-decoder-audio-port 0] [--rx3-decoder-text-port 0]\n"
                     "                [--rx4-decoder-audio-port 0] [--rx4-decoder-text-port 0]\n"
                     "                [--digital-audio-port 0] [--digital-bridge-port 0]\n"
-                    "                [--web-root DIR] [--idle-seconds 300] [--max-clients 16] [--queue-bytes 524288]\n";return 0;
+                    "                [--web-root DIR] [--idle-seconds 0] [--heartbeat-seconds 60]\n"
+                    "                [--max-clients 16] [--queue-bytes 524288]\n";return 0;
             }
             if(++i==argc) throw std::runtime_error("Missing value for "+option);
             if(option=="--config") continue;
@@ -70,7 +72,7 @@ int main(int argc,char** argv) {
         signals.async_wait([&](auto ec,int) {if(ec) return;adapter.stop();shutdown.expires_after(std::chrono::seconds(2));
             shutdown.async_wait([&](auto){io.stop();});});
         std::cout<<"HTTP/WS http://"<<c.listen<<':'<<c.port<<"; backend UDP 127.0.0.1:"<<c.backend_port
-            <<"; idle timeout "<<c.idle_seconds<<" s\n"<<std::flush;
+            <<"; idle timeout "<<c.idle_seconds<<" s (0=disabled); WebSocket heartbeat timeout "<<c.heartbeat_seconds<<" s\n"<<std::flush;
         for(size_t i=0;i<c.decoders.size();++i) if(c.decoders[i].audio_port)
             std::cout<<"RX"<<i+3<<" audio UDP 127.0.0.1:"<<c.decoders[i].audio_port
                 <<"; decoder text UDP 127.0.0.1:"<<c.decoders[i].text_port<<'\n'<<std::flush;

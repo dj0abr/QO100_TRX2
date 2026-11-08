@@ -318,11 +318,14 @@ die statische Entwurfsvorschau unter **`/layout-preview.html`**.
   Weitere sind `viewer`. Bestehende Zuschauer werden **nie automatisch befördert**.
 - Zuschauer erhalten FFT, RX1-Audio, RX3-/RX4-Decoder-Text und Betriebszustand. Kommandos, Settings-Abfragen und
   TX-Audio von Zuschauern werden vor der UDP-Ausgabe abgewiesen. `state` liest nur den Cache.
-- Bediener meldet echte Maus-/Tastatur-/Touch-Aktivität mit `activity`, gedrosselt auf etwa
-  einmal pro Sekunde. Der Adapter misst selbst: **300 s ohne Activity → Verbindung schließen**.
-  Audio, FFT, Heartbeats und PTT-Keepalives zählen nicht als Bedienaktivität.
-- Alle Browser können `heartbeat` etwa jede Sekunde senden. Beim Bediener führen **6 s**
-  ohne Heartbeat zur Abschaltung. Zuschauer dürfen passiv bleiben; WebSocket-Ping prüft die Verbindung.
+- **Empfang bleibt ohne Bedienaktivität verbunden.** `idle_seconds=0` deaktiviert die
+  Inaktivitäts-Abmeldung. Ein ausdrücklich gesetzter Wert größer null aktiviert sie
+  optional wieder; `activity` meldet dafür Maus-/Tastatur-/Touch-Bedienung.
+- Native WebSocket-Pings/Pongs prüfen alle Verbindungen. Der Browser beantwortet
+  Pings unabhängig von JavaScript-Timern. Standard: **60 s** ohne eingehende Daten
+  oder Pong bis zur Trennung; bei stiller Verbindung wird nach etwa 30 s ein Ping
+  gesendet. Einstellbar mit `heartbeat_seconds` bzw. `--heartbeat-seconds` (2–3600 s).
+  JSON-`heartbeat` bleibt für ältere GUIs zulässig und zählt nicht als Bedienaktivität.
 - Verlust/Timeout/Shutdown: TX-Berechtigung sofort löschen, Audiopakete verwerfen, **PTT aus,
   Loop normal**. Ein frisch angemeldeter Bediener darf erst nach bestätigter Abschaltung steuern.
   Nach Timeout **keine automatische Wiederanmeldung**; die Testseite zeigt „Verbinden“.
@@ -330,8 +333,16 @@ die statische Entwurfsvorschau unter **`/layout-preview.html`**.
   Nach **750 ms** ohne Freigabe setzt der Adapter PTT aus. Das Backend hat zusätzlich seine
   eigene 1,5-s-Lease. Ein später Keepalive schaltet PTT nicht wieder ein.
 - Bei Backend-Neustart: Session neu ermitteln, Puffer leeren, Zustände neu laden; PTT bleibt aus.
-  Langsame Browser erhalten begrenzte Puffer; alte FFT-Fragmente werden verworfen, dauerhaft
-  zurückliegende Verbindungen getrennt. Andere Teilnehmer laufen weiter.
+  Langsame Browser erhalten begrenzte Puffer. Nach kurzen Unterbrechungen werden
+  wartende Audio-/FFT-Pakete älter als 200 ms verworfen. Der aktive Schreibpuffer
+  sowie Steuer- und Textnachrichten bleiben erhalten. Erst ein über 5 s blockierter
+  Schreibvorgang oder das volle Pufferlimit trennt die Verbindung. Andere Teilnehmer laufen weiter.
+
+`webbridge.log` protokolliert für jede Trennung den Grund, etwa `heartbeat_timeout`,
+`slow_client`, `queue_limit`, `idle` oder einen Transportfehler, sowie die Puffergröße.
+Die WebGUI zeigt bei einem unerwarteten Abbruch den WebSocket-Code bzw. den vom
+Server übermittelten Grund. Der maximale PTT-Timer von fünf Minuten sowie der
+750-ms-PTT-Watchdog sind unabhängig davon; reines Zuhören hat keine Zeitbegrenzung.
 
 Hardware-Settings und Änderungen an `initial_tx_hz` löschen ebenfalls die PTT-Freigabe und
 stellen Loops auf Normal. Bis zum Abschluss der Änderung und bestätigter Abschaltung bleibt
