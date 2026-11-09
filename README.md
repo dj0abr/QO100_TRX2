@@ -95,8 +95,31 @@ Open the GUI in your browser:
 - **On the same computer:** <http://localhost:8080/>
 - **From another computer:** `http://<SBC-IP>:8080/`, or your HTTPS reverse-proxy address.
 
-**Remote microphone access requires HTTPS; localhost also works over HTTP.**
+**Microphone access and audio playback require a secure browser context:** HTTPS,
+`localhost`, or the browser exception for home networks described below.
 Leave the terminal open. **Ctrl+C** stops all programs.
+
+### Audio from another device on your home network
+
+When opening `http://<SBC-IP>:8080/`, browsers block microphone access and
+AudioWorklet playback by default. Chrome/Chromium and Brave can explicitly allow
+this address on a trusted home network, without setting up certificates or an
+HTTPS reverse proxy:
+
+1. On the **device running the browser**, open
+   `chrome://flags/#unsafely-treat-insecure-origin-as-secure` in the address bar;
+   for Brave, use `brave://flags/#unsafely-treat-insecure-origin-as-secure` instead.
+2. Under **Insecure origins treated as secure**, enter the complete transceiver
+   address including its port, for example `http://192.168.10.152:8080`.
+   Replace the example IP with your own server's IP address.
+3. Set the option to **Enabled** and restart the browser using **Relaunch**.
+4. Open the WebGUI at that address, click **Audio starten** (Start audio), and
+   allow microphone access. The microphone and speakers are on the browser device.
+
+Configure this exception in each browser you use; it applies to the entered
+address including its port. It does not encrypt HTTP; use HTTPS for access outside
+your trusted home network. For browsers without this setting, use the HTTPS address
+as well. Background: [Chromium: secure-context exceptions](https://www.chromium.org/Home/chromium-security/deprecating-powerful-features-on-insecure-origins/).
 
 ## Configuration
 

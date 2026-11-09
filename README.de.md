@@ -95,8 +95,32 @@ Die Bedienoberfläche im Browser öffnen:
 - **Auf demselben Rechner:** <http://localhost:8080/>
 - **Von einem anderen Rechner:** `http://<SBC-IP>:8080/` oder die HTTPS-Adresse des Reverse-Proxys.
 
-**Mikrofonzugriff von einem anderen Rechner erfordert HTTPS; auf localhost funktioniert auch HTTP.**
+**Mikrofon und Audiowiedergabe benötigen einen sicheren Browser-Kontext:** HTTPS,
+`localhost` oder die unten beschriebene Browser-Ausnahme für das Heimnetz.
 Das Terminal offen lassen. **Strg+C** beendet alle Programme.
+
+### Audio von einem anderen Gerät im Heimnetz
+
+Beim Zugriff über `http://<SBC-IP>:8080/` blockiert der Browser standardmäßig
+Mikrofon und AudioWorklet-Wiedergabe. In Chrome/Chromium und Brave lässt sich für
+den Betrieb im vertrauenswürdigen Heimnetz genau diese Adresse freigeben, ohne
+Zertifikate oder einen HTTPS-Reverse-Proxy einzurichten:
+
+1. Auf dem **Gerät mit dem Browser** in der Adresszeile
+   `chrome://flags/#unsafely-treat-insecure-origin-as-secure` öffnen;
+   in Brave stattdessen `brave://flags/#unsafely-treat-insecure-origin-as-secure`.
+2. Bei **Insecure origins treated as secure** die vollständige Adresse des
+   Transceivers einschließlich Port eintragen, beispielsweise `http://192.168.10.152:8080`.
+   Die Beispiel-IP durch die eigene Server-IP ersetzen.
+3. Die Einstellung auf **Enabled** setzen und den Browser mit **Relaunch** neu starten.
+4. Das WebGUI unter dieser Adresse öffnen, **Audio starten** anklicken und den
+   Mikrofonzugriff erlauben. Mikrofon und Lautsprecher gehören zum Browser-Gerät.
+
+Die Ausnahme muss in jedem verwendeten Browser eingerichtet werden und gilt für
+die eingetragene Adresse einschließlich Port. Sie verschlüsselt HTTP nicht;
+für Zugriffe außerhalb des vertrauenswürdigen Heimnetzes HTTPS verwenden.
+Bei Browsern ohne diese Einstellung ebenfalls die HTTPS-Adresse verwenden.
+Hintergrund: [Chromium: Ausnahmen für sichere Browser-Kontexte](https://www.chromium.org/Home/chromium-security/deprecating-powerful-features-on-insecure-origins/).
 
 ## Konfiguration
 
