@@ -29,9 +29,13 @@ The two transmit paths are combined into a shared IQ signal for the Pluto.
 
 Open a terminal on the SBC or Linux PC:
 
+On minimal Debian without `sudo`, run `apt update` and `apt install sudo` once as
+root, grant the normal user access with `usermod -aG sudo USERNAME`, then log in again.
+Run the following steps as that normal user.
+
 ```sh
 sudo apt update
-sudo apt install -y git
+sudo apt install -y git ca-certificates
 git clone https://github.com/dj0abr/QO100_TRX2.git
 cd QO100_TRX2
 ./build_all.sh --install-deps
@@ -40,7 +44,32 @@ cd QO100_TRX2
 The script installs the required packages and builds everything. On an SBC, missing libraries are built automatically for its processor.
 For later builds, just run `./build_all.sh`.
 
+The ADI libraries **libiio** and **libad9361** are installed automatically through
+the Debian packages `libiio-dev` and `libad9361-dev`; the bundled Pluto driver is
+built from source. No separate ADI driver installation is required.
+NumPy/SciPy for the decoders and the audio dependencies are included as well.
+For RX2/TX2 on a minimal system, the script adds PulseAudio if neither PulseAudio
+nor `pipewire-pulse` is present. Existing sound servers are preserved.
+After the first installation, log in again and run `./start_all.sh` as the normal
+user so that the virtual devices are available in that user's audio session.
+Install FLdigi/WSJT-X and a browser separately if needed.
+
+On a minimal system without a desktop, check the audio connection with `pactl info`
+before the first start. If the PulseAudio installation added by the script is not
+running yet, run `pulseaudio --start` as the normal user, then check `pactl info`
+again. No physical sound card is required. Run PulseAudio and the stack as the same
+user, without `sudo`.
+
+Without local digital programs, use `./start_all.sh --no-digital-audio`;
+browser RX1/TX1 and the three monitoring decoders do not need a sound card in the VM.
+
 ### Pluto over Ethernet
+
+**libiio and libad9361** are also required on the backend computer for Ethernet
+operation. `./build_all.sh --install-deps` installs them. libiio connects through
+`ip:PLUTO-IP` to the IIO service in Pluto's firmware; no additional Pluto kernel
+driver or USB passthrough is required in the Debian VM. The VM must be able to
+reach Pluto's IP address.
 
 - Connect a Pluto-compatible USB Ethernet adapter using a **USB OTG cable**. Supply **5 V** through an OTG Y-cable or Pluto's separate power connector.
 - In Pluto's `config.txt`, leave **`ipaddr_eth` empty** under `[USB_ETHERNET]` to obtain an IP via DHCP. Safely eject the virtual USB drive after editing.
@@ -48,6 +77,10 @@ For later builds, just run `./build_all.sh`.
 - **Avoid address conflicts:** Pluto's USB network (default `192.168.2.x`) and Ethernet LAN must use different subnets.
 
 Details: [AMSAT-DL: Pluto networking](https://wiki.amsat-dl.org/doku.php?id=de:tricks:pluto_network).
+
+Before the first start, check connectivity with `iio_info -u ip:PLUTO-IP`.
+`iio_info` is installed through `libiio-utils`. Background:
+[Analog Devices: libiio over USB and Ethernet](https://github.com/analogdevicesinc/libiio).
 
 ## Run the Software
 

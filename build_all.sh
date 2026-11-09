@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the complete browser-based transceiver, including both child programs.
+# Build the complete transceiver, Pluto driver, monitoring decoders and audio adapter.
 set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -49,9 +49,20 @@ if ((install_deps)); then
         fi
         apt_command=(sudo apt-get)
     fi
-    packages=(build-essential cmake pkg-config gfortran python3 python3-numpy python3-scipy ca-certificates
-        libiio-dev libad9361-dev libsamplerate0-dev libfftw3-dev
-        libboost-dev nlohmann-json3-dev libpulse-dev pulseaudio-utils)
+    packages=(build-essential cmake pkg-config gfortran git ca-certificates
+        python3 python3-numpy python3-scipy
+        libiio-dev libad9361-dev libiio-utils libsamplerate0-dev libfftw3-dev
+        libboost-dev nlohmann-json3-dev libpulse-dev pulseaudio-utils
+        libasound2-plugins dbus-user-session)
+    # The client utilities do not install a sound server on minimal Debian.
+    # Preserve an existing PulseAudio/PipeWire setup; add PulseAudio only if neither exists.
+    package_installed() {
+        [[ $(dpkg-query -W -f='${Status}' "$1" 2>/dev/null) == 'install ok installed' ]]
+    }
+    if ! package_installed pulseaudio && ! package_installed pipewire-pulse && \
+       ! command -v pulseaudio >/dev/null && ! command -v pipewire-pulse >/dev/null; then
+        packages+=(pulseaudio)
+    fi
     "${apt_command[@]}" update
     "${apt_command[@]}" install -y --no-install-recommends "${packages[@]}"
 fi
@@ -62,6 +73,11 @@ for program in cmake python3 pkg-config cc c++ gfortran make; do
         exit 1
     fi
 done
+python_bin=/usr/bin/python3
+if [[ ! -x "$python_bin" ]] || ! "$python_bin" -c 'import numpy, scipy, sqlite3, zlib'; then
+    echo "Missing system Python modules. Run ./build_all.sh --install-deps first." >&2
+    exit 1
+fi
 
 # Bundles for x86-64 ship with the project. Build missing native bundles on
 # ARM64 (or after an incomplete copy); the helpers remove temporary sources.
@@ -69,16 +85,16 @@ liquid_bundle="$project_dir/external/liquid-dsp-1.8.3"
 speex_bundle="$project_dir/external/speexdsp-1.2.1"
 if [[ ! -f "$liquid_bundle/lib/linux-$arch/libliquid.a" || ! -f "$liquid_bundle/include/liquid/liquid.h" ]]; then
     echo "Preparing liquid-dsp for $arch (first build requires internet access) ..."
-    python3 "$project_dir/tools/build_liquid.py" --jobs "$jobs"
+    "$python_bin" "$project_dir/tools/build_liquid.py" --jobs "$jobs"
 fi
 if [[ ! -f "$speex_bundle/lib/linux-$arch/libspeexdsp.a" || ! -f "$speex_bundle/include/speex/speex_preprocess.h" ]]; then
     echo "Preparing SpeexDSP for $arch (first build requires internet access) ..."
-    python3 "$project_dir/tools/build_speex.py" --jobs "$jobs"
+    "$python_bin" "$project_dir/tools/build_speex.py" --jobs "$jobs"
 fi
 
 cmake -S "$project_dir" -B "$project_dir/build" \
     -DCMAKE_BUILD_TYPE=Release -DQO100_BUILD_WEBBRIDGE=ON \
-    -DPython3_EXECUTABLE=/usr/bin/python3
+    -DPython3_EXECUTABLE="$python_bin"
 cmake --build "$project_dir/build" --parallel "$jobs" \
     --target qo100_backend qo100_webbridge qo100_ft8_decoder qo100_beacon_decoder qo100_mm_decoder qo100_digital_audio
 

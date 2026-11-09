@@ -5,6 +5,15 @@
 Server (oder ein PipeWire-Server mit PulseAudio-Kompatibilität).
 `./build_all.sh --install-deps` installiert die benötigten Pakete.
 
+Auf einem Minimalsystem ergänzt das Skript auch den PulseAudio-Server, falls weder
+PulseAudio noch `pipewire-pulse` installiert ist. `pulseaudio-utils` allein enthält
+nur die Clientprogramme und reicht für die virtuellen Audiogeräte nicht aus.
+Nach der ersten Installation neu anmelden. Mit `pactl info` prüfen, ob der
+Audioserver erreichbar ist; bei der PulseAudio-Installation kann er bei Bedarf mit
+`pulseaudio --start` gestartet werden. Diese Befehle und `./start_all.sh` unter
+demselben normalen Benutzer ausführen, ohne `sudo`. Eine Desktop-Oberfläche oder
+eine physische Soundkarte wird für die virtuellen Geräte nicht benötigt.
+
 ## Start und Geräteauswahl
 
 `./start_all.sh` startet Backend, Webbridge, FT8, PSK und den Audioadapter.

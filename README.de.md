@@ -29,9 +29,13 @@ Die beiden Sendezweige werden zu einem gemeinsamen IQ-Signal für den Pluto zusa
 
 Auf dem SBC oder Linux-PC ein Terminal öffnen:
 
+Bei einem Minimal-Debian ohne `sudo`: einmal als root `apt update` und
+`apt install sudo` ausführen, den normalen Benutzer mit `usermod -aG sudo BENUTZERNAME`
+berechtigen und anschließend neu anmelden. Die folgenden Schritte als normaler Benutzer ausführen.
+
 ```sh
 sudo apt update
-sudo apt install -y git
+sudo apt install -y git ca-certificates
 git clone https://github.com/dj0abr/QO100_TRX2.git
 cd QO100_TRX2
 ./build_all.sh --install-deps
@@ -40,7 +44,32 @@ cd QO100_TRX2
 Das Skript installiert die benötigten Pakete und baut alle Programme. Auf einem SBC werden fehlende Bibliotheken automatisch für dessen Prozessor gebaut.
 Für spätere Builds genügt `./build_all.sh`.
 
+Auch die ADI-Bibliotheken **libiio** und **libad9361** werden über die Debian-Pakete
+`libiio-dev` und `libad9361-dev` automatisch installiert; der mitgelieferte Pluto-Treiber
+wird aus Quellcode gebaut. Es ist keine separate ADI-Treiberinstallation nötig.
+NumPy/SciPy für die Decoder und die Audio-Abhängigkeiten sind ebenfalls enthalten.
+Für RX2/TX2 ergänzt das Skript auf einem Minimalsystem PulseAudio, falls noch kein
+PulseAudio oder `pipewire-pulse` vorhanden ist. Bestehende Audioserver werden beibehalten.
+Nach der ersten Installation neu anmelden und `./start_all.sh` als normaler Benutzer
+starten, damit die virtuellen Geräte in seiner Audio-Sitzung verfügbar sind.
+FLdigi/WSJT-X und ein Browser werden bei Bedarf separat installiert.
+
+Auf einem Minimalsystem ohne Desktop die Audioverbindung vor dem ersten Start mit
+`pactl info` prüfen. Falls die vom Skript ergänzte PulseAudio-Installation noch nicht
+läuft, als normaler Benutzer `pulseaudio --start` ausführen und `pactl info` erneut
+prüfen. Dafür ist keine physische Soundkarte erforderlich. PulseAudio und den Stack
+unter demselben Benutzer starten, ohne `sudo`.
+
+Ohne lokale Digitalprogramme ist auch `./start_all.sh --no-digital-audio` möglich;
+RX1/TX1 im Browser und die drei Monitoringdecoder benötigen keine Soundkarte in der VM.
+
 ### Pluto über Ethernet
+
+Auch bei Ethernet werden **libiio und libad9361** auf dem Rechner mit dem Backend
+benötigt. `./build_all.sh --install-deps` erledigt das vollständig. libiio verbindet
+sich über `ip:PLUTO-IP` mit dem IIO-Dienst der Pluto-Firmware; in der Debian-VM ist
+dafür kein zusätzlicher Pluto-Kernel-Treiber und keine USB-Durchreichung erforderlich.
+Die Pluto-IP muss aus der VM erreichbar sein.
 
 - Einen Pluto-kompatiblen USB-Ethernet-Adapter über ein **USB-OTG-Kabel** anschließen. Die **5-V-Versorgung** erfolgt über ein OTG-Y-Kabel oder die separate Strombuchse des Pluto.
 - In der Pluto-`config.txt` unter `[USB_ETHERNET]` **`ipaddr_eth` leer lassen**, damit der Router die IP per DHCP vergibt. Nach Änderungen das virtuelle USB-Laufwerk sicher auswerfen.
@@ -48,6 +77,10 @@ Für spätere Builds genügt `./build_all.sh`.
 - **Adresskonflikte vermeiden:** USB-Netz des Pluto (standardmäßig `192.168.2.x`) und Ethernet-LAN müssen unterschiedliche Subnetze verwenden.
 
 Details: [AMSAT-DL: Pluto im Netzwerk](https://wiki.amsat-dl.org/doku.php?id=de:tricks:pluto_network).
+
+Vor dem ersten Start lässt sich die Verbindung mit `iio_info -u ip:PLUTO-IP` prüfen.
+`iio_info` wird über `libiio-utils` mitinstalliert. Hintergrund:
+[Analog Devices: libiio über USB und Ethernet](https://github.com/analogdevicesinc/libiio).
 
 ## Software starten
 

@@ -91,6 +91,7 @@ add_executable(benchmark_dsp EXCLUDE_FROM_ALL tools/benchmark_dsp.cpp)
 target_link_libraries(benchmark_dsp PRIVATE qo100_core)
 
 if(BUILD_TESTING)
+    add_test(NAME build_dependencies COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_build_dependencies.py)
     add_executable(gui_udp_example examples/gui_udp.cpp)
     target_compile_options(gui_udp_example PRIVATE -Wall -Wextra -Wpedantic)
     add_executable(test_settings tests/test_settings.cpp)
