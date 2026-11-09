@@ -29,6 +29,7 @@ struct Config {
     uint64_t initial_rx2_hz = 10489600000ULL;
     uint64_t rx3_frequency_hz = 10489540000ULL;
     uint64_t rx4_frequency_hz = 10489748821ULL;
+    uint64_t rx5_frequency_hz = 10489993000ULL;
     uint64_t initial_tx_hz = 2400400000ULL;
     uint64_t initial_tx2_hz = 2400100000ULL;
     double tx_attenuation_db = 30;

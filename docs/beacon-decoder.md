@@ -12,7 +12,7 @@ steht **RX4 · PSK (Hz)** standardmäßig auf **10489748821 Hz**. Die Bake bei
 10489,750 MHz liegt damit bei etwa 1179 Hz im USB-Audio. Änderungen dort speichern.
 Die Frequenz ist unabhängig von RX1/RX2 und wird dauerhaft gespeichert.
 
-**Decoder-Text anzeigen** über dem Zoom einschalten und **RX4 · PSK** auswählen.
+Oben in der Zoom-Kachel **PSK-Monitor** auswählen; der Text nutzt die gesamte Kachel.
 Die ersten vollständigen Texte erscheinen nach etwa 20–40 Sekunden. Beide
 Textquellen werden auch bei ausgeblendeter Anzeige gleichzeitig empfangen.
 

@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 *.settings
 *.settings.tmp-*
+/data/mm-beacon/
+/external/mmdecoder/build/
+/external/mmdecoder/logs/
+/external/mmdecoder/data/

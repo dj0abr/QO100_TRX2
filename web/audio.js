@@ -66,7 +66,7 @@ export class RadioAudio {
     if (version !== this.deviceRefresh) return;
     // These virtual endpoints belong to external digital programs, not to the
     // browser's speaker/microphone path (including their monitor/default aliases).
-    this.devices = devices.filter(d => !/\bQO100[_ -](?:RX2(?:[_ -]Internal)?|TX2)\b/i.test(d.label));
+    this.devices = devices.filter(d => !/\b(?:(?:from|to)QO100(?:[_ -]internal)?|QO100[_ -](?:RX2(?:[_ -]Internal)?|TX2))\b/i.test(d.label));
     // Before permission, browsers may expose only anonymous/default devices.
     // Never treat that restricted list as evidence that a saved device vanished.
     for (const [kind, field, key] of [['audioinput', 'inputId', 'qo100.audioInput'], ['audiooutput', 'outputId', 'qo100.audioOutput']]) {

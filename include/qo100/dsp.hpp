@@ -25,6 +25,8 @@ using SrcPtr = std::unique_ptr<SRC_STATE, decltype(&src_delete)>;
 void check_liquid(int result);
 LiquidDecimator make_rx_decimator();
 LiquidFir make_usb_filter(float gain, RxFilterSettings settings = {});
+// Fixed 0..4000 Hz USB passband retaining the multimedia beacon's low pilot.
+LiquidFir make_mm_usb_filter();
 SrcPtr make_audio_resampler(int quality, int channels);
 
 // Interpolated oscillator: avoid the coarse LIQUID_NCO lookup table. Use a

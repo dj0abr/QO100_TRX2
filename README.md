@@ -12,9 +12,10 @@ This project is a fully functional software-based transceiver for QO-100, operat
 
 ![QO100 Multichannel Web Transceiver block diagram](docs/blockschaltbild_english.png)
 
-A single Pluto serves four parallel receive channels and two transmit paths.
+A single Pluto serves five parallel receive channels and two transmit paths.
 **RX1/TX1** provide voice operation in the browser, while **RX2/TX2** connect external digital programs such as WSJT-X or fldigi through virtual audio devices.
 **RX3** monitors FT8 and **RX4** the PSK beacon on fixed frequencies configurable in Setup; both decoders run independently of normal radio operation and send their text to the WebGUI.
+**RX5** additionally receives the multimedia beacon and displays DX cluster, CW skimmer and bulletin text in the WebGUI.
 The two transmit paths are combined into a shared IQ signal for the Pluto.
 
 ## Hardware Requirements
@@ -133,23 +134,24 @@ The bandplan identifies the operating areas. Click **↻** at the right of the F
 
 ![Bandplan display switch](docs/bandplan.png)
 
-## Four Receivers
+## Five Receivers
 
 - **RX1:** normal QO-100 voice operation, with adjustable audio filter and noise reduction.
 - **RX2/TX2:** independent digital pair for FLdigi/WSJT-X, with virtual audio devices and additional RX2 monitoring in the browser. [Setup and levels](docs/digital-audio.md).
 - **RX3:** FT8 monitor.
 - **RX4:** PSK beacon monitor.
+- **RX5:** multimedia beacon monitor with automatic frequency correction (AFC), DX cluster, CW skimmer and bulletins. Default: **10489993000 Hz**. [Details (German)](docs/mm-beacon.md).
 
 **Note on using RX2 with WSJT-X:** Under **Settings → Audio**, select these devices:
 
 | Setting | Device |
 |---|---|
-| Input | `QO100_RX2_input` |
-| Output | `QO100_TX2` |
+| Input | `fromQO100` |
+| Output | `toQO100` |
 
-WSJT-X also lists internal endpoints such as `QO100_RX2.Monitor` and `QO100_TX2.Monitor`. Use the devices listed above for RX2/TX2 operation.
+The names describe the digital program's perspective: `fromQO100` supplies received audio from RX2, while `toQO100` sends audio to TX2. WSJT-X also lists internal endpoints such as `fromQO100_internal.monitor` and `toQO100.monitor`. Use the devices listed above for RX2/TX2 operation. After updating, restart the stack and replace the previous device selections in the digital program.
 
-Set both USB carrier frequencies in whole Hz under **Setup → Monitoring receivers** and save. **Show decoder text** above the zoom opens the output; radio buttons select **RX3 · FT8** or **RX4 · PSK**. Both sources are received concurrently and buffered separately. `./start_all.sh` starts both decoders.
+Set all three monitoring frequencies in whole Hz under **Setup → Monitoring receivers** and save. Seven radio buttons at the top of the zoom tile select **RX1/RX2 zoom**, **FT8 monitor**, **PSK monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin** or **RX5 diagnostics**. The selected view fills the entire area below the buttons. The zoom choice follows the selected receiver RX1/RX2; an open monitor view stays selected when switching receivers. All sources continue receiving in the background and have separate buffers. The view and reading positions are saved in this browser. `./start_all.sh` starts all three decoders. MM texts and bulletin versions persist across restarts in `data/mm-beacon/`; the browser shows the latest 200 DX/CW messages and the last complete bulletin.
 
 ![FT8 decoded messages](docs/decoderoutput.png)
 

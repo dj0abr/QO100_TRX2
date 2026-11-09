@@ -20,6 +20,7 @@ SettingsMap settings_values(const Config& c) {
         {"tx_attenuation_db",value(c.tx_attenuation_db)},
         {"initial_rx_hz",value(c.initial_rx_hz)},{"initial_rx2_hz",value(c.initial_rx2_hz)},
         {"rx3_frequency_hz",value(c.rx3_frequency_hz)},{"rx4_frequency_hz",value(c.rx4_frequency_hz)},
+        {"rx5_frequency_hz",value(c.rx5_frequency_hz)},
         {"initial_tx_hz",value(c.initial_tx_hz)},
         {"initial_tx2_hz",value(c.initial_tx2_hz)},
         {"rx1_filter_low_hz",value(c.rx1_filter.low_hz())},

@@ -168,7 +168,7 @@ std::vector<uint8_t> state_packet(uint32_t request, uint64_t frequency, uint32_t
 std::vector<uint8_t> audio_packet(const FrameInfo& f, const std::vector<int16_t>& audio) {
     if (audio.empty() || audio.size()>568) throw std::runtime_error("Invalid audio packet size");
     if (f.stream_id!=1 && f.stream_id!=2 && f.stream_id!=4 &&
-        f.stream_id!=rx3_stream && f.stream_id!=rx4_stream) throw std::runtime_error("Invalid audio stream ID");
+        f.stream_id!=rx3_stream && f.stream_id!=rx4_stream && f.stream_id!=rx5_stream) throw std::runtime_error("Invalid audio stream ID");
     auto p=state_packet(f.frame_id,f.center_hz,0,f.session_id,2,f.stream_id);
     p[5]=audio_type;put(p,16,f.timestamp_ns,8);put(p,24,f.sample_index,8);
     put(p,52,audio.size(),2);put(p,56,audio.size(),4);p.resize(64+2*audio.size());

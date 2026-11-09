@@ -12,9 +12,10 @@ Das Projekt ist ein voll funktionsfähiger Software-Transceiver für QO-100, der
 
 ![Blockschaltbild des QO100 Multichannel Web Transceivers](docs/blockschaltbild.png)
 
-Ein einzelner Pluto versorgt vier parallel arbeitende Empfangskanäle und zwei Sendezweige.
+Ein einzelner Pluto versorgt fünf parallel arbeitende Empfangskanäle und zwei Sendezweige.
 **RX1/TX1** dienen dem Sprachfunk im Browser, **RX2/TX2** verbinden externe Digitalprogramme wie WSJT-X oder fldigi über virtuelle Audiogeräte.
 **RX3** überwacht FT8 und **RX4** die PSK-Bake auf festen, im Setup einstellbaren Frequenzen; beide Decoder laufen unabhängig vom normalen Funkbetrieb und liefern ihre Texte an das WebGUI.
+**RX5** empfängt zusätzlich die Multimedia-Bake und stellt DX-Cluster, CW-Skimmer und Bulletins im WebGUI bereit.
 Die beiden Sendezweige werden zu einem gemeinsamen IQ-Signal für den Pluto zusammengeführt.
 
 ## Benötigte Hardware
@@ -133,23 +134,24 @@ Der Bandplan zeigt die Bereiche für die verschiedenen Betriebsarten. Mit **↻*
 
 ![Umschalter für Bandplan und Frequenzanzeige](docs/bandplan.png)
 
-## Vier Empfänger
+## Fünf Empfänger
 
 - **RX1:** normaler QO-100-Sprechfunk mit einstellbarem Audiofilter und Rauschreduktion.
 - **RX2/TX2:** unabhängiges Digitalpaar für FLdigi/WSJT-X mit virtuellen Audiogeräten und zusätzlicher RX2-Audiokontrolle im Browser. [Einrichtung und Pegel](docs/digital-audio.md).
 - **RX3:** FT8-Monitor.
 - **RX4:** PSK-Bakenmonitor.
+- **RX5:** Multimedia-Bakenmonitor mit automatischer Frequenznachführung (AFC), DX-Cluster, CW-Skimmer und Bulletins. Vorgabe: **10489993000 Hz**. [Details](docs/mm-beacon.md).
 
 **Anmerkung zu RX2 in WSJT-X:** Unter **Einstellungen → Audio** folgende Geräte wählen:
 
 | Einstellung | Gerät |
 |---|---|
-| Input (Eingang) | `QO100_RX2_input` |
-| Output (Ausgang) | `QO100_TX2` |
+| Input (Eingang) | `fromQO100` |
+| Output (Ausgang) | `toQO100` |
 
-WSJT-X zeigt zusätzlich interne Anschlüsse wie `QO100_RX2.Monitor` und `QO100_TX2.Monitor` an. Für den Betrieb über RX2/TX2 die oben aufgeführten Geräte verwenden.
+Die Namen gelten aus Sicht des Digitalprogramms: `fromQO100` liefert das Empfangsaudio von RX2, `toQO100` führt das Sendeaudio zu TX2. WSJT-X zeigt zusätzlich interne Anschlüsse wie `fromQO100_internal.monitor` und `toQO100.monitor` an. Für den Betrieb über RX2/TX2 die oben aufgeführten Geräte verwenden. Nach dem Update den Stack neu starten und die bisherige Geräteauswahl im Digitalprogramm ersetzen.
 
-Beide Monitoringfrequenzen unter **Setup → Monitoring-Empfänger** als ganze Hz einstellen und speichern. **Decoder-Text anzeigen** über dem Zoom öffnet die Ausgabe; Radiobuttons wählen **RX3 · FT8** oder **RX4 · PSK**. Beide Quellen werden gleichzeitig empfangen und getrennt gepuffert. `./start_all.sh` startet beide Decoder.
+Die drei Monitoringfrequenzen unter **Setup → Monitoring-Empfänger** als ganze Hz einstellen und speichern. Oben in der Zoom-Kachel wählen sieben Radiobuttons **RX1-/RX2-Zoom**, **FT8-Monitor**, **PSK-Monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin** oder **RX5-Diagnose**. Die ausgewählte Ansicht nutzt den gesamten Bereich unter den Radiobuttons. Die Zoom-Auswahl folgt dem angeklickten Empfänger RX1/RX2; eine geöffnete Monitoransicht bleibt dabei bestehen. Alle Quellen werden im Hintergrund weiter empfangen und getrennt gepuffert. Ansicht und Lesepositionen bleiben in diesem Browser gespeichert. `./start_all.sh` startet alle drei Decoder. Die MM-Texte und Bulletin-Versionen bleiben in `data/mm-beacon/` über Neustarts erhalten; im Browser erscheinen die letzten 200 DX-/CW-Meldungen und das letzte vollständige Bulletin.
 
 ![Decodierte FT8-Nachrichten](docs/decoderoutput.png)
 

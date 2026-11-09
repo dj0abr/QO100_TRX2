@@ -1,5 +1,6 @@
 """Real virtual audio devices on a private PulseAudio server; no physical devices or RF."""
 from pathlib import Path
+import json
 import os
 import shutil
 import socket
@@ -33,11 +34,16 @@ def main():
             wait(native.exists)
             adapter = subprocess.Popen([str(binary), '--port', str(audio_port), '--bridge-port', str(bridge_port),
                 '--device-prefix', prefix], stdout=logs[1], stderr=logs[1], env=env)
-            wait(lambda: 'Digital audio: RX2 input ' in (root/'adapter.log').read_text())
+            wait(lambda: 'Digital audio: Input fromQO100=' in (root/'adapter.log').read_text())
+            sinks = json.loads(subprocess.check_output(['pactl', '--format=json', 'list', 'sinks'], env=env))
+            sources = json.loads(subprocess.check_output(['pactl', '--format=json', 'list', 'sources'], env=env))
+            assert {d['name']: d['properties']['device.description'] for d in sinks} == {
+                prefix+'_fromQO100_internal': 'fromQO100_internal', prefix+'_toQO100': 'toQO100'}
+            assert next(d for d in sources if d['name'] == prefix+'_fromQO100')['properties']['device.description'] == 'fromQO100'
             recorder = subprocess.Popen(['parec', '--raw', '--format=s16le', '--rate=48000', '--channels=1',
-                '--latency-msec=40', '--device='+prefix+'_rx2_input'], stdout=subprocess.PIPE, stderr=logs[2], env=env)
+                '--latency-msec=40', '--device='+prefix+'_fromQO100'], stdout=subprocess.PIPE, stderr=logs[2], env=env)
             player = subprocess.Popen(['pacat', '--playback', '--raw', '--format=s16le', '--rate=48000', '--channels=1',
-                '--latency-msec=40', '--device='+prefix+'_tx2'], stdin=subprocess.PIPE, stderr=logs[2], env=env)
+                '--latency-msec=40', '--device='+prefix+'_toQO100'], stdin=subprocess.PIPE, stderr=logs[2], env=env)
             def read_audio():
                 while True:
                     data = recorder.stdout.read(1920)

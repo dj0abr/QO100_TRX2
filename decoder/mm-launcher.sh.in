@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec "@Python3_EXECUTABLE@" "@CMAKE_CURRENT_SOURCE_DIR@/decoder/mm_beacon.py" --probe "@CMAKE_RUNTIME_OUTPUT_DIRECTORY@/qo100_mm_probe" "$@"

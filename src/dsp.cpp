@@ -33,8 +33,7 @@ LiquidDecimator make_rx_decimator() {
     if (!result) throw std::runtime_error("Cannot create liquid RX decimator");
     return result;
 }
-LiquidFir make_usb_filter(float gain, RxFilterSettings settings) {
-    if (!settings.valid()) throw std::runtime_error("Invalid USB filter bandwidth/center");
+static LiquidFir usb_filter(float gain, RxFilterSettings settings) {
     const auto h = lowpass(513, settings.bandwidth_hz/2., 12000);
     std::vector<std::complex<float>> taps(h.size());
     for (size_t i = 0; i < h.size(); ++i)
@@ -43,6 +42,11 @@ LiquidFir make_usb_filter(float gain, RxFilterSettings settings) {
     if (!result) throw std::runtime_error("Cannot create liquid USB filter");
     return result;
 }
+LiquidFir make_usb_filter(float gain, RxFilterSettings settings) {
+    if (!settings.valid()) throw std::runtime_error("Invalid USB filter bandwidth/center");
+    return usb_filter(gain,settings);
+}
+LiquidFir make_mm_usb_filter() { return usb_filter(1,RxFilterSettings::from_edges(0,4000)); }
 SrcPtr make_audio_resampler(int quality, int channels) {
     int error = 0;
     SrcPtr result(src_new(quality, channels, &error), src_delete);

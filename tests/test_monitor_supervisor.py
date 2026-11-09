@@ -22,7 +22,7 @@ def main():
         audio_stub.chmod(0o755)
         (root/'config/backend.conf').write_text(private_config(defaults, port()))
         backend_port = next(line.split('=')[1].strip() for line in (root/'config/backend.conf').read_text().splitlines() if line.startswith('gui_port ='))
-        audio3, text3, audio4, text4, http = [port() for _ in range(5)]
+        audio3, text3, audio4, text4, http, audio5, mm_http = [port() for _ in range(7)]
         digital_port, digital_bridge_port = port(), port()
         (root/'config/webbridge.conf').write_text(f'''listen = 127.0.0.1
 port = {http}
@@ -34,10 +34,12 @@ rx4_decoder_audio_port = {audio4}
 rx4_decoder_text_port = {text4}
 digital_audio_port = {digital_port}
 digital_bridge_port = {digital_bridge_port}
+rx5_decoder_audio_port = {audio5}
+mm_http_port = {mm_http}
 ''')
         log = root/'supervisor.log'
         with log.open('w') as output:
-            stack = subprocess.Popen(['bash', str(root/'start_all.sh'), '--source', 'synthetic'], stdout=output, stderr=output)
+            stack = subprocess.Popen(['bash', str(root/'start_all.sh'), '--source', 'synthetic', '--mm-data-dir',str(root/'mm-data')], stdout=output, stderr=output)
             seen = set()
             def children():
                 result = {}
@@ -47,13 +49,13 @@ digital_bridge_port = {digital_bridge_port}
                         command = Path(f'/proc/{pid}/cmdline').read_bytes().decode().replace('\0', ' ')
                     except FileNotFoundError:
                         continue
-                    for name in ('qo100_backend', 'qo100_webbridge', 'qo100_ft8_decoder', 'beacon_decoder.py', 'qo100_digital_audio'):
+                    for name in ('qo100_backend', 'qo100_webbridge', 'qo100_ft8_decoder', 'beacon_decoder.py', 'qo100_digital_audio', 'mm_beacon.py'):
                         if name in command:
                             result[name] = int(pid); seen.add(int(pid))
                 return result
             try:
                 wait(lambda: 'RX3 FT8 und RX4 PSK laufen.' in log.read_text(), timeout=15)
-                before = children(); assert len(before) == 5, before
+                before = children(); assert len(before) == 6, before
                 ft8 = 'qo100_ft8_decoder'; psk = 'beacon_decoder.py'
                 os.kill(before[ft8], signal.SIGTERM)
                 wait(lambda: children().get(ft8, before[ft8]) != before[ft8], timeout=6)
@@ -68,10 +70,14 @@ digital_bridge_port = {digital_bridge_port}
                 wait(lambda: children().get(audio, restarted[audio]) != restarted[audio], timeout=6)
                 after_audio = children()
                 assert all(after_audio[name] == pid for name, pid in restarted.items() if name != audio)
+                mm='mm_beacon.py';os.kill(after_audio[mm],signal.SIGTERM)
+                wait(lambda:children().get(mm,after_audio[mm]) != after_audio[mm],timeout=6)
+                after_mm=children()
+                assert all(after_mm[name]==pid for name,pid in after_audio.items() if name!=mm)
                 os.kill(restarted['qo100_backend'], signal.SIGTERM)
                 assert stack.wait(timeout=12) == 1, log.read_text()
                 wait(lambda: not any(Path(f'/proc/{pid}').exists() for pid in seen), timeout=4)
-                print('Supervisor: FT8/PSK/audio adapter restart independently, core failure cleans up every child; no hardware accessed')
+                print('Supervisor: FT8/PSK/MM/audio adapter restart independently, core failure cleans up every child; no hardware accessed')
             finally:
                 if stack.poll() is None:
                     stack.terminate(); stack.wait(timeout=12)

@@ -108,11 +108,12 @@ int main(int argc, char** argv) {
             std::unique_ptr<qo100::Spectrum> zoom;
             uint32_t zoom_frame_id = 0;
         };
-        std::array<ReceiverState,4> receivers;
+        std::array<ReceiverState,qo100::rx_streams.size()> receivers;
         receivers[0].frequency=c.initial_rx_hz;
         receivers[1].frequency=c.initial_rx2_hz;
         receivers[2].frequency=c.rx3_frequency_hz;
         receivers[3].frequency=c.rx4_frequency_hz;
+        receivers[4].frequency=c.rx5_frequency_hz;
         qo100::TxChannel tx(150000,c.tx1_compressor);
         uint64_t tx_frequency=c.initial_tx_hz, tx_blocks=0;
         uint32_t tx_epoch=1,tx_request=0,tx_block_id=0,status_sequence=0;
@@ -248,7 +249,8 @@ int main(int argc, char** argv) {
                     qo100::FrameInfo f{rx.epoch,stamp(),index,rx_frequency(i),12000,0,session_id,qo100::rx_streams[i]};
                     send_packet(qo100::audio_packet(f,audio));
                 }, i==0 ? c.rx1_filter : qo100::RxFilterSettings{},
-                i==0 ? std::optional<uint32_t>(c.rx1_nr_percent) : std::nullopt);
+                i==0 ? std::optional<uint32_t>(c.rx1_nr_percent) : std::nullopt,
+                i==4 ? qo100::RxChannel::Profile::multimedia : qo100::RxChannel::Profile::normal);
         }
         std::cout << "RX1 NR: SpeexDSP 1.2.1 (bundled, static); strength=" << c.rx1_nr_percent << " percent\n";
         qo100::Spectrum spectrum(c.iq_rate(), c.fft_size, c.spectrum_fps,
@@ -297,7 +299,7 @@ int main(int argc, char** argv) {
         };
         auto apply_runtime=[&](const qo100::Config& old,bool reset_all) {
             for(size_t i=0;i<receivers.size();++i) {
-                const auto hz=std::array<uint64_t,4>{c.initial_rx_hz,c.initial_rx2_hz,c.rx3_frequency_hz,c.rx4_frequency_hz}[i];
+                const auto hz=std::array<uint64_t,5>{c.initial_rx_hz,c.initial_rx2_hz,c.rx3_frequency_hz,c.rx4_frequency_hz,c.rx5_frequency_hz}[i];
                 const bool changed=hz!=receivers[i].frequency;
                 receivers[i].frequency=hz;
                 if(reset_all || (i>=2 && changed)) reset_rx(i);
@@ -398,7 +400,8 @@ int main(int argc, char** argv) {
                             have_loop_request=false;
                             change_loop(TestLoop::normal);
                         }
-                        send_rx_state(2);send_rx_state(3);send_tx2_state();
+                        for(size_t i=2;i<receivers.size();++i) send_rx_state(i);
+                        send_tx2_state();
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
                         qo100::SettingsControl control_settings{};
                         if(qo100::parse_settings_control(buffer.data(),size_t(n),control_settings)) {

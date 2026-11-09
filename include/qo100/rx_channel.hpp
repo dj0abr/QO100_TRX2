@@ -15,10 +15,11 @@ namespace qo100 {
 // One reusable, independently tuned channel. All rates refer to complex samples.
 class RxChannel {
 public:
+    enum class Profile { normal, multimedia };
     using Zoom = std::function<void(std::complex<float>)>;
     using Audio = std::function<void(const std::vector<int16_t>&, uint64_t)>;
     RxChannel(int64_t offset_hz, Zoom zoom, Audio audio, RxFilterSettings filter = {},
-              std::optional<uint32_t> nr_percent = std::nullopt);
+              std::optional<uint32_t> nr_percent = std::nullopt, Profile profile = Profile::normal);
     ~RxChannel();
     RxChannel(const RxChannel&) = delete;
     RxChannel& operator=(const RxChannel&) = delete;
@@ -34,6 +35,7 @@ private:
     void resample();
     LiquidDecimator decimator_;
     RxAudioFilter usb_filter_;
+    LiquidFir mm_filter_;
     std::unique_ptr<NoiseReduction> nr_;
     FrequencyShifter mixer_{600000};
     std::array<std::complex<float>, 8> mixed_{};

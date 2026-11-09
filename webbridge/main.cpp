@@ -22,6 +22,8 @@ void setting(bridge::Config& c,const std::string& k,const std::string& v,const s
     else if(k=="rx3_decoder_text_port") c.decoders[0].text_port=number(v,0,65535);
     else if(k=="rx4_decoder_audio_port") c.decoders[1].audio_port=number(v,0,65535);
     else if(k=="rx4_decoder_text_port") c.decoders[1].text_port=number(v,0,65535);
+    else if(k=="rx5_decoder_audio_port") c.rx5_decoder_audio_port=number(v,0,65535);
+    else if(k=="mm_http_port") c.mm_http_port=number(v,0,65535);
     else if(k=="digital_audio_port") c.digital_audio_port=number(v,0,65535);
     else if(k=="digital_bridge_port") c.digital_bridge_port=number(v,0,65535);
     else if(k=="idle_seconds") c.idle_seconds=number(v,0,86400);
@@ -53,6 +55,7 @@ int main(int argc,char** argv) {
                 std::cout<<"qo100_webbridge [--config FILE] [--listen IPv4] [--port 8080] [--backend-port 40900]\n"
                     "                [--rx3-decoder-audio-port 0] [--rx3-decoder-text-port 0]\n"
                     "                [--rx4-decoder-audio-port 0] [--rx4-decoder-text-port 0]\n"
+                    "                [--rx5-decoder-audio-port 0] [--mm-http-port 0]\n"
                     "                [--digital-audio-port 0] [--digital-bridge-port 0]\n"
                     "                [--web-root DIR] [--idle-seconds 0] [--heartbeat-seconds 60]\n"
                     "                [--max-clients 16] [--queue-bytes 524288]\n";return 0;

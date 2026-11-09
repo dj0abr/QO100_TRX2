@@ -62,10 +62,12 @@ class Client:
         return bytes(data)
 
     def _read(self):
+        fragments = bytearray()
+        fragment_opcode = None
         try:
             while not self.closed:
                 first, second = self._exact(2)
-                assert first & 128, 'Server unexpectedly fragmented a message'
+                final = bool(first & 128)
                 opcode, count = first & 15, second & 127
                 if count == 126:
                     count = struct.unpack('!H', self._exact(2))[0]
@@ -73,6 +75,21 @@ class Client:
                     count = struct.unpack('!Q', self._exact(8))[0]
                 assert not second & 128
                 data = self._exact(count)
+                if opcode < 8:
+                    if opcode in (1, 2):
+                        assert fragment_opcode is None, 'Data message started inside a fragmented message'
+                        fragment_opcode = opcode
+                    else:
+                        assert opcode == 0 and fragment_opcode is not None, 'Unexpected continuation frame'
+                    fragments.extend(data)
+                    assert len(fragments) <= 4*1024*1024, 'Oversized test WebSocket message'
+                    if not final:
+                        continue
+                    opcode, data = fragment_opcode, bytes(fragments)
+                    fragment_opcode = None
+                    fragments.clear()
+                else:
+                    assert final and count <= 125, 'Invalid control frame'
                 if opcode == 8:
                     self._frame(8, data)
                     break

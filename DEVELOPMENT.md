@@ -37,16 +37,18 @@ Programme müssen erst beendet werden. Endet später Backend oder Webadapter, we
 die übrigen beendet. Einzelne Monitoringdecoder werden separat neu gestartet. Für einen Test ohne Pluto: `./start_all.sh --source synthetic`.
 Alternative Konfigurationen: `--backend-config DATEI --webbridge-config DATEI`.
 
-**Monitoring:** RX3/FT8 und RX4/PSK besitzen eigene USB-Demodulatoren und feste,
+**Monitoring:** RX3/FT8, RX4/PSK und RX5/MM besitzen eigene USB-Demodulatoren und feste,
 im WebGUI unter **Setup → Monitoring-Empfänger** als ganze Hz einstellbare Frequenzen.
-`./start_all.sh` startet beide externen Decoder. Die Webbridge leitet die getrennten
-Audioströme (Transport-IDs 5/6) lokal weiter und verteilt beide Textquellen gleichzeitig
+`./start_all.sh` startet die drei externen Decoder. Die Webbridge leitet die getrennten
+Audioströme (Transport-IDs 5/6/8) lokal weiter und verteilt alle Textquellen gleichzeitig
 an die Browser. Radiobuttons wählen die sichtbare Quelle mit getrennten Textpuffern.
 RX2 bleibt unabhängig abstimmbar und besitzt keinen Monitoringdecoderanschluss.
 Das zugehörige TX2 und die virtuellen Audiogeräte für FLdigi/WSJT-X sind unter
 [RX2/TX2-Digitalbetrieb](docs/digital-audio.md) beschrieben. Die Browserauswahl
 RX1/RX2 wählt das bediente Paar und den hörbaren Audiokanal.
 [Architektur, Ports und Betrieb](docs/webbridge.md#monitoring-rx3-und-rx4).
+RX5 liefert DX-Cluster, CW-Skimmer und Bulletin über den übernommenen persistenten
+MM-Bakenmonitor; [Signalweg, Datenverzeichnis und Tests](docs/mm-beacon.md).
 
 **Browser-GUI:** Der separate Adapter `qo100_webbridge` verbindet die GUI-UDP-Schnittstelle
 mit HTTP/WebSocket und liefert eine HTML/JS-Testseite aus. Ein Bediener, beliebig weitere

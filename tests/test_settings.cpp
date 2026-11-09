@@ -12,11 +12,13 @@ int main() {
     try {
         std::filesystem::create_directory(directory);
         qo100::Config base;base.derive();base.validate();
-        auto monitors=qo100::patch_settings(base,{{"rx3_frequency_hz","10489540321"},{"rx4_frequency_hz","10489748821"}});
-        require(monitors.rx3_frequency_hz==10489540321ULL && monitors.rx4_frequency_hz==10489748821ULL,"Monitoring RF lost precision");
+        require(base.rx5_frequency_hz==10489993000ULL,"Wrong RX5 default");
+        auto monitors=qo100::patch_settings(base,{{"rx3_frequency_hz","10489540321"},{"rx4_frequency_hz","10489748821"},{"rx5_frequency_hz","10489993001"}});
+        require(monitors.rx3_frequency_hz==10489540321ULL && monitors.rx4_frequency_hz==10489748821ULL && monitors.rx5_frequency_hz==10489993001ULL,"Monitoring RF lost precision");
         require(!qo100::hardware_settings_changed(base,monitors),"Monitoring frequency must not restart hardware");
         for(const auto& invalid:{"0","-1","10489000000","10489540321.5","18446744073709551615"})
-            rejects([&]{qo100::patch_settings(base,{{"rx3_frequency_hz",invalid}});});
+            for(const auto& key:{"rx3_frequency_hz","rx4_frequency_hz","rx5_frequency_hz"})
+                rejects([&]{qo100::patch_settings(base,{{key,invalid}});});
         auto next=qo100::patch_settings(base,{{"rx_correction_hz","123"},{"tx_correction_hz","-456"},{"lnb_reference_hz","24999999"}});
         require(next.pluto_rx_hz==739750513 && next.pluto_tx_hz==1290249544,"Incorrect LNB/calibration calculation");
         next=qo100::patch_settings(next,{{"pluto_connection","usb"},{"gui_audio_gain","5.5"},{"initial_rx_hz","10489897327"}});

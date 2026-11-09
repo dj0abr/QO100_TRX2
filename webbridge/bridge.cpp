@@ -34,7 +34,7 @@ std::shared_ptr<const Bytes> encoded(const Json& j) {
     const auto s=j.dump();return std::make_shared<const Bytes>(s.begin(),s.end());
 }
 }
-Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp_(io),digital_(io),timer_(io) {
+Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp_(io),digital_(io),mm_audio_(io),timer_(io) {
     udp_.open(net::ip::udp::v4());
     udp_.set_option(net::socket_base::receive_buffer_size(4*1024*1024));
     udp_.bind({net::ip::make_address_v4("127.0.0.1"),0});
@@ -51,6 +51,27 @@ Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp
         socket.bind({net::ip::make_address_v4("127.0.0.1"),config.text_port});
         // A connected loopback socket accepts text only from the configured decoder's audio port.
         socket.connect({net::ip::make_address_v4("127.0.0.1"),config.audio_port});
+    }
+    if(config_.rx5_decoder_audio_port || config_.mm_http_port) {
+        if(!config_.rx5_decoder_audio_port || !config_.mm_http_port || !ports.insert(config_.rx5_decoder_audio_port).second)
+            throw std::runtime_error("RX5 audio and MM HTTP must both be enabled; RX5 UDP port must be distinct");
+        mm_audio_.open(net::ip::udp::v4());
+        mm_audio_.connect({net::ip::make_address_v4("127.0.0.1"),config_.rx5_decoder_audio_port});
+        mm_monitor_=monitor_mm(io,config_.mm_http_port,[this](const auto& channel,const auto& text) {
+            // Validate UTF-8 before caching/broadcasting a remote text snapshot.
+            try {
+                const Json message={{"type","decoder_text"},{"stream",5},{"channel",channel},{"replace",true},{"text",text}};
+                (void)encoded(message);mm_text_[channel]=text;broadcast(message);
+            } catch(const std::exception& e) {std::cerr<<"Ignored MM text: "<<e.what()<<'\n';}
+        },[this](const auto& body) {
+            try {
+                auto data=Json::parse(body);
+                if(!data.is_object()) return;
+                data["type"]="mm_diagnostics";data["stream"]=5;
+                auto bytes=encoded(data);const auto clients=clients_;
+                for(const auto& [id,client]:clients) if(client.mm_diagnostics) client.peer->send(bytes,false);
+            } catch(const std::exception& e) {std::cerr<<"Ignored MM diagnostics: "<<e.what()<<'\n';}
+        });
     }
     if(config_.digital_audio_port || config_.digital_bridge_port) {
         if(!config_.digital_audio_port || !config_.digital_bridge_port ||
@@ -150,12 +171,19 @@ uint64_t Bridge::join(std::shared_ptr<Peer> peer) {
     const auto id=++next_client_;const auto now=Clock::now();clients_[id]={std::move(peer),now};
     if(!owner_) owner_=id; // Only a NEW connection can acquire a vacant seat.
     roles();state_["ready"]=ready();text(id,state_);
+    for(const auto& [channel,value]:mm_text_)
+        text(id,{{"type","decoder_text"},{"stream",5},{"channel",channel},{"replace",true},{"text",value}});
     std::cout<<"Browser "<<id<<" joined as "<<(owner_==id?"operator":"viewer")<<'\n'<<std::flush;
     return id;
 }
 void Bridge::leave(uint64_t id) {
     const bool owned=id && id==owner_;clients_.erase(id);
+    update_mm_subscription();
     if(owned) revoke("disconnected");else roles();
+}
+void Bridge::update_mm_subscription() {
+    if(mm_monitor_ && !stopping_) mm_monitor_->diagnostics(std::any_of(clients_.begin(),clients_.end(),
+        [](const auto& item){return item.second.mm_diagnostics;}));
 }
 void Bridge::revoke(const std::string& reason) {
     const auto old=owner_;owner_=0;
@@ -265,9 +293,16 @@ void Bridge::packet(Bytes p) {
     if(type==2 || type==5) {
         if(!initialized_) return;
         if(type==2 && (stream>2 || get(p,54,2)!=1 || !get(p,52,2) || p.size()!=64+2*get(p,52,2))) return;
-        if(type==5 && ((stream!=1 && stream!=2 && stream!=4 && stream!=qo100::rx3_stream && stream!=qo100::rx4_stream) || p.size()!=544 ||
+        if(type==5 && ((stream!=1 && stream!=2 && stream!=4 && stream!=qo100::rx3_stream && stream!=qo100::rx4_stream && stream!=qo100::rx5_stream) || p.size()!=544 ||
             get(p,40,4)!=12000 || get(p,52,2)!=240 || get(p,54,2)!=2 || get(p,56,4)!=240)) return;
         if(type==5 && stream==2) send_digital(p); // Fan out to external audio AND browser monitoring.
+        if(type==5 && stream==qo100::rx5_stream) {
+            if(mm_audio_.is_open()) {
+                auto data=std::make_shared<Bytes>(std::move(p));
+                mm_audio_.async_send(net::buffer(*data),[data](auto,size_t){});
+            }
+            return;
+        }
         if(type==5 && (stream==qo100::rx3_stream || stream==qo100::rx4_stream)) {
             send_decoder(stream==qo100::rx3_stream?0:1,std::move(p));return;
         }
@@ -339,6 +374,10 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
         // Retained for existing GUIs. WebSocket ping/pong checks liveness without
         // depending on JavaScript timers in a background or briefly busy tab.
         if(type=="heartbeat") return;
+        if(type=="mm_diagnostics") {
+            if(!j.contains("enabled") || !j["enabled"].is_boolean()) throw std::runtime_error("Expected diagnostics enabled boolean");
+            clients_.at(client).mm_diagnostics=j["enabled"].get<bool>();update_mm_subscription();return;
+        }
         if(client!=owner_) {error(client,id,"read_only","Only the operator can send commands");return;}
         if(type=="activity") {clients_.at(client).activity=Clock::now();return;}
         if(type=="ptt_keepalive") {if(ptt_requested_) ptt_until_=Clock::now()+std::chrono::milliseconds(750);return;}
@@ -455,7 +494,9 @@ void Bridge::tick() {
 }
 void Bridge::stop() {
     stopping_=true;
-    boost::system::error_code ec;digital_.close(ec);for(auto& decoder:decoders_) if(decoder) decoder->socket.close(ec);
+    boost::system::error_code ec;digital_.close(ec);mm_audio_.close(ec);
+    if(mm_monitor_) mm_monitor_->stop();
+    for(auto& decoder:decoders_) if(decoder) decoder->socket.close(ec);
     revoke("shutdown");
     const auto copy=clients_;for(const auto& c:copy) c.second.peer->close("Server shutdown");
 }

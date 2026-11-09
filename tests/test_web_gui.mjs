@@ -211,6 +211,15 @@ audio.devices=[
   {kind:'audiooutput',deviceId:'speakers',label:'Built-in speakers'},
   {kind:'audiooutput',deviceId:'usb-out',label:'USB Advanced Audio Device Analog Stereo'},
 ];
+// Digital-program endpoints and their aliases must not enter the browser's audio path.
+const physicalDevices=audio.devices.slice();
+const digitalLabels=['fromQO100','toQO100','fromQO100_internal','Monitor of fromQO100_internal',
+  'Monitor of toQO100','Default - fromQO100','Default - toQO100',
+  'QO100_RX2','QO100_TX2','Monitor of QO100_RX2_Internal'];
+navigator.mediaDevices.enumerateDevices=async()=>[...physicalDevices,...digitalLabels.flatMap((label,i)=>
+  ['audioinput','audiooutput'].map(kind=>({kind,deviceId:`digital-${i}-${kind}`,label})))];
+await audio.refreshDevices();
+assert.deepEqual(audio.devices,physicalDevices);
 let routed;
 audio.context={setSinkId:async id=>{routed=id;}};
 assert.equal(audio.deviceId('audioinput'),'default');

@@ -21,7 +21,7 @@ cmake --build build-webbridge -j2
 ```
 
 `config/webbridge.conf`: Listen-Adresse, HTTP-Port, Backend-Port, Dokumentverzeichnis,
-lokale Decoder-Ports (RX3 **40910/40911**, RX4 **40912/40913**), Inaktivitätslimit (Standard **300 s**), Verbindungslimit (**16**) und Sendepuffer je Browser
+lokale Decoder-Ports (RX3 **40910/40911**, RX4 **40912/40913**, RX5 Audio **40916** und MM-HTTP **8766**), Inaktivitätslimit (Standard **0 = aus**), Verbindungslimit (**16**) und Sendepuffer je Browser
 (**512 KiB**). Relative `web_root`-Pfade beziehen sich auf die Config-Datei.
 CLI überschreibt die Datei; Optionen zeigt `--help`.
 
@@ -53,10 +53,17 @@ Startwerte: FT8 **10489540000 Hz**, PSK **10489748821 Hz** (USB-Träger).
 Nur der geänderte Monitoringkanal setzt Filter, Epoche und Samplezähler zurück;
 RX1, RX2 und der andere Monitor laufen weiter. Normales `tune` erlaubt nur RX1/RX2.
 
-**Decoder-Text anzeigen** über dem Zoom blendet den Monitoringbereich ein.
-Radiobuttons **RX3 · FT8** und **RX4 · PSK** wählen die sichtbare Quelle.
-Beide Textströme werden immer empfangen, mit getrennten Puffern und Lesepositionen.
-Quelle und Sichtbarkeit werden in diesem Browser gespeichert. **Text löschen**
+Die Zoom-Kachel bietet oben sieben Radiobuttons: **RX1-/RX2-Zoom**, **FT8-Monitor**,
+**PSK-Monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin** und **RX5-Diagnose**.
+Genau eine Ansicht nutzt den gesamten Inhalt der Kachel, einschließlich des sonst
+für Zoom-Spektrum, Frequenzachse und Wasserfall verwendeten Platzes.
+Alle Textströme werden immer empfangen, mit getrennten Puffern und Lesepositionen.
+Die Zoom-Canvases behalten im Hintergrund ihre Größe und ihren laufenden Wasserfall;
+beim Zurückschalten wird keine veraltete Historie nachgespielt.
+Die Auswahl wird als `qo100.zoomView` in diesem Browser gespeichert; bisherige
+`decoderVisible`-/`decoderSource`-Einstellungen werden beim ersten Laden übernommen.
+Ein RX1-/RX2-Wechsel ändert den Zoom-Empfänger, ohne eine gewählte Monitoransicht
+zu schließen. **Text löschen**
 löscht ausschließlich die ausgewählte Quelle in diesem Browser.
 
 Konfiguration in `config/webbridge.conf`:
@@ -94,6 +101,36 @@ Ein fehlender Decoder unterbricht weder QSO noch den anderen Decoder. Das Starts
 startet einen während des Betriebs beendeten Decoder nach spätestens etwa zwei Sekunden
 neu. Ein Ende von Backend oder Webadapter beendet weiterhin den Verbund.
 [FT8: Uhrzeit und Tests](ft8-decoder.md), [PSK-Bake](beacon-decoder.md).
+
+### RX5: Multimedia-Bake
+
+RX5 verwendet einen eigenen USB-Demodulator, Transport-ID **8**, und die persistente
+Einstellung `rx5_frequency_hz` (Vorgabe **10489993000 Hz**). Audio geht ausschließlich
+über UDP **40916** an `qo100_mm_decoder`; RX2 wird dafür nicht verwendet. Der
+integrierte MM-Monitor liefert seine drei Text-Momentaufnahmen über HTTP **8766**.
+Die Abholung läuft asynchron, ohne blockierende HTTP-Aufrufe im Audio-/WS-Pfad.
+Neue Browser erhalten die zwischengespeicherten Texte auch ohne neues Funkereignis.
+
+```json
+{"type":"decoder_text","stream":5,"channel":"dx-cluster","replace":true,"text":"DX-Meldungen\n"}
+{"type":"decoder_text","stream":5,"channel":"cw-skimmer","replace":true,"text":"CW-Meldungen\n"}
+{"type":"decoder_text","stream":5,"channel":"bulletin","replace":true,"text":"Bulletintext"}
+```
+
+Der Browser hält getrennte Text-/Scrollzustände für alle fünf Quellen. MM-Spots sind
+auf 200 Zeilen, die Übertragung pro MM-Ansicht auf etwa 64 KiB begrenzt. Das
+vollständige MM-Archiv bleibt lokal persistent. [RX5-Betrieb und Daten](mm-beacon.md).
+
+**RX5-Diagnose** abonniert zusätzlich Spektrum, Pilotenmessung, Konstellation und
+Empfangsstatus. Browser senden `{"type":"mm_diagnostics","enabled":true}` beim
+Öffnen und `enabled:false` beim Verlassen. Auch Zuschauer dürfen dies abonnieren;
+es löst keine Funkkommandos aus. Nur bei mindestens einem Abonnenten wird die lokale
+HTTP-Diagnose etwa viermal pro Sekunde abgefragt. Antworten gehen ausschließlich an
+die abonnierten Browser als `{"type":"mm_diagnostics","stream":5,...}`.
+Die Nutzdaten enthalten `audio_fresh`, `audio_age_s`, `status_age_s`, `frequency_hz`,
+`receiver`, `pilot_hz`, `pilot_prominence_db`, maximal 480 `points` und 768
+`spectrum.dbfs`-Werte. Der Browser berücksichtigt zusätzlich die seit Empfang der
+Nachricht verstrichene Zeit und löscht bei veralteten Daten Lock, Punkte und Kurve.
 
 ## OPNsense und Webseite
 
@@ -294,7 +331,8 @@ Mikrofon und AudioWorklet benötigen HTTPS oder localhost.
 Unter **Setup → Audio** lassen sich Aufnahme- und Wiedergabegerät auswählen.
 Zur Auswahl stehen **Systemstandard** und die verfügbaren Audiogeräte. Ohne
 explizite Geräteauswahl gilt der Systemstandard. Die virtuellen Digitalgeräte
-QO100_RX2, QO100_TX2 und QO100_RX2_Internal samt Monitorvarianten sind ausgeblendet.
+fromQO100, toQO100 und fromQO100_internal samt Monitorvarianten sowie die bisherigen
+QO100_RX2-/QO100_TX2-Geräte sind ausgeblendet.
 Nach der Mikrofonfreigabe werden die Gerätenamen angezeigt. Die Auswahl wird lokal
 im jeweiligen Browser gespeichert. Bei veralteten Geräte-IDs wird nach der Freigabe
 auf den Systemstandard zurückgefallen. Eine abgelehnte Ausgabezuordnung erzeugt eine Warnung und

@@ -1,4 +1,4 @@
-"""Four independent RXs, parallel monitor links, persistent Setup tuning and WS text."""
+"""Five independent RXs, parallel monitor links, persistent Setup tuning and WS text."""
 from pathlib import Path
 import socket
 import subprocess
@@ -14,7 +14,7 @@ def main():
     adapter, backend, dummy, defaults, assets = map(Path, sys.argv[1:])
     with tempfile.TemporaryDirectory(prefix='qo100-monitors-') as temp:
         root = Path(temp)
-        backend_port, http_port, audio3, text3, audio4, text4 = [port() for _ in range(6)]
+        backend_port, http_port, audio3, text3, audio4, text4, audio5, mm_http = [port() for _ in range(8)]
         config = root/'backend.conf'
         config.write_text(private_config(defaults, backend_port)
                           .replace('rx3_frequency_hz = 10489540000', 'rx3_frequency_hz = 10489600000')
@@ -24,8 +24,8 @@ def main():
             return subprocess.Popen([str(backend), '--config', str(config), '--source', 'synthetic'], stdout=logs[0], stderr=logs[0])
         radio = start_radio()
         proxy = Proxy(backend_port)
-        pcm = {s: [] for s in (1, 2, 5, 6)}
-        wire = {5: set(), 6: set()}
+        pcm = {s: [] for s in (1, 2, 5, 6, 8)}
+        wire = {5: set(), 6: set(), 8: set()}
         def observe(p):
             h = HEADER.unpack_from(p)
             if h[2] == 5 and h[4] in pcm:
@@ -38,7 +38,8 @@ def main():
         bridge = subprocess.Popen([str(adapter), '--listen', '127.0.0.1', '--port', str(http_port),
             '--backend-port', str(proxy.port), '--web-root', str(assets),
             '--rx3-decoder-audio-port', str(audio3), '--rx3-decoder-text-port', str(text3),
-            '--rx4-decoder-audio-port', str(audio4), '--rx4-decoder-text-port', str(text4)], stdout=logs[1], stderr=logs[1])
+            '--rx4-decoder-audio-port', str(audio4), '--rx4-decoder-text-port', str(text4),
+            '--rx5-decoder-audio-port', str(audio5), '--mm-http-port', str(mm_http)], stdout=logs[1], stderr=logs[1])
         taps = {}
         clients = []
         decoder = None
@@ -50,7 +51,7 @@ def main():
                     return False
             wait(available)
             time.sleep(.3)  # Missing decoders/ICMP must not stop the adapter.
-            for stream, audio_port in ((5, audio3), (6, audio4)):
+            for stream, audio_port in ((5, audio3), (6, audio4), (8, audio5)):
                 taps[stream] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 taps[stream].bind(('127.0.0.1', audio_port))
                 taps[stream].settimeout(.2)
@@ -65,7 +66,8 @@ def main():
                     h = HEADER.unpack_from(p)
                     assert len(p) == 544 and h[:5] == (b'QTR2', 1, 5, 64, stream), h
                     assert (h[9], h[12], h[13], h[14]) == (12000, 240, 2, 240), h
-                    assert source == ('127.0.0.1', text3 if stream == 5 else text4)
+                    assert source[0] == '127.0.0.1'
+                    if stream != 8: assert source[1] == (text3 if stream == 5 else text4)
                     assert p in wire[stream], 'Monitor PCM/metadata changed in adapter'
                     if (frequency is None or h[8] == frequency) and (epoch is None or h[5] == epoch):
                         return h
@@ -81,7 +83,8 @@ def main():
             owner, viewer = Client(http_port), Client(http_port)
             clients += [owner, viewer]
             owner.role('operator'); viewer.role('viewer', True)
-            initial = owner.state(lambda s: s.get('ready') and all(str(c) in s['rx'] for c in (1, 2, 3, 4)))
+            initial = owner.state(lambda s: s.get('ready') and all(str(c) in s['rx'] for c in (1, 2, 3, 4, 5)))
+            assert initial['rx']['5']['frequency_hz'] == 10489993000
             viewer.state()
 
             def output(stream, text):
@@ -123,6 +126,10 @@ def main():
             assert audio(6)[5] == initial['rx']['4']['epoch'], 'RX3 change reset RX4'
             patch({'rx4_frequency_hz': 10489748821})
             audio(6, 10489748821, initial['rx']['4']['epoch']+1)
+            patch({'rx5_frequency_hz': 10489993001})
+            audio(8, 10489993001, initial['rx']['5']['epoch']+1)
+            assert audio(5)[5] == initial['rx']['3']['epoch']+1, 'RX5 change reset RX3'
+            assert audio(6)[5] == initial['rx']['4']['epoch']+1, 'RX5 change reset RX4'
             # Validation is atomic and frequencies retain all bits above 32-bit range.
             saved = config.with_suffix('.settings').read_bytes()
             for invalid in (10489000000, -1, 10489600321.5, '18446744073709551615'):
@@ -134,7 +141,7 @@ def main():
             owner.wait(lambda s: isinstance(s, dict) and s.get('id') == request and s.get('type') == 'ack' and s.get('status') == 0)
             assert audio(5, 10489600321)[5] == initial['rx']['3']['epoch']+1
             assert audio(6, 10489748821)[5] == initial['rx']['4']['epoch']+1
-            for channel in (3, 4, 5, 6):
+            for channel in (3, 4, 5, 6, 8):
                 request += 1
                 owner.send({'type': 'tune', 'id': request, 'stream': channel, 'frequency_hz': 10489600000})
                 owner.wait(lambda s: isinstance(s, dict) and s.get('id') == request and s.get('code') == 'invalid')
@@ -143,7 +150,7 @@ def main():
                 assert len(pcm[channel]) > 30
                 assert all(b[7] == a[7]+240 and b[5] == a[5] for a, b in zip(pcm[channel], pcm[channel][1:])), 'Monitor setting interrupted RX1/RX2'
             for client in clients:
-                assert not any(isinstance(p, bytes) and p[5] == 5 and HEADER.unpack_from(p)[4] in (5, 6) for p in client.messages)
+                assert not any(isinstance(p, bytes) and p[5] == 5 and HEADER.unpack_from(p)[4] in (5, 6, 8) for p in client.messages)
             # Restart only FT8 transport while PSK and the station continue.
             taps[5].close()
             decoder = subprocess.Popen([str(dummy), '--port', str(audio3), '--interval-ms', '60'], stdout=logs[2], stderr=logs[2])
@@ -154,10 +161,11 @@ def main():
             radio = start_radio()
             state = owner.state(lambda s: s.get('ready') and s.get('session') not in (0, initial['session']) and
                                 s.get('settings', {}).get('rx3_frequency_hz') == '10489600321' and
-                                s.get('settings', {}).get('rx4_frequency_hz') == '10489748821', timeout=7)
+                                s.get('settings', {}).get('rx4_frequency_hz') == '10489748821' and
+                                s.get('settings', {}).get('rx5_frequency_hz') == '10489993001', timeout=7)
             assert not state['tx']['ptt']
             audio(6, 10489748821)
-            print('Monitoring: parallel byte-identical RX3/RX4 PCM and text, headless routing, independent retune, validation, '
+            print('Monitoring: parallel byte-identical RX3/RX4/RX5 PCM, FT8/PSK text, headless routing, independent retune, validation, '
                   'RX1/RX2 continuity, decoder restart, durable settings/backend restart and no browser PCM passed')
         finally:
             for tap in taps.values(): tap.close()

@@ -2,6 +2,7 @@ import {DOWNLINK_UPLINK_HZ, frequencyText, parseMHz, validateFrequency, tuneTarg
 import {FrameAssembler, RadioDisplay, displayOffsets, AXIS_MODES} from './radio-display.js';
 import {RadioAudio} from './audio.js';
 import {PttControl} from './ptt-control.js';
+import {MmDiagnostics} from './mm-diagnostics.js';
 import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
 
 const $ = id => document.getElementById(id);
@@ -21,6 +22,7 @@ const frames = new FrameAssembler(frame => {
   if (cursor?.view === view) queueCursorUpdate();
 });
 const radio = new RadioAudio(transmitSamples, mediaChanged);
+const mmDiagnostics = new MmDiagnostics($('mm-diagnostics'));
 const ptt = new PttControl({start: startPtt, stop: stopPtt, isActive: () => pttHeld,
   mode: readPreference('pttMode'), spaceEnabled: readPreference('pttSpace') === 'true',
   timeout: () => notify('PTT nach 5 Minuten automatisch ausgeschaltet.', false, 8000)});
@@ -81,7 +83,7 @@ function connect() {
   const url = new URL('/ws', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = socket = new WebSocket(url); ws.binaryType = 'arraybuffer';
   notify('Verbindung wird hergestellt …', false, 0); controls();
-  ws.onopen = () => { if (ws === socket) { notify('Adapter verbunden. Warte auf Backend …', false, 0); controls(); } };
+  ws.onopen = () => { if (ws === socket) { notify('Adapter verbunden. Warte auf Backend …', false, 0); send({type:'mm_diagnostics',enabled:!$('mm-diagnostics').hidden}); controls(); } };
   ws.onmessage = event => {
     if (ws !== socket) return;
     if (typeof event.data !== 'string') {
@@ -99,6 +101,8 @@ function connect() {
       controls();
     } else if (message.type === 'state') update(message);
     else if (message.type === 'decoder_text' && [3, 4].includes(message.stream) && typeof message.text === 'string') appendDecoderText(message.stream, message.text);
+    else if (message.type === 'decoder_text' && message.stream === 5 && typeof message.text === 'string' && ['dx-cluster', 'cw-skimmer', 'bulletin'].includes(message.channel)) appendDecoderText(`5-${message.channel}`, message.text, true);
+    else if (message.type === 'mm_diagnostics' && message.stream === 5) mmDiagnostics.update(message);
     else if (message.type === 'ack' || message.type === 'error') {
       const item = pending.get(message.id);
       if (item) {
@@ -113,7 +117,7 @@ function connect() {
   ws.onerror = () => { if (ws === socket) notify('WebSocket-Verbindung fehlgeschlagen.', true); };
   ws.onclose = event => {
     if (ws !== socket) return;
-    stopPtt(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset();
+    stopPtt(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset(); mmDiagnostics.reset();
     for (const item of pending.values()) { clearTimeout(item.timeout); item.reject(fail('Verbindung getrennt.', 'closed')); }
     pending.clear(); frames.reset(); views.forEach(view => view.clear());
     cursor = null; queueCursorUpdate();
@@ -264,6 +268,7 @@ function renderFilter(changed = 'low') {
 function renderZoomLabels() {
   const rx = `RX${selected}`, low = Number($('filter-lower').value), high = Number($('filter-upper').value);
   $('zoom-title').textContent = `${rx}-ZOOM`;
+  $('zoom-choice-label').textContent = `${rx}-Zoom`;
   $('zoom-filter').textContent = selected === 1 ? `USB · ${((high - low) / 1000).toFixed(1)} kHz` : 'RX2 · USB';
   $('filter-caption').textContent = selected === 1 ? `RX1 · Filter ${low}–${high} Hz` : 'RX2 · USB';
   $('zoom-mobile-caption').textContent = `${rx}-Zoom · 50 kHz`;
@@ -467,7 +472,7 @@ function openSetup() {
   stopPtt(); settingsBase = {...state.settings};
   for (const field of document.querySelectorAll('[data-setting]')) field.value = settingsBase[field.dataset.setting] ?? '';
   const center = Number(state.settings?.rx_center_hz);
-  if (Number.isSafeInteger(center)) for (const key of ['rx3_frequency_hz', 'rx4_frequency_hz']) {
+  if (Number.isSafeInteger(center)) for (const key of ['rx3_frequency_hz', 'rx4_frequency_hz', 'rx5_frequency_hz']) {
     const field = document.querySelector(`[data-setting="${key}"]`); field.min = center - 275000; field.max = center + 275000;
   }
   $('settings-message').textContent = ''; $('settings-message').classList.remove('error');
@@ -630,11 +635,14 @@ $('tx-listen-mute').onclick = toggleTxMonitorMute;
 $('tx-listen-mute').addEventListener('keydown', e => {
   if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') e.stopPropagation();
 });
-let decoderSource = readPreference('decoderSource') === '4' ? 4 : 3;
-const decoderScroll = {3: {top: 0, follow: true}, 4: {top: 0, follow: true}};
-const decoderPending = {3: '', 4: ''};
+const decoderSources = [3, 4, '5-dx-cluster', '5-cw-skimmer', '5-bulletin'];
+const zoomSources = ['zoom', ...decoderSources, '5-diagnostics'];
+let decoderSource = decoderSources.find(source => String(source) === readPreference('decoderSource')) ?? 3;
+const decoderScroll = Object.fromEntries(decoderSources.map(source => [source, {top: 0, follow: source !== '5-bulletin'}]));
+const decoderPending = Object.fromEntries(decoderSources.map(source => [source, null]));
+const decoderReplace = {};
 let decoderRenderTimer = null;
-const decoderOutput = source => $(source === 4 ? 'decoder-text-4' : 'decoder-text');
+const decoderOutput = source => $(source === 3 ? 'decoder-text' : `decoder-text-${source}`);
 function rememberDecoderScroll() {
   if ($('decoder-panel').hidden) return;
   const output = decoderOutput(decoderSource);
@@ -645,56 +653,62 @@ function restoreDecoderScroll() {
   output.scrollTop = position.follow ? output.scrollHeight : position.top;
 }
 function selectDecoder(source) {
-  rememberDecoderScroll(); decoderSource = source;
-  for (const channel of [3, 4]) {
-    decoderOutput(channel).hidden = channel !== source;
+  rememberDecoderScroll();
+  const monitoring = source !== 'zoom';
+  const diagnostics = source === '5-diagnostics';
+  if (monitoring && !diagnostics) decoderSource = source;
+  for (const channel of decoderSources) {
+    decoderOutput(channel).hidden = channel !== decoderSource;
     $(`decoder-source${channel}`).checked = channel === source;
   }
-  writePreference('decoderSource', source); restoreDecoderScroll();
+  $('decoder-sourcezoom').checked = !monitoring;
+  $('decoder-source5-diagnostics').checked = diagnostics;
+  $('decoder-panel').hidden = !monitoring || diagnostics;
+  $('decoder-clear').hidden = !monitoring || diagnostics;
+  mmDiagnostics.show(diagnostics);
+  send({type:'mm_diagnostics',enabled:diagnostics});
+  $('zoom-plots').setAttribute('aria-hidden', String(monitoring));
+  $('zoom-plots').inert = monitoring;
+  $('zoom-output').dataset.view = String(source);
+  writePreference('zoomView', source);
+  if (monitoring && !diagnostics) { writePreference('decoderSource', source); restoreDecoderScroll(); }
 }
-function appendDecoderText(source, text) {
+function appendDecoderText(source, text, replace = false) {
   // FT8 returns a whole slot in a burst. Keep its per-line WebSocket handlers
   // free of layout work so they cannot hold up the 20-ms audio packets.
-  decoderPending[source] = (decoderPending[source] + text).slice(-16384);
+  const limit = typeof source === 'number' ? 16384 : 65542;
+  decoderPending[source] = replace ? text.slice(0, limit) : ((decoderPending[source] || '') + text).slice(-limit);
+  decoderReplace[source] = replace;
   if (decoderRenderTimer === null) decoderRenderTimer = setTimeout(flushDecoderText, 50);
 }
 function flushDecoderText() {
   decoderRenderTimer = null;
-  const visible = !!decoderPending[decoderSource] && !$('decoder-panel').hidden;
+  const visible = decoderPending[decoderSource] !== null && !$('decoder-panel').hidden;
   if (visible) rememberDecoderScroll();
-  for (const source of [3, 4]) {
-    if (!decoderPending[source]) continue;
+  for (const source of decoderSources) {
+    if (decoderPending[source] === null) continue;
     const output = decoderOutput(source);
-    let text = (output.textContent + decoderPending[source]).slice(-16384);
+    let text = decoderReplace[source] ? decoderPending[source] : (output.textContent + decoderPending[source]).slice(-16384);
     if (source === 3) {
       const lines = text.split('\n');
       // A final newline terminates the last FT8 message; it adds no extra row.
       const excess = lines.length - (text.endsWith('\n') ? 1 : 0) - 50;
       if (excess > 0) text = lines.slice(excess).join('\n');
     }
+    if (source === '5-bulletin' && output.textContent !== text) decoderScroll[source] = {top: 0, follow: false};
     output.textContent = text;
-    decoderPending[source] = '';
+    decoderPending[source] = null;
   }
   if (visible) restoreDecoderScroll();
 }
-function showDecoder(visible) {
-  rememberDecoderScroll();
-  $('decoder-panel').hidden = !visible;
-  $('zoom-output').classList.toggle('decoder-visible', visible);
-  $('decoder-toggle').setAttribute('aria-expanded', String(visible));
-  decoderLabel();
-  writePreference('decoderVisible', visible);
-  if (visible) restoreDecoderScroll();
-}
-function decoderLabel() { $('decoder-toggle').textContent = $('decoder-panel').hidden ? t('Decoder-Text anzeigen', 'Show decoder text') : t('Decoder-Text ausblenden', 'Hide decoder text'); }
-$('decoder-toggle').onclick = () => showDecoder($('decoder-panel').hidden);
-$('decoder-clear').onclick = () => { decoderPending[decoderSource] = ''; decoderOutput(decoderSource).textContent = ''; decoderScroll[decoderSource] = {top: 0, follow: true}; };
-for (const source of [3, 4]) $(`decoder-source${source}`).onchange = () => selectDecoder(source);
+$('decoder-clear').onclick = () => { decoderPending[decoderSource] = null; decoderOutput(decoderSource).textContent = ''; decoderScroll[decoderSource] = {top: 0, follow: decoderSource !== '5-bulletin'}; };
+for (const source of zoomSources) $(`decoder-source${source}`).onchange = () => selectDecoder(source);
 // Keep local decoder controls and log scrolling independent of global Space PTT.
-for (const id of ['decoder-toggle', 'decoder-panel']) $(id).addEventListener('keydown', event => {
+for (const id of ['zoom-sources', 'decoder-clear', 'decoder-panel', 'mm-diagnostics']) $(id).addEventListener('keydown', event => {
   if (event.code === 'Space' || event.key === ' ') event.stopPropagation();
 });
-selectDecoder(decoderSource); showDecoder(readPreference('decoderVisible') === 'true');
+const savedZoomView = zoomSources.find(source => String(source) === readPreference('zoomView'));
+selectDecoder(savedZoomView ?? (readPreference('decoderVisible') === 'true' ? decoderSource : 'zoom'));
 $('loop').onchange = () => { stopPtt(); checked('loop', {mode: Number($('loop').value)}).catch(report); };
 $('copy-rx-tx').onclick = () => { try { setFrequency('tx', frequency(selected) - DOWNLINK_UPLINK_HZ); } catch (error) { report(error); } };
 $('copy-tx-rx').onclick = () => { try { setFrequency(selected, frequency('tx') + DOWNLINK_UPLINK_HZ); } catch (error) { report(error); } };
@@ -754,7 +768,7 @@ $('language').onchange = () => {
   txVolumeChanged(false);
   views.forEach(view => view.setLanguage(language));
   selectReceiver(selected); renderFilter(); renderNoiseLevels();
-  setFullbandAxis(views[0].axisMode); decoderLabel(); controls();
+  setFullbandAxis(views[0].axisMode); controls();
 };
 applyLanguage(); views.forEach(view => view.setLanguage(language));
 bindPlots(views[0], 250); bindPlots(views[1], 25);

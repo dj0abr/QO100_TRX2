@@ -12,8 +12,13 @@ Der Adapter erzeugt zwei virtuelle Audiowege im Audioserver desselben Linux-Benu
 
 | Auswahl im Digitalprogramm | Anzeigename | PulseAudio-Gerät |
 |---|---|---|
-| Audioeingang / Input | QO100_RX2 | `qo100_rx2_input` |
-| Audioausgang / Output | QO100_TX2 | `qo100_tx2` |
+| Audioeingang / Input | fromQO100 | `fromQO100` |
+| Audioausgang / Output | toQO100 | `toQO100` |
+
+Die Namen gelten aus Sicht des Digitalprogramms: Empfangsaudio kommt **fromQO100**,
+Sendeaudio geht **toQO100**. `fromQO100_internal` und die Monitoranschlüsse sind
+interne Hilfsgeräte. Nach dem Update den Stack neu starten und die alten
+QO100_RX2-/QO100_TX2-Zuordnungen im Digitalprogramm durch die neuen Namen ersetzen.
 
 In FLdigi bzw. WSJT-X diese Geräte wählen, vorzugsweise **48 kHz, Mono, PCM16**.
 Der Adapter verbindet sie mit dem 12-kHz-Funkprotokoll. Die virtuellen Geräte haben
@@ -74,9 +79,9 @@ noch einen angemeldeten Bediener.
 
 ```text
 RX2 ── Webbridge ──┬── WebSocket ── Browser-Audiokontrolle
-                  └── UDP ── Audioadapter ── QO100_RX2 ── Digitalprogramm
+                  └── UDP ── Audioadapter ── fromQO100 ── Digitalprogramm
 
-Digitalprogramm ── QO100_TX2 ── Audioadapter ── UDP ── Webbridge ── TX2
+Digitalprogramm ── toQO100 ── Audioadapter ── UDP ── Webbridge ── TX2
 
 TX1-Modulator ──┐
                ├── IQ-Summe mit 6 dB Reserve ── ein Pluto-Treiber

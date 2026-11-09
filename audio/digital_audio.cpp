@@ -113,16 +113,17 @@ int main(int argc,char** argv) {
         if(lock.fd<0 || flock(lock.fd,LOCK_EX|LOCK_NB)) throw std::runtime_error("Digital audio devices are already in use");
         Devices devices;
         const bool pipewire=command({"pactl","info"}).find("PipeWire")!=std::string::npos;
-        for(const auto& suffix:{"_rx2","_tx2"}) {
-            const auto name=prefix+suffix;
+        const auto device_prefix=prefix=="qo100"?std::string{}:prefix+"_";
+        const auto from=device_prefix+"fromQO100",to=device_prefix+"toQO100",internal=from+"_internal";
+        for(const auto& name:{internal,to}) {
             std::vector<std::string> args{"module-null-sink","sink_name="+name,"rate=48000","channels=1","channel_map=mono",
-                std::string("sink_properties=device.description=")+(suffix==std::string("_rx2")?"QO100_RX2_Internal":"QO100_TX2")};
+                std::string("sink_properties=device.description=")+(name==internal?"fromQO100_internal":"toQO100")};
             if(!pipewire) args.push_back("norewinds=1"); // PulseAudio's default null-sink block is two seconds.
             devices.ensure("sinks",name,std::move(args));
         }
-        devices.ensure("sources",prefix+"_rx2_input",{"module-remap-source","master="+prefix+"_rx2.monitor",
-            "source_name="+prefix+"_rx2_input","source_properties=device.description=QO100_RX2","channels=1","channel_map=mono","master_channel_map=mono"});
-        Pulse playback(prefix+"_rx2",false),capture(prefix+"_tx2.monitor",true);
+        devices.ensure("sources",from,{"module-remap-source","master="+internal+".monitor",
+            "source_name="+from,"source_properties=device.description=fromQO100","channels=1","channel_map=mono","master_channel_map=mono"});
+        Pulse playback(internal,false),capture(to+".monitor",true);
         std::mutex mutex;Identity identity;
         qo100::TxChannel rx_clock(0);uint32_t rx_session=0,rx_epoch=0;
         auto last_rx=Clock::now()-std::chrono::seconds(10),last_state=last_rx;
@@ -163,7 +164,7 @@ int main(int argc,char** argv) {
                 }
             } catch(const std::exception& e) {std::cerr<<"TX2 audio: "<<e.what()<<'\n';running=0;}
         });
-        std::cout<<"Digital audio: RX2 input "<<prefix<<"_rx2_input; TX2 output "<<prefix<<"_tx2; UDP "<<audio_port<<'/'<<bridge_port<<std::endl;
+        std::cout<<"Digital audio: Input fromQO100="<<from<<"; Output toQO100="<<to<<"; UDP "<<audio_port<<'/'<<bridge_port<<std::endl;
         try {
             auto next_hello=Clock::now();std::array<uint8_t,1201> buffer{};
             while(running) {

@@ -1,5 +1,6 @@
 #pragma once
 #include "wire.hpp"
+#include "mm_monitor.hpp"
 #include "qo100/channels.hpp"
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
@@ -18,6 +19,7 @@ struct Config {
     struct Decoder { uint16_t audio_port=0,text_port=0; }; // Both zero disables this link.
     std::array<Decoder,2> decoders;
     uint16_t digital_audio_port=0,digital_bridge_port=0;
+    uint16_t rx5_decoder_audio_port=0,mm_http_port=0;
     unsigned idle_seconds=0,heartbeat_seconds=60,max_clients=16;
     size_t queue_bytes=524288;
 };
@@ -27,13 +29,15 @@ struct Peer {
     virtual void close(const std::string& reason)=0;
 };
 class Bridge {
-    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;};
+    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;bool mm_diagnostics=false;};
     struct Pending {
         Bytes packet;uint8_t reply;uint64_t client=0;Json id;std::string command;
         Clock::time_point sent{},started=Clock::now();bool safety=false;
     };
     Config config_;
-    net::ip::udp::socket udp_,digital_;
+    net::ip::udp::socket udp_,digital_,mm_audio_;
+    std::shared_ptr<MmMonitor> mm_monitor_;
+    std::map<std::string,std::string> mm_text_;
     std::array<uint8_t,1201> digital_buffer_{};
     struct DecoderLink {
         net::ip::udp::socket socket;
@@ -59,6 +63,7 @@ class Bridge {
     void send_udp(Bytes p);
     void receive_decoder(size_t index);void send_decoder(size_t index,Bytes p);
     void receive_digital();void send_digital(Bytes p);
+    void update_mm_subscription();
     void control(Bytes p,uint8_t reply,uint64_t client=0,Json id=nullptr,std::string command="",bool safety=false);
     void discover();void safety();void tx_off();void roles();void broadcast(const Json& j);
     void text(uint64_t client,const Json& j);void error(uint64_t client,const Json& id,const std::string& code,const std::string& message);

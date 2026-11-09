@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(QO100_TRX2 VERSION 0.11.1 LANGUAGES CXX)
+project(QO100_TRX2 VERSION 0.12.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -76,6 +76,12 @@ target_link_libraries(qo100_digital_audio PRIVATE qo100_core PkgConfig::PULSE Th
 target_compile_options(qo100_digital_audio PRIVATE -Wall -Wextra -Wpedantic)
 
 include(CTest)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_subdirectory(external/mmdecoder)
+configure_file(decoder/mm-launcher.sh.in ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/qo100_mm_decoder @ONLY)
+file(CHMOD ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/qo100_mm_decoder
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+add_custom_target(qo100_mm_decoder ALL DEPENDS qo100_mm_probe)
 option(QO100_BUILD_WEBBRIDGE "Build standalone HTTP/WebSocket GUI adapter" ON)
 if(QO100_BUILD_WEBBRIDGE)
     add_subdirectory(webbridge)
@@ -114,6 +120,17 @@ if(BUILD_TESTING)
     add_executable(test_rx_channel tests/test_rx_channel.cpp)
     target_link_libraries(test_rx_channel PRIVATE qo100_core)
     add_test(NAME usb_dsp COMMAND test_rx_channel)
+    add_executable(test_mm_rx_chain tests/mm_rx_chain.cpp)
+    add_test(NAME mm_diagnostics COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mm_diagnostics.py)
+    target_link_libraries(test_mm_rx_chain PRIVATE qo100_core)
+    if(TARGET qo100_webbridge)
+        add_test(NAME mm_beacon_chain COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mm_beacon.py $<TARGET_FILE:qo100_webbridge>
+            $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/decoder/mm_beacon.py
+            $<TARGET_FILE:qo100_mm_fixture> $<TARGET_FILE:test_mm_rx_chain> $<TARGET_FILE:qo100_mm_probe>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(mm_beacon_chain PROPERTIES TIMEOUT 60)
+    endif()
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_test(NAME digital_virtual_audio COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_digital_audio.py $<TARGET_FILE:qo100_digital_audio>)

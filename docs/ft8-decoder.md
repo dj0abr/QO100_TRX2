@@ -21,7 +21,7 @@ Es darf jeweils nur ein Decoder denselben UDP-Port belegen.
 
 Unter **Setup → Monitoring-Empfänger** den USB-Träger als **RX3 · FT8 (Hz)**
 eingeben und **Änderungen speichern**. Startwert: **10489540000 Hz**.
-**Decoder-Text anzeigen** über dem Zoom einschalten und **RX3 · FT8** auswählen.
+Oben in der Zoom-Kachel **FT8-Monitor** auswählen; der Text nutzt die gesamte Kachel.
 RX4 dekodiert gleichzeitig die PSK-Bake; beide Textpuffer laufen unabhängig weiter. Empfangene Zeilen enthalten:
 
 ```text

@@ -76,6 +76,7 @@ void set_config_value(Config& c,const std::string& k,const std::string& v) {
         else if (k == "initial_rx2_hz") c.initial_rx2_hz = integer(v);
         else if (k == "rx3_frequency_hz") c.rx3_frequency_hz = integer(v);
         else if (k == "rx4_frequency_hz") c.rx4_frequency_hz = integer(v);
+        else if (k == "rx5_frequency_hz") c.rx5_frequency_hz = integer(v);
         else if (k == "rx1_filter_low_hz") c.rx1_filter = RxFilterSettings::from_edges(real(v), c.rx1_filter.high_hz());
         else if (k == "rx1_filter_high_hz") c.rx1_filter = RxFilterSettings::from_edges(c.rx1_filter.low_hz(), real(v));
         else if (k == "rx1_filter_bandwidth_hz") c.rx1_filter.bandwidth_hz = u32(v);
@@ -138,7 +139,7 @@ void Config::validate() const {
         throw std::runtime_error("initial_rx_hz must leave room for the +/-25 kHz zoom");
     if (initial_rx2_hz + 275000 < rx_center_hz || initial_rx2_hz > rx_center_hz + 275000)
         throw std::runtime_error("initial_rx2_hz must remain inside the RX channel window");
-    for (const auto frequency : {rx3_frequency_hz, rx4_frequency_hz})
+    for (const auto frequency : {rx3_frequency_hz, rx4_frequency_hz, rx5_frequency_hz})
         if (frequency < rx_center_hz - 275000 || frequency > rx_center_hz + 275000)
             throw std::runtime_error("Monitoring frequency must remain inside the RX channel window (+/-275000 Hz)");
     if (tx_center_hz < 275000 || initial_tx_hz + 275000 < tx_center_hz || initial_tx_hz > tx_center_hz + 275000)

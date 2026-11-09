@@ -80,7 +80,7 @@ cmake -S "$project_dir" -B "$project_dir/build" \
     -DCMAKE_BUILD_TYPE=Release -DQO100_BUILD_WEBBRIDGE=ON \
     -DPython3_EXECUTABLE=/usr/bin/python3
 cmake --build "$project_dir/build" --parallel "$jobs" \
-    --target qo100_backend qo100_webbridge qo100_ft8_decoder qo100_beacon_decoder qo100_digital_audio
+    --target qo100_backend qo100_webbridge qo100_ft8_decoder qo100_beacon_decoder qo100_mm_decoder qo100_digital_audio
 
-echo "Built backend, Pluto driver, WebSocket adapter, RX3 FT8, RX4 PSK and RX2/TX2 virtual audio interface."
+echo "Built backend, Pluto driver, WebSocket adapter, RX3 FT8, RX4 PSK, RX5 MM beacon and RX2/TX2 virtual audio interface."
 echo "Start with: $project_dir/start_all.sh"

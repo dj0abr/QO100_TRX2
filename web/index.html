@@ -114,19 +114,28 @@
           <div class="waterfall"><canvas id="wide" data-waterfall data-tune aria-label="Fullband-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas></div>
           <footer class="display-footer"><span id="wide-help" class="desktop-note">Links: RX1 + TX · Rechts: nur RX1 · Shift + Rad: TX</span><span id="touch-help" class="mobile-note">Tippen: RX1 + TX</span><span>600 kHz</span></footer>
         </section>
-        <section id="zoom-display" class="display" aria-labelledby="zoom-title">
-          <header class="display-heading"><div class="display-title"><h2 id="zoom-title">RX1-ZOOM</h2><span>±25 kHz</span></div><div class="display-meta"><button id="decoder-toggle" type="button" aria-expanded="false" aria-controls="decoder-panel">Decoder-Text anzeigen</button><span id="zoom-filter" class="desktop-note">USB</span><span class="wheel-step" data-en="Mouse wheel">Mausrad <b>25 Hz</b></span></div></header>
-          <div class="plot-body"><canvas id="zoom-spectrum" class="spectrum" data-spectrum data-tune aria-label="RX1-Zoom-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty">Warte auf RX1-Zoom …</span></div>
-          <div class="frequency-axis" aria-label="RX1-Zoom-Frequenzen in MHz"></div>
-          <div id="zoom-output" class="zoom-output">
-            <div class="waterfall"><canvas id="zoom" data-waterfall data-tune aria-label="RX1-Zoom-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas></div>
-            <section id="decoder-panel" class="decoder-panel" aria-labelledby="decoder-title" hidden>
-              <header class="decoder-heading"><h2 id="decoder-title">Monitoring</h2><div class="decoder-sources" role="radiogroup" aria-label="Decoderquelle" data-en-aria-label="Decoder source"><label><input id="decoder-source3" type="radio" name="decoder-source" value="3" checked>RX3 · FT8</label><label><input id="decoder-source4" type="radio" name="decoder-source" value="4">RX4 · PSK</label></div><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den ausgewählten Text in diesem Browser löschen" data-en-title="Clear only the selected text in this browser">Text löschen</button></header>
+        <section id="zoom-display" class="display zoom-tile" aria-labelledby="zoom-title">
+          <header class="display-heading zoom-heading"><h2 id="zoom-title" class="visually-hidden">RX1-ZOOM</h2><div id="zoom-sources" class="decoder-sources" role="radiogroup" aria-label="Zoom- oder Monitoransicht" data-en-aria-label="Zoom or monitor view"><label><input id="decoder-sourcezoom" type="radio" name="zoom-source" value="zoom" checked><span id="zoom-choice-label">RX1-Zoom</span></label><label><input id="decoder-source3" type="radio" name="zoom-source" value="3"><span data-en="FT8 monitor">FT8-Monitor</span></label><label><input id="decoder-source4" type="radio" name="zoom-source" value="4"><span data-en="PSK monitor">PSK-Monitor</span></label><label><input id="decoder-source5-dx-cluster" type="radio" name="zoom-source" value="5-dx-cluster">DX-Cluster</label><label><input id="decoder-source5-cw-skimmer" type="radio" name="zoom-source" value="5-cw-skimmer">CW-Skimmer</label><label><input id="decoder-source5-bulletin" type="radio" name="zoom-source" value="5-bulletin">QO100-Bulletin</label><label><input id="decoder-source5-diagnostics" type="radio" name="zoom-source" value="5-diagnostics"><span data-en="RX5 diagnostics">RX5-Diagnose</span></label></div><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den ausgewählten Text in diesem Browser löschen" data-en-title="Clear only the selected text in this browser" hidden>Text löschen</button></header>
+          <div id="zoom-output" class="zoom-output" data-view="zoom">
+            <div id="zoom-plots" class="zoom-plots" aria-hidden="false">
+              <div class="plot-body"><canvas id="zoom-spectrum" class="spectrum" data-spectrum data-tune aria-label="RX1-Zoom-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty">Warte auf RX1-Zoom …</span></div>
+              <div class="frequency-axis" aria-label="RX1-Zoom-Frequenzen in MHz"></div>
+              <div class="waterfall"><canvas id="zoom" data-waterfall data-tune aria-label="RX1-Zoom-Wasserfall, zum Abstimmen anklicken"></canvas><canvas class="waterfall-overlay" data-overlay aria-hidden="true"></canvas></div>
+              <footer class="display-footer"><span id="filter-caption">RX1 · Filter —</span><span id="zoom-filter" class="desktop-note">USB</span><span class="desktop-note" data-en="Fine tuning · 25 Hz">Feinabstimmung · 25 Hz</span><span id="zoom-mobile-caption" class="mobile-note">RX1-Zoom · 50 kHz</span></footer>
+            </div>
+            <section id="decoder-panel" class="decoder-panel" aria-label="Monitoring" hidden>
               <pre id="decoder-text" class="decoder-text" role="log" aria-live="polite" aria-label="RX3 FT8 Decoder-Text" tabindex="0"></pre>
               <pre id="decoder-text-4" class="decoder-text" role="log" aria-live="polite" aria-label="RX4 PSK Decoder-Text" tabindex="0" hidden></pre>
+              <pre id="decoder-text-5-dx-cluster" class="decoder-text" role="log" aria-live="polite" aria-label="RX5 DX-Cluster" tabindex="0" hidden></pre>
+              <pre id="decoder-text-5-cw-skimmer" class="decoder-text" role="log" aria-live="polite" aria-label="RX5 CW-Skimmer" tabindex="0" hidden></pre>
+              <pre id="decoder-text-5-bulletin" class="decoder-text" role="log" aria-live="polite" aria-label="RX5 Bulletin" tabindex="0" hidden></pre>
+            </section>
+            <section id="mm-diagnostics" class="mm-diagnostics" aria-label="RX5-Diagnose" data-en-aria-label="RX5 diagnostics" hidden>
+              <div class="mm-status"><strong id="mm-lock" role="status">Warte auf RX5-Daten</strong><span id="mm-warning"></span></div>
+              <dl class="mm-values"><div><dt>Pilot</dt><dd id="mm-pilot">—</dd></div><div><dt>AFC</dt><dd id="mm-afc">—</dd></div><div><dt data-en="PLL residual">PLL-Rest</dt><dd id="mm-pll">—</dd></div><div><dt data-en="Audio level">Audiopegel</dt><dd id="mm-level">—</dd></div><div><dt>RX5</dt><dd id="mm-frequency">—</dd></div><div><dt data-en="AFC state">AFC-Zustand</dt><dd id="mm-afc-state">—</dd></div></dl>
+              <div class="mm-charts"><div class="mm-chart"><canvas id="mm-spectrum" aria-label="RX5-Audiospektrum von 0 bis 4000 Hz" data-en-aria-label="RX5 audio spectrum from 0 to 4000 Hz"></canvas></div><div class="mm-chart"><canvas id="mm-constellation" aria-label="RX5 8APSK-Konstellation" data-en-aria-label="RX5 8APSK constellation"></canvas></div></div>
             </section>
           </div>
-          <footer class="display-footer"><span id="filter-caption">RX1 · Filter —</span><span class="desktop-note" data-en="Fine tuning · 25 Hz">Feinabstimmung · 25 Hz</span><span id="zoom-mobile-caption" class="mobile-note">RX1-Zoom · 50 kHz</span></footer>
         </section>
       </div>
     </main>
@@ -139,7 +148,7 @@
         <div class="tx-volume-slider"><button id="tx-listen-mute" class="tx-listen-mute" type="button" aria-pressed="true" aria-label="TX-Mithören einschalten" title="TX-Mithören einschalten"><svg class="icon" aria-hidden="true"><use href="#speaker-muted"/></svg><span class="mute-tag" aria-hidden="true">TX</span></button><input id="volume-tx" class="range" type="range" min="0" max="20" step="0.05" value="0" aria-label="Empfangslautstärke während PTT" data-en-aria-label="Receive volume while PTT is active"></div>
       </div>
       <div id="voice-compressor-control" class="qso-control"><label class="control-heading" for="compressor"><svg class="icon" aria-hidden="true"><use href="#mic"/></svg><span data-en="Compressor">Kompressor</span><output id="compressor-value">—</output></label><input id="compressor" class="range" type="range" min="0" max="140" step="0.1" value="100" data-control><div class="slider-labels"><span>0 · Bypass</span><span>140 %</span></div></div>
-      <div id="digital-audio-control" class="qso-control" hidden><strong>TX2 · QO100 TX2</strong><p data-en="External audio · set the level in the digital program.">Externes Audio · Pegel im Digitalprogramm einstellen.</p></div>
+      <div id="digital-audio-control" class="qso-control" hidden><strong>TX2 · toQO100</strong><p data-en="External audio · set the level in the digital program.">Externes Audio · Pegel im Digitalprogramm einstellen.</p></div>
       <button id="ptt" type="button" class="ptt" data-control aria-pressed="false" title="Zuerst Audio und Mikrofon einschalten, dann zum Senden gedrückt halten"><svg class="icon" aria-hidden="true"><use href="#transmit"/></svg><strong id="ptt-label">PTT</strong><small id="ptt-hint">Mikrofon fehlt</small></button>
     </section>
     <footer class="page-footer"><span id="status" role="status" aria-live="polite">Verbindung wird hergestellt …</span><span id="offset-status">RX1 ausgewählt</span></footer>
@@ -150,7 +159,7 @@
     <div class="dialog-scroll">
       <fieldset><legend data-en="Language">Sprache</legend><label class="field-label" for="language" data-en="Display language">Anzeigesprache</label><select id="language" class="menu-select"><option value="auto" data-en="Automatic · Browser language">Automatisch · Browsersprache</option><option value="de">Deutsch</option><option value="en">English</option></select></fieldset>
       <fieldset><legend>Audio</legend><div class="form-grid">
-        <p class="field-help" data-en="Audio: RX1. Monitoring: RX3 · FT8 and RX4 · PSK.">Audio: RX1. Monitoring: RX3 · FT8 und RX4 · PSK.</p>
+        <p class="field-help" data-en="Audio: RX1/RX2. Monitoring: RX3 · FT8, RX4 · PSK and RX5 · MM beacon.">Audio: RX1/RX2. Monitoring: RX3 · FT8, RX4 · PSK und RX5 · MM-Bake.</p>
         <div class="form-action"><span id="audio-details">Audio ausgeschaltet</span></div>
         <label data-en="Playback device">Wiedergabegerät<select id="audio-output"><option value="default">Systemstandard</option></select></label>
         <label data-en="Recording device">Aufnahmegerät<select id="audio-input"><option value="default">Systemstandard</option></select></label>
@@ -167,7 +176,8 @@
         <fieldset><legend data-en="Monitoring receivers">Monitoring-Empfänger</legend><div class="form-grid">
           <label>RX3 · FT8 (Hz)<input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx3_frequency_hz" data-control></label>
           <label>RX4 · PSK (Hz)<input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx4_frequency_hz" data-control></label>
-        </div><p class="field-help" data-en="USB carrier frequencies in whole Hz. Both receivers decode continuously. Save changes below.">USB-Trägerfrequenzen in ganzen Hz. Beide Empfänger dekodieren laufend. Änderungen unten speichern.</p></fieldset>
+          <label><span data-en="RX5 · MM beacon (Hz)">RX5 · MM-Bake (Hz)</span><input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx5_frequency_hz" data-control></label>
+        </div><p class="field-help" data-en="USB carrier frequencies in whole Hz. All three receivers decode continuously. Save changes below.">USB-Trägerfrequenzen in ganzen Hz. Alle drei Empfänger dekodieren laufend. Änderungen unten speichern.</p></fieldset>
         <fieldset><legend data-en="Pluto and frequency correction">Pluto und Frequenzkorrektur</legend><div class="form-grid">
           <label data-en="Pluto connection">Pluto-Verbindung<select data-setting="pluto_connection" data-control><option value="usb">USB</option><option value="network" data-en="Network">Netzwerk</option></select></label>
           <label data-en="Pluto IPv4 address">Pluto IPv4-Adresse<input type="text" data-setting="pluto_ip" autocomplete="off" data-control></label>
