@@ -27,9 +27,11 @@ stack after editing; see [DSP threading](docs/dsp-threading.md) for details.
 ## Hardware Requirements
 
 - Pluto SDR, connected via USB or a USB-to-Ethernet adapter.
-- SBC such as Raspberry Pi 4, Odroid C4/N2, or a desktop PC running Debian, Ubuntu, Linux Mint, etc. **Use a 64-bit OS.**
+- **Minimum requirement: Raspberry Pi 4 with 2 GB RAM**, or a comparable SBC (e.g. Odroid C4/N2) or desktop PC running Debian, Ubuntu, Linux Mint, etc. **Use a 64-bit OS.**
 - USB sound stick if the computer used for audio has no microphone connector; microphone and speakers/headphones connect to the **browser computer**.
 - Satellite dish, QO-100 feed/LNB and a 2.4 GHz amplifier, e.g. the AMSAT-DL 46 dB amplifier.
+
+Reception and actual on-air transmission have been tested on a Raspberry Pi 4 without interruptions.
 
 ## Installation
 
