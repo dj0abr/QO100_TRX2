@@ -87,10 +87,15 @@ std::string FT8DecoderProcess::executablePath() {
 
 bool FT8DecoderProcess::enqueue(FT8Slot&& slot) {
     std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
-    if (!lock || stopping_ || queue_.size() >= 2) {
+    if (!lock || stopping_) {
         std::fprintf(stderr, "[FT8] Decoder busy; dropping UTC slot %s\n",
                      utcLabel(slot.utcSeconds).c_str());
         return false;
+    }
+    // Monitoring is best-effort: never decode a growing backlog of stale slots.
+    if(!queue_.empty()) {
+        std::fprintf(stderr,"[FT8] Decoder busy; replacing pending UTC slot with newest\n");
+        queue_.clear();
     }
     queue_.push_back(std::move(slot));
     ready_.notify_one();
@@ -172,10 +177,11 @@ std::string FT8DecoderProcess::decode(const FT8Slot& slot,
     posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
     posix_spawnattr_setpgroup(&attributes, 0);
     std::string label = utcLabel(slot.utcSeconds);
-    std::array<char*, 10> args{{const_cast<char*>(executable.c_str()),
+    std::array<char*, 12> args{{const_cast<char*>(executable.c_str()),
         const_cast<char*>("--format"), const_cast<char*>("f32le"),
         const_cast<char*>("--output"), const_cast<char*>("text"),
-        const_cast<char*>("--utc"), label.data(), const_cast<char*>("-"), nullptr}};
+        const_cast<char*>("--utc"), label.data(), const_cast<char*>("--depth"),
+        const_cast<char*>("1"), const_cast<char*>("-"), nullptr}};
     Child child;
     const int error = posix_spawn(&child.pid, executable.c_str(), &actions,
                                   &attributes, args.data(), environ);

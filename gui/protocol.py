@@ -102,7 +102,7 @@ class Assembler:
              rate, size, first, count, fmt, total, session) = HEADER.unpack_from(packet)
             if (magic != MAGIC or version != VERSION or kind != SPECTRUM or
                 hsize != HEADER.size or stream != self.stream_id or fmt != 1 or
-                size != total or size < 1024 or size > 65536 or size & (size - 1) or
+                size != total or size < 1024 or size > 65536 or
                 not 0 < rate <= 100000000 or not count or first + count > size or
                 len(packet) != HEADER.size + 2 * count):
                 raise ValueError()

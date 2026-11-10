@@ -132,7 +132,7 @@ def main():
         def zoom_follows_rx():
             return execute('''const zoom=document.getElementById('zoom-display'),rx=zoom.dataset.receiver;
                 const label=zoom.querySelector('.frequency-axis span');
-                return zoom.dataset.stream===rx && !!label && Math.abs(parseFloat(label.textContent)*1e6-(Number(document.getElementById('rx'+rx).dataset.hz)-25000))<.5;''')
+                return zoom.dataset.stream===rx && !!label && Math.abs(Number(zoom.dataset.center)-Number(document.getElementById('rx'+rx).dataset.hz))<=12 && Math.abs(parseFloat(label.textContent)*1e6-(Number(zoom.dataset.center)-30000))<.5;''')
         def mark_history():
             wait(zoom_follows_rx)
             execute('''for (const id of ['wide','zoom']) {
@@ -287,8 +287,8 @@ def main():
             assert execute('return document.getElementById("waterfall-ceiling").value')=='40'
             assert execute('return document.querySelectorAll("#waterfall-content input[type=range]:not(#spectrum-average)").length')==2
             assert execute('return localStorage.getItem("qo100.fullbandFloor")')=='-113'
-            # The synthetic source contains tones, no broadband noise: empty zoom bins may all clip at -160 dBFS.
-            wait(lambda:execute('return document.getElementById("fullband-noise").dataset.dbfs'))
+            # Exact-bin synthetic tones have no broadband noise; both displays may correctly report no reliable noise estimate.
+            wait(lambda:execute('return ["fullband","zoom-display"].every(id=>Number(document.getElementById(id).dataset.frames)>=3)'))
             def expect_auto_ranges():
                 assert execute('''return ['fullband','zoom'].every(name=>{
                     const measured=document.getElementById(name+'-noise').dataset.dbfs,noise=Number(measured),range=document.getElementById(name+'-range').dataset;
@@ -300,6 +300,12 @@ def main():
             audio_off=execute('return getComputedStyle(document.getElementById("audio")).backgroundColor')
             assert audio_off=='rgb(122, 45, 53)',audio_off
             observer=Client(http_port);observer.role('viewer')
+            observer.send({'type':'audio_subscription','stream':2,'enabled':False})
+            def rx2_demand():
+                reports=[struct.unpack_from('!I',p,48)[0] for p in proxy.log if p[5]==20]
+                return bool(reports[-1]&1) if reports else None
+            wait(lambda:rx2_demand() is False)
+            time.sleep(.8)  # The initial RX2 demodulator must actually fall asleep.
             initial=snapshot()
             rx,tx=hz('rx1'),hz('tx')
             assert execute('return !document.querySelector("#selection-label,.sidebar-bottom")')
@@ -380,8 +386,8 @@ def main():
             assert execute('return document.getElementById("zoom-title").textContent')=='RX2-ZOOM'
             # RX2 zoom uses its own center for both spectrum and waterfall clicks.
             for selector,button in [('#zoom-spectrum',0),('#zoom',2)]:
-                wait(zoom_follows_rx);ratio=plot(selector,.55,button=button)
-                old_rx2=rx2;rx2=round(rx2+(ratio-.5)*50000)
+                wait(zoom_follows_rx);zoom_center=execute('return Number(document.getElementById("zoom-display").dataset.center)');ratio=plot(selector,.55,button=button)
+                old_rx2=rx2;rx2=round(zoom_center+(ratio-.5)*60000)
                 if button==0:tx2+=rx2-old_rx2
                 after=expect_frequency(2,rx2)
                 assert after['rx']['1']['frequency_hz']==rx and after['tx']['frequency_hz']==tx
@@ -415,10 +421,14 @@ def main():
             execute('document.getElementById("frequency2").dispatchEvent(new MouseEvent("dblclick",{bubbles:true}))')
             changed('#frequency-input',10489.600000)
             execute('document.getElementById("frequency-form").requestSubmit()');rx2=10489600000
-            expect_frequency(2,rx2);click('#audio')
+            expect_frequency(2,rx2)
+            assert rx2_demand() is False,'Selecting RX2 with audio off kept DSP awake'
+            click('#audio')
+            wait(lambda:rx2_demand() is True)
             wait(lambda:execute('return window.__audioSource?.endsWith(":2") && window.__audioPeak>.02'))
             click('#frequency1')
             wait(lambda:execute('return window.__audioSource?.endsWith(":1")'))
+            wait(lambda:rx2_demand() is False)
             click('#audio')
             click('#copy-rx-tx');snapshot(lambda s:s.get('tx',{}).get('frequency_hz')==rx-8089500000);tx=rx-8089500000
             wheel('#wide',True);snapshot(lambda s:s.get('tx',{}).get('frequency_hz')==tx+250);tx+=250
@@ -471,8 +481,8 @@ def main():
                     const full=create(),zoom=create(true),frame={center:100,rate:600000,n:8192,values:new Int16Array(8192).fill(-6000)};
                     frame.values.fill(-1000,2000,2800);full.accept(frame);
                     zoom.update({rx:{'1':{frequency_hz:100}}},1);
-                    const close={...frame,stream:1,rate:75000,values:new Int16Array(8192).fill(-8000)};
-                    close.values.fill(-15000,0,1366);close.values.fill(-15000,6827);zoom.accept(close);
+                    const close={...frame,stream:1,rate:60000,values:new Int16Array(8192).fill(-8000)};
+                    zoom.accept(close);
                     result.autoCalibration=full.noise.value===-60 && full.floor===-65 && full.ceiling===-20 && zoom.noise.value===-80 && zoom.floor===-85 && zoom.ceiling===-40;
                     const history=full.waterfall.toDataURL(),count=full.element.dataset.frames;
                     full.setOffsets(10,38);full.setAverage(20);full.update({settings:{gui_display_floor:-140}},1);
@@ -493,12 +503,12 @@ def main():
                     result.zoomStreamIsolation=result.zoomStreamIsolation && zoom.frame===second && zoom.noise.value===-70 && zoom.average.frames.length===1;
                     const secondHistory=zoom.waterfall.toDataURL();zoom.accept(close);
                     result.zoomStreamIsolation=result.zoomStreamIsolation && zoom.waterfall.toDataURL()===secondHistory && zoom.frame===second;
-                    zoom.update({...receiverState,rx:{...receiverState.rx,'2':{frequency_hz:101}}},2);
+                    zoom.update({...receiverState,rx:{...receiverState.rx,'2':{frequency_hz:126}}},2);
                     const event={clientX:400,currentTarget:zoom.spectrum};
                     result.zoomStaleFrame=zoom.frequencyAt(event)===null;
                     zoom.accept(second);result.zoomStaleFrame=result.zoomStaleFrame && zoom.frame===second;
-                    zoom.accept({...second,center:101});
-                    result.zoomStaleFrame=result.zoomStaleFrame && zoom.geometry.center===101 && zoom.frequencyAt(event)!==null;
+                    zoom.accept({...second,center:125});
+                    result.zoomStaleFrame=result.zoomStaleFrame && zoom.geometry.center===125 && zoom.frequencyAt(event)!==null;
                     zoom.update(receiverState,1);zoom.accept(close);
                     result.zoomReceiverReset=result.zoomReceiverReset && zoom.frame===close && zoom.noise.value===-80 && zoom.average.frames.length===1;
                     const annotated=create(false,800),ctx=annotated.spectrum.getContext('2d'),drawText=ctx.fillText;
@@ -857,8 +867,9 @@ def main():
             assert not execute('return document.getElementById("frequency-dialog").open')
             wait(zoom_follows_rx)
             execute('document.getElementById("zoom-spectrum").scrollIntoView({block:"center"})')
+            zoom_center=execute('return Number(document.getElementById("zoom-display").dataset.center)')
             ratio=plot('#zoom-spectrum',.56,touch=True)
-            mobile_rx2=round(target+150+(ratio-.5)*50000)
+            mobile_rx2=round(zoom_center+(ratio-.5)*60000)
             after=expect_frequency(2,mobile_rx2)
             snapshot(lambda s:s.get('tx2',{}).get('frequency_hz')==before_tx+150+mobile_rx2-(target+150))
             wait(zoom_follows_rx)

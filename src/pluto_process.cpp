@@ -35,6 +35,11 @@ PlutoProcess::PlutoProcess(const Config& c, const std::filesystem::path& binary)
     int errors[2];
     if (pipe2(errors, O_CLOEXEC) < 0) { close(logfd); throw std::runtime_error("Cannot create child startup pipe"); }
     const pid_t parent = getpid();
+    // Resolve all C++ objects before fork: workers may exist during a restart.
+    // The child only uses syscall/POSIX operations until execv or _exit.
+    const char* executable=exe.c_str();
+    const char* directory=directory_.c_str();
+    char* const arguments[]={const_cast<char*>(executable),nullptr};
     pid_ = fork();
     if (pid_ < 0) {
         close(logfd); close(errors[0]); close(errors[1]);
@@ -45,13 +50,13 @@ PlutoProcess::PlutoProcess(const Config& c, const std::filesystem::path& binary)
         prctl(PR_SET_PDEATHSIG, SIGTERM);
         if (getppid() != parent) _exit(125);
         signal(SIGINT, SIG_DFL); signal(SIGTERM, SIG_DFL);
-        if (chdir(directory_.c_str()) < 0 || dup2(logfd, STDOUT_FILENO) < 0 || dup2(logfd, STDERR_FILENO) < 0) {
+        if (chdir(directory) < 0 || dup2(logfd, STDOUT_FILENO) < 0 || dup2(logfd, STDERR_FILENO) < 0) {
             const int error = errno;
             (void)!write(errors[1], &error, sizeof(error));
             _exit(126);
         }
         close(logfd);
-        execl(exe.c_str(), exe.c_str(), static_cast<char*>(nullptr));
+        execv(executable,arguments);
         const int error = errno;
         (void)!write(errors[1], &error, sizeof(error));
         _exit(127);

@@ -2,6 +2,9 @@
 #include "qo100/channels.hpp"
 #include "qo100/tx_channel.hpp"
 #include "wire.hpp"
+#include "pulse_usage.hpp"
+#include <condition_variable>
+#include <memory>
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #include <arpa/inet.h>
@@ -89,10 +92,11 @@ unsigned port(const std::string& value) {
 }
 int main(int argc,char** argv) {
     try {
-        unsigned audio_port=40914,bridge_port=40915;std::string prefix="qo100";
+        bool always_active=false;unsigned audio_port=40914,bridge_port=40915;std::string prefix="qo100";
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"qo100_digital_audio [--port 40914] [--bridge-port 40915] [--device-prefix qo100]\n";return 0;}
+            if(arg=="--help") {std::cout<<"qo100_digital_audio [--port 40914] [--bridge-port 40915] [--device-prefix qo100] [--always-active]\n";return 0;}
+            if(arg=="--always-active") {always_active=true;continue;}
             if(++i==argc) throw std::runtime_error("Missing argument for "+arg);
             if(arg=="--port") audio_port=port(argv[i]);
             else if(arg=="--bridge-port") bridge_port=port(argv[i]);
@@ -123,39 +127,57 @@ int main(int argc,char** argv) {
         }
         devices.ensure("sources",from,{"module-remap-source","master="+internal+".monitor",
             "source_name="+from,"source_properties=device.description=fromQO100","channels=1","channel_map=mono","master_channel_map=mono"});
-        Pulse playback(internal,false),capture(to+".monitor",true);
+        std::condition_variable wake;
+        PulseUsage usage(from,to,internal,[&]{wake.notify_all();});
+        const auto used=[&]{return always_active?PulseUsage::State{true,true,true,true}:usage.state();};
         std::mutex mutex;Identity identity;
         qo100::TxChannel rx_clock(0);uint32_t rx_session=0,rx_epoch=0;
         auto last_rx=Clock::now()-std::chrono::seconds(10),last_state=last_rx;
-        const uint64_t nonce=(uint64_t(std::random_device{}())<<32)|std::random_device{}()|1;
+        uint64_t nonce=(uint64_t(std::random_device{}())<<32)|std::random_device{}()|1;
         std::thread output([&] {
             try {
+                std::unique_ptr<Pulse> playback;
                 while(running) {
+                    if(!used().rx) {
+                        const bool reset=bool(playback);playback.reset();
+                        std::unique_lock<std::mutex> guard(mutex);
+                        if(reset) {rx_clock.reset(0);rx_session=rx_epoch=0;}
+                        wake.wait_for(guard,std::chrono::milliseconds(100),[&]{return !running || used().rx;});
+                        continue;
+                    }
+                    if(!playback) playback=std::make_unique<Pulse>(internal,false);
                     std::vector<float> samples;
                     {std::lock_guard<std::mutex> guard(mutex);samples=rx_clock.pull_audio(Clock::now()-last_rx<std::chrono::milliseconds(200));}
                     std::array<int16_t,240> pcm{};
                     for(size_t i=0;i<samples.size();++i) pcm[i]=int16_t(std::lround(std::clamp(samples[i],-1.f,1.f)*32767));
-                    int error=0;if(pa_simple_write(playback.stream,pcm.data(),sizeof(pcm),&error)) throw std::runtime_error(pa_strerror(error));
+                    int error=0;if(pa_simple_write(playback->stream,pcm.data(),sizeof(pcm),&error)) throw std::runtime_error(pa_strerror(error));
                 }
             } catch(const std::exception& e) {std::cerr<<"RX2 audio: "<<e.what()<<'\n';running=0;}
         });
         std::thread input([&] {
             try {
-                Identity previous;uint64_t index=0;
+                Identity previous;uint64_t index=0;std::unique_ptr<Pulse> capture;
                 while(running) {
                     Identity current;{std::lock_guard<std::mutex> guard(mutex);current=identity;
                         if(Clock::now()-last_state>std::chrono::seconds(1)) current.ready=false;}
+                    if(!used().tx || !current.ready) {
+                        capture.reset();
+                        std::unique_lock<std::mutex> guard(mutex);
+                        wake.wait_for(guard,std::chrono::milliseconds(50),[&]{return !running || (used().tx && identity.ready && Clock::now()-last_state<std::chrono::seconds(1));});
+                        continue;
+                    }
+                    if(!capture) capture=std::make_unique<Pulse>(to+".monitor",true);
                     int error=0;
                     if(!(current==previous)) {
-                        if(pa_simple_flush(capture.stream,&error)) throw std::runtime_error(pa_strerror(error));
+                        if(pa_simple_flush(capture->stream,&error)) throw std::runtime_error(pa_strerror(error));
                         // Readiness may briefly disappear without a new backend epoch.
                         // Only a new wire identity permits sample index zero again.
                         if(current.session!=previous.session || current.epoch!=previous.epoch || current.frequency!=previous.frequency) index=0;
                         previous=current;
                     }
                     std::array<int16_t,240> pcm{};
-                    if(pa_simple_read(capture.stream,pcm.data(),sizeof(pcm),&error)) throw std::runtime_error(pa_strerror(error));
-                    {std::lock_guard<std::mutex> guard(mutex);if(!(identity==current) || !current.ready) continue;}
+                    if(pa_simple_read(capture->stream,pcm.data(),sizeof(pcm),&error)) throw std::runtime_error(pa_strerror(error));
+                    {std::lock_guard<std::mutex> guard(mutex);if(!(identity==current) || !current.ready || !used().tx) continue;}
                     auto packet=bridge::header(8,qo100::tx2_stream,current.epoch,current.session);packet.resize(544);
                     bridge::put(packet,24,index,8);bridge::put(packet,32,current.frequency,8);bridge::put(packet,40,12000,4);
                     bridge::put(packet,52,240,2);bridge::put(packet,54,2,2);bridge::put(packet,56,240,4);
@@ -166,8 +188,30 @@ int main(int argc,char** argv) {
         });
         std::cout<<"Digital audio: Input fromQO100="<<from<<"; Output toQO100="<<to<<"; UDP "<<audio_port<<'/'<<bridge_port<<std::endl;
         try {
-            auto next_hello=Clock::now();std::array<uint8_t,1201> buffer{};
+            auto next_hello=Clock::now(),next_usage=next_hello;
+            unsigned previous_usage=UINT32_MAX;bool previous_tx=false;
+            std::array<uint8_t,1201> buffer{};
             while(running) {
+                const auto users=used();
+                const unsigned mask=(users.rx?1u:0u)|(users.tx?2u:0u);
+                if(users.available && mask!=previous_usage) {
+                    std::cout<<"Digital audio users: RX2="<<users.rx<<" TX2="<<users.tx
+                        <<(users.known?"":" (usage detection unavailable; keeping audio active)")<<std::endl;
+                    if(users.tx && !previous_tx) {
+                        // Also supports older bridges: every new TX user gets a
+                        // fresh epoch before sample index zero, never stale audio.
+                        if(++nonce==0)++nonce;
+                        std::lock_guard<std::mutex> guard(mutex);identity.ready=false;
+                        last_state=Clock::now()-std::chrono::seconds(10);next_hello={};
+                    }
+                    previous_tx=users.tx;previous_usage=mask;next_usage={};wake.notify_all();
+                }
+                Identity current;{std::lock_guard<std::mutex> guard(mutex);current=identity;}
+                if(users.available && current.session && Clock::now()>=next_usage) {
+                    auto activity=bridge::header(20,qo100::tx2_stream,0,current.session);
+                    bridge::put(activity,16,nonce,8);bridge::put(activity,48,mask,4);
+                    (void)send(udp.fd,activity.data(),activity.size(),0);next_usage=Clock::now()+std::chrono::milliseconds(500);
+                }
                 bool stale;{std::lock_guard<std::mutex> guard(mutex);stale=Clock::now()-last_state>std::chrono::seconds(1);}
                 if(stale && Clock::now()>=next_hello) {
                     auto hello=bridge::header(19,qo100::tx2_stream);bridge::put(hello,16,nonce,8);
@@ -183,9 +227,11 @@ int main(int argc,char** argv) {
                             bridge::get(p,48,4)!=0}; // Command errors do not disable an unchanged valid frequency.
                         std::lock_guard<std::mutex> guard(mutex);
                         if(next.session==identity.session && int32_t(next.epoch-identity.epoch)<0) continue;
-                        identity=next;last_state=Clock::now();
+                        if(!(next==identity))next_usage={};
+                        identity=next;last_state=Clock::now();wake.notify_all();
                     } else if(p[5]==5 && n==544 && bridge::get(p,8,4)==2 && bridge::get(p,40,4)==12000 &&
                         !bridge::get(p,44,8) && bridge::get(p,52,2)==240 && bridge::get(p,54,2)==2 && bridge::get(p,56,4)==240) {
+                        if(!used().rx) continue;
                         std::vector<int16_t> pcm(240);for(size_t i=0;i<pcm.size();++i) pcm[i]=int16_t(bridge::get(p,64+2*i,2));
                         std::lock_guard<std::mutex> guard(mutex);
                         const auto session=bridge::get(p,60,4),epoch=bridge::get(p,12,4);
@@ -194,7 +240,7 @@ int main(int argc,char** argv) {
                     }
                 }
             }
-        } catch(...) {running=0;input.join();output.join();throw;}
-        input.join();output.join();return 0;
+        } catch(...) {running=0;wake.notify_all();input.join();output.join();throw;}
+        wake.notify_all();input.join();output.join();return 0;
     } catch(const std::exception& e) {std::cerr<<"Digital audio: "<<e.what()<<'\n';return 1;}
 }

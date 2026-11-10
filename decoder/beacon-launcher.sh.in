@@ -1,2 +1,0 @@
-#!/bin/sh
-exec "@Python3_EXECUTABLE@" "@CMAKE_CURRENT_SOURCE_DIR@/beacon_decoder.py" "$@"

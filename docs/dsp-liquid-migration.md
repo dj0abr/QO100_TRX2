@@ -76,3 +76,34 @@ To measure the current version without touching hardware:
 cmake --build build --target benchmark_dsp
 ./build/bin/benchmark_dsp
 ```
+
+
+## Current RX block processing
+
+The backend now converts each received I/Q datagram once and passes the same
+read-only complex block to three persistent RX workers (RX1, RX2/RX3, RX4/RX5),
+while the main thread computes the shared FFT. RX uses the existing
+interpolating liquid block mixer, with fixed 4096-sample scratch per channel.
+Partial decimator groups survive all block boundaries; filter design, rates,
+oscillator phase, continuous retuning, NR and PCM sample counters are retained.
+No larger input block is accumulated. Each worker has private receiver state
+and audio outboxes. Manual `rx2_enabled` through `rx5_enabled` startup switches
+skip disabled channel construction and processing; empty groups have no worker.
+All workers finish before input reuse, controls or resets;
+only main accesses subscriber metadata and sends UDP packets. A separate TX
+worker renders TX1/TX2, mixes and packs IQ concurrently with available RX work.
+Main joins TX before DSP queries, commands or hardware/LO commits. FIFO feedback
+still clocks TX; at most four blocks are prepared per job. Threads sleep on
+condition variables and have no fixed CPU affinity. Five backend threads share
+four cores; the small FFT/I/O task also leaves room for the driver and decoders.
+
+`rx_block_equivalence` compares complete complex and PCM output vectors against
+the scalar API, including irregular block sizes, normal/NR/MM profiles, mixed
+scalar/block calls, controls and resets. The current `benchmark_dsp` additionally
+compares scalar, serial block and three-worker processing for **five RX plus the shared 24000-point FFT**
+using real driver fragment sizes (8192 + 3808 complex samples), checking output
+counts and checksums. `dsp_worker_equivalence` also tests control/reset boundaries,
+exception propagation and joining on shutdown. The benchmark reports wall time,
+process CPU and main-thread CPU separately, medians of seven runs and a separate active
+TX cost. Its scope therefore differs from the historical two-RX table above;
+multicore throughput and synchronization costs must be measured on the target machine.

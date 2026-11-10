@@ -18,6 +18,12 @@ A single Pluto serves five parallel receive channels and two transmit paths.
 **RX5** additionally receives the multimedia beacon and displays DX cluster, CW skimmer and bulletin text in the WebGUI.
 The two transmit paths are combined into a shared IQ signal for the Pluto.
 
+The backend uses three persistent RX workers (RX1, RX2/RX3, RX4/RX5) and one TX worker by default. The main thread handles the shared FFT and communication; Linux schedules these tasks across the four cores of a Raspberry Pi.
+
+For CPU load comparisons, RX2–RX5 and the FT8/PSK/MM decoders can be disabled
+individually in [`config/backend.conf`](config/backend.conf). Restart the full
+stack after editing; see [DSP threading](docs/dsp-threading.md) for details.
+
 ## Hardware Requirements
 
 - Pluto SDR, connected via USB or a USB-to-Ethernet adapter.
@@ -142,7 +148,7 @@ The first browser gets control; additional browsers can watch and listen. The co
 
 ### The two waterfalls
 
-**Fullband** shows the entire QO-100 narrowband transponder. **Zoom** shows ±25 kHz around the selected receiver for fine tuning. Click **RX1** or **RX2** to select its RX/TX pair; zoom and audio follow your selection.
+**Fullband** shows the entire QO-100 narrowband transponder. **Zoom** shows ±30 kHz around the selected receiver for fine tuning. Click **RX1** or **RX2** to select its RX/TX pair; zoom and audio follow your selection.
 
 ### Mouse tuning
 

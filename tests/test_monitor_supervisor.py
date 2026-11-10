@@ -49,14 +49,14 @@ mm_http_port = {mm_http}
                         command = Path(f'/proc/{pid}/cmdline').read_bytes().decode().replace('\0', ' ')
                     except FileNotFoundError:
                         continue
-                    for name in ('qo100_backend', 'qo100_webbridge', 'qo100_ft8_decoder', 'beacon_decoder.py', 'qo100_digital_audio', 'mm_beacon.py'):
+                    for name in ('qo100_backend', 'qo100_webbridge', 'qo100_ft8_decoder', 'qo100_beacon_decoder', 'qo100_digital_audio', 'mm_beacon.py'):
                         if name in command:
                             result[name] = int(pid); seen.add(int(pid))
                 return result
             try:
                 wait(lambda: 'RX3 FT8 und RX4 PSK laufen.' in log.read_text(), timeout=15)
                 before = children(); assert len(before) == 6, before
-                ft8 = 'qo100_ft8_decoder'; psk = 'beacon_decoder.py'
+                ft8 = 'qo100_ft8_decoder'; psk = 'qo100_beacon_decoder'
                 os.kill(before[ft8], signal.SIGTERM)
                 wait(lambda: children().get(ft8, before[ft8]) != before[ft8], timeout=6)
                 after = children()

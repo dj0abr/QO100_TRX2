@@ -1,6 +1,7 @@
 # PSK-Bake über RX4
 
-Bauen: `./build_all.sh --install-deps` (installiert auch NumPy/SciPy).
+Bauen: `./build_all.sh --install-deps`. Der produktive PSK-Decoder ist ein
+natives C++-Programm; NumPy/SciPy werden für diesen Empfangsprozess nicht benötigt.
 Dann den bisherigen Stack beenden und starten:
 
 ```sh
@@ -17,13 +18,29 @@ Die ersten vollständigen Texte erscheinen nach etwa 20–40 Sekunden. Beide
 Textquellen werden auch bei ausgeblendeter Anzeige gleichzeitig empfangen.
 
 Einzelstart: `./build/bin/qo100_beacon_decoder --port 40912`.
-Der separate Python-Decoder empfängt RX4-Audio (QTR2-Stream **6**, 12 kHz Mono)
+Der separate C++-Decoder empfängt RX4-Audio (QTR2-Stream **6**, 12 kHz Mono)
 auf **127.0.0.1:40912** und antwortet mit UTF-8-Text an den Adapter-Port **40913**.
 Der Browser empfängt `decoder_text` mit `stream:4` (logische Empfängernummer).
+
+Standardmäßig gilt ein Budget von **10 % eines CPU-Kerns**, einschließlich
+aller Threads und der Überwachung. `rx4_decoder_cpu_percent` in `backend.conf`
+erlaubt 1–10 %; nach Änderungen den gesamten Stack neu starten.
+Einzelstart alternativ mit `--cpu-percent 10`. CPU-Priorität: nice 19/SCHED_IDLE;
+RX1–RX5, Audio, Backend und MM-Decoder behalten Vorrang.
+[CPU-Budget, Messwerte und FT8-Verhalten](decoder-cpu.md).
 
 Überlappende Fenster umfassen höchstens 40 Sekunden. Bei Paketverlust oder
 Abstimmung werden angefangene Blöcke verworfen; nur CRC-/RS-geprüfte Texte
 werden ausgegeben. Kleine Fehler der Abtastfrequenz werden mitgesucht.
+Es gibt einen laufenden und höchstens einen ersetzbaren neuesten Auftrag.
+Wenn das CPU-Budget nicht reicht, werden ältere Fenster übersprungen.
+
+Der normale RX4-Signalweg mischt und dezimiert früh von 12 auf 4 kHz, bevor
+Träger-/Phasennachführung, Taktbestimmung und Rahmensuche laufen. Nur bei tiefen
+Audiotönen unter 800 Hz wird zusätzlich ein analytisches Eingangssignal zur
+Bildunterdrückung gebildet. Viterbi und Reed-Solomon laufen vollständig in C++.
+Die Python-Fassung bleibt als Regressionstest-Referenz erhalten; ihr alter
+Kommandozeilen-Einstieg leitet auf das C++-Programm weiter.
 
 ## Verifizierte Protokollparameter
 

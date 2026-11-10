@@ -92,9 +92,14 @@ std::vector<float> TxChannel::pull_audio(bool recent) {
     return audio;
 }
 std::vector<std::complex<float>> TxChannel::render(bool recent) {
+    auto result=render_active(recent);
+    if(result.empty())result.resize(iq_block);
+    return result;
+}
+std::vector<std::complex<float>> TxChannel::render_active(bool recent) {
     const auto audio=pull_audio(recent);
+    if(audio.empty()) return {};
     std::vector<std::complex<float>> result(iq_block);
-    if(audio.empty()) return result;
     std::vector<std::complex<float>> input(audio_block), analytic(audio_block);
     for(size_t i=0;i<audio.size();++i) input[i]={profile_==Profile::digital?audio[i]:compressor_.execute(audio[i]),0};
     check_liquid(firfilt_cccf_execute_block(usb_filter_.get(),input.data(),audio_block,analytic.data()));

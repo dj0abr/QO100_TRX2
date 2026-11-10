@@ -83,7 +83,7 @@ function connect() {
   const url = new URL('/ws', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = socket = new WebSocket(url); ws.binaryType = 'arraybuffer';
   notify('Verbindung wird hergestellt …', false, 0); controls();
-  ws.onopen = () => { if (ws === socket) { notify('Adapter verbunden. Warte auf Backend …', false, 0); send({type:'mm_diagnostics',enabled:!$('mm-diagnostics').hidden}); controls(); } };
+  ws.onopen = () => { if (ws === socket) { rx2AudioSubscription = null; notify('Adapter verbunden. Warte auf Backend …', false, 0); send({type:'mm_diagnostics',enabled:!$('mm-diagnostics').hidden}); controls(); } };
   ws.onmessage = event => {
     if (ws !== socket) return;
     if (typeof event.data !== 'string') {
@@ -271,7 +271,7 @@ function renderZoomLabels() {
   $('zoom-choice-label').textContent = `${rx}-Zoom`;
   $('zoom-filter').textContent = selected === 1 ? `USB · ${((high - low) / 1000).toFixed(1)} kHz` : 'RX2 · USB';
   $('filter-caption').textContent = selected === 1 ? `RX1 · Filter ${low}–${high} Hz` : 'RX2 · USB';
-  $('zoom-mobile-caption').textContent = `${rx}-Zoom · 50 kHz`;
+  $('zoom-mobile-caption').textContent = `${rx}-Zoom · 60 kHz`;
   const view = views[1];
   view.empty.textContent = t(`Warte auf ${rx}-Zoom …`, `Waiting for ${rx} zoom …`);
   view.spectrum.setAttribute('aria-label', t(`${rx}-Zoom-Spektrum, zum Abstimmen anklicken`, `${rx} zoom spectrum, click to tune`));
@@ -320,7 +320,16 @@ function update(next) {
   renderWaterfallSettings(); views.forEach(view => view.update(next, selected)); controls();
   for (const waiter of stateWaiters) waiter(next);
 }
+let rx2AudioSubscription = null;
+function syncRx2Subscription() {
+  if (!isOpen()) { rx2AudioSubscription = null; return; }
+  const enabled = selected === 2 && radio.running;
+  if (rx2AudioSubscription !== enabled) {
+    send({type:'audio_subscription',stream:2,enabled}); rx2AudioSubscription = enabled;
+  }
+}
 function controls() {
+  syncRx2Subscription();
   const writable = canControl();
   for (const element of document.querySelectorAll('[data-control]')) element.disabled = !writable;
   $('ptt').disabled = selected === 2 || !writable || !!(state.flags & 6) || !radio.microphone || !radio.running;

@@ -31,7 +31,19 @@ void RxChannel::tune(int64_t offset) {
     src_reset(src_.get());
 }
 void RxChannel::push(std::complex<float> x) {
-    mixed_[decimation_++] = mixer_.execute(x);
+    push_mixed(mixer_.execute(x));
+}
+void RxChannel::push_block(const std::complex<float>* samples, size_t count) {
+    while(count) {
+        const size_t n=std::min(count,block_.size());
+        std::copy_n(samples,n,block_.data());
+        mixer_.execute_block(block_.data(),static_cast<unsigned>(n));
+        for(size_t i=0;i<n;++i) push_mixed(block_[i]);
+        samples+=n;count-=n;
+    }
+}
+void RxChannel::push_mixed(std::complex<float> x) {
+    mixed_[decimation_++] = x;
     if (decimation_ != mixed_.size()) return;
     decimation_ = 0;
     std::complex<float> y;

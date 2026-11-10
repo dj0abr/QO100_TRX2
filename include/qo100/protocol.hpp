@@ -14,6 +14,9 @@ constexpr uint8_t compressor_control_type = 11, compressor_state_type = 12;
 constexpr uint8_t loop_control_type = 13, loop_state_type = 14;
 constexpr uint8_t nr_control_type = 15, nr_state_type = 16;
 constexpr uint8_t settings_control_type = 17, settings_state_type = 18;
+// Leased RX2/TX2 demand from the current GUI subscriber. Flags: RX2=1, TX2=2.
+struct DigitalActivity {uint32_t request,session,flags;};
+bool parse_digital_activity(const uint8_t*,size_t,DigitalActivity&);
 struct SettingsControl { uint32_t request,session; uint64_t revision; bool set; std::string payload; };
 bool parse_settings_control(const uint8_t*,size_t,SettingsControl&);
 std::vector<uint8_t> settings_state_packet(uint32_t request,uint32_t session,uint64_t revision,

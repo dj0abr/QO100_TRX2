@@ -512,7 +512,7 @@ def draw_image(frames, width=1100, height=650, floor=-100, ceiling=0, span_hz=No
     waterfall_y = geometry.waterfall_top
     mask = np.abs(np.arange(frame.fft_size)-frame.fft_size/2) <= span * frame.fft_size / frame.sample_rate / 2
     draw.text((20, 15), ("QO100_TRX2 | USB zoom +/-25 kHz" if frame.stream_id else "QO100_TRX2 | Full RX spectrum / waterfall"), fill="#e8edf7")
-    draw.text((20, 35), f"Center {frame.center_hz / 1e6:.6f} MHz | {span / 1000:g} kHz span | FFT {frame.fft_size} | {frame.sample_rate/frame.fft_size:.2f} Hz/bin", fill="#a4b5cd")
+    draw.text((20, 35), f"Center {frame.center_hz / 1e6:.6f} MHz | {span / 1000:g} kHz span | Bins {frame.fft_size} | {frame.sample_rate/frame.fft_size:.2f} Hz/bin", fill="#a4b5cd")
     for db in range(int(floor), int(ceiling) + 1, 20):
         y = y1 - (db - floor) / (ceiling - floor) * (y1 - y0)
         draw.line((x0, y, x1, y), fill="#243348")
@@ -937,7 +937,7 @@ def gui(args):
         try:
             while True:
                 frame = receiver.zoom_frames.get_nowait()
-                if receiver.applied_hz is not None and frame.center_hz != receiver.applied_hz:
+                if receiver.applied_hz is not None and abs(frame.center_hz - receiver.applied_hz) > 12:
                     continue
                 if zoom_history and (frame.center_hz,frame.session_id)!=(zoom_history[-1].center_hz,zoom_history[-1].session_id):
                     zoom_history.clear()
@@ -946,12 +946,12 @@ def gui(args):
         except queue.Empty:
             pass
         if zoom_history and (zoom_changed or changed or floor.get() != last_floor):
-            zoom_rendered = draw_image(zoom_history,height=265,floor=floor.get(),span_hz=50000,rx_hz=receiver.applied_hz,
+            zoom_rendered = draw_image(zoom_history,height=265,floor=floor.get(),span_hz=60000,rx_hz=receiver.applied_hz,
                                       tx_downlink_hz=receiver.tx_applied_hz+DOWNLINK_UPLINK_HZ if receiver.tx_applied_hz is not None else None)
             photo = ImageTk.PhotoImage(zoom_rendered)
             zoom_canvas.configure(image=photo,text="")
             zoom_canvas.image = photo
-            zoom_canvas.plot_geometry=PlotGeometry(zoom_history[-1].center_hz,50000,zoom_rendered.width,zoom_rendered.height)
+            zoom_canvas.plot_geometry=PlotGeometry(zoom_history[-1].center_hz,60000,zoom_rendered.width,zoom_rendered.height)
             if args.screenshot and history:
                 from PIL import Image
                 from PIL import ImageDraw

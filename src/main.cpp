@@ -4,11 +4,13 @@
 #include "qo100/protocol.hpp"
 #include "qo100/spectrum.hpp"
 #include "qo100/rx_channel.hpp"
+#include "qo100/dsp_workers.hpp"
 #include "qo100/tx_channel.hpp"
 #include "qo100/channels.hpp"
 #include <arpa/inet.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -27,8 +29,11 @@
 #include <unistd.h>
 
 namespace {
-volatile sig_atomic_t running = 1;
-void stop(int) { running = 0; }
+// Signals can now arrive on any DSP thread. A lock-free atomic is safe both
+// between threads and in the signal handler.
+static_assert(std::atomic<bool>::is_always_lock_free);
+std::atomic<bool> running{true};
+void stop(int) { running.store(false,std::memory_order_relaxed); }
 using Clock = std::chrono::steady_clock;
 class Socket {
 public:
@@ -105,7 +110,6 @@ int main(int argc, char** argv) {
             bool have_request = false;
             uint16_t command_status = 0;
             std::unique_ptr<qo100::RxChannel> dsp;
-            std::unique_ptr<qo100::Spectrum> zoom;
             uint32_t zoom_frame_id = 0;
         };
         std::array<ReceiverState,qo100::rx_streams.size()> receivers;
@@ -130,6 +134,9 @@ int main(int argc, char** argv) {
         uint64_t tx2_frequency=c.initial_tx2_hz;
         uint32_t tx2_epoch=1,tx2_request=0;
         bool tx2_have_request=false;
+        bool digital_managed=false,tx2_used=true,rx2_processing=c.rx_enabled[1];
+        uint32_t digital_request=0,digital_flags=3;
+        auto digital_at=Clock::now()-std::chrono::seconds(10),rx2_last_use=Clock::now();
         uint16_t tx2_command_status=0;
         auto last_tx2_audio=last_tx_audio,last_tx2_state=last_tx_audio;
         auto reset_tx2=[&] {
@@ -175,7 +182,7 @@ int main(int argc, char** argv) {
         };
         auto send_tx2_state=[&] {
             send_packet(qo100::tx_state_packet(tx2_request,tx2_frequency,tx2_epoch,session_id,tx2_command_status,
-                hardware_online && !loop_pending && loop_mode==TestLoop::normal,tx2.level(),pluto_fill,
+                hardware_online && !loop_pending && loop_mode==TestLoop::normal && tx2_used,tx2.level(),pluto_fill,
                 int32_t(std::lround(tx2.ppm())),qo100::tx2_stream));
             last_tx2_state=Clock::now();
         };
@@ -189,6 +196,7 @@ int main(int argc, char** argv) {
         };
         auto send_settings=[&](std::optional<uint32_t> reply_request=std::nullopt,std::optional<uint16_t> reply_status=std::nullopt) {
             auto values=qo100::settings_values(c);
+            values["digital_activity_control"]=c.digital_auto_idle?"1":"0";
             values["settings_schema"]="1";values["pluto_rx_hz"]=std::to_string(c.pluto_rx_hz);
             values["pluto_tx_hz"]=std::to_string(c.pluto_tx_hz);values["rx_center_hz"]=std::to_string(c.rx_center_hz);
             values["tx_center_hz"]=std::to_string(c.tx_center_hz);values["hardware_online"]=hardware_online?"1":"0";
@@ -200,73 +208,117 @@ int main(int argc, char** argv) {
         };
         sockaddr_in driver{};driver.sin_family=AF_INET;driver.sin_port=htons(qo100::pluto_tx_port);
         driver.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
-        auto render_tx=[&] {
+        // Results and DSP outlive the worker, including exception unwinding.
+        std::vector<std::vector<uint8_t>> tx_packets;
+        unsigned pending_tx_blocks=0;
+        qo100::DspWorker tx_worker("qo100-tx");
+        auto finish_tx=[&] {
+            tx_worker.wait();
+            for(const auto& p:tx_packets) {
+                if(sendto(tx_status->fd,p.data(),p.size(),0,reinterpret_cast<sockaddr*>(&driver),sizeof(driver))!=ssize_t(p.size())) ++send_errors;
+            }
+            tx_packets.clear();
+            tx_block_id+=pending_tx_blocks;tx_blocks+=pending_tx_blocks;pending_tx_blocks=0;
+        };
+        auto start_tx=[&](unsigned blocks) {
+            if(!blocks) return;
             const bool recent=tx_enabled && active() && loop_mode!=TestLoop::audio && !loop_pending
                 && Clock::now()-last_tx_audio<std::chrono::milliseconds(200);
-            auto samples=tx.render(recent);
-            const bool digital_recent=active() && hardware_online && !loop_pending && loop_mode==TestLoop::normal &&
+            const bool digital_recent=tx2_used && active() && hardware_online && !loop_pending && loop_mode==TestLoop::normal &&
                 Clock::now()-last_tx2_audio<std::chrono::milliseconds(200);
-            const auto digital=tx2.render(digital_recent);
-            float peak=1.f;
-            for(size_t i=0;i<samples.size();++i) {samples[i]+=digital[i];peak=std::max(peak,std::abs(samples[i]));}
-            // Fixed 6-dB summing reserve. Exceptional overload reduces a complete
-            // block uniformly rather than clipping individual digital samples.
-            for(auto& sample:samples) sample*=.5f/peak;
-            if(tx_status) {
-                constexpr size_t chunk=12000;
-                for(size_t start=0;start<samples.size();start+=chunk) {
-                    const size_t count=std::min(chunk,samples.size()-start);
-                    std::vector<uint8_t> p(16+count*4);
-                    const uint32_t h[4]={htonl(0x50545849),htonl(tx_block_id),htonl(start*4),htonl(samples.size()*4)};
-                    std::memcpy(p.data(),h,16);
-                    for(size_t i=0;i<count;++i) {
-                        const auto x=samples[start+i];
-                        const uint16_t v[2]={uint16_t(int16_t(std::lround(std::clamp(x.real(),-1.f,1.f)*32767))),
-                                             uint16_t(int16_t(std::lround(std::clamp(x.imag(),-1.f,1.f)*32767)))};
-                        for(size_t k=0;k<2;++k) { p[16+4*i+2*k]=v[k]&255;p[17+4*i+2*k]=v[k]>>8; }
+            const auto first_id=tx_block_id;
+            const bool pack_iq=bool(tx_status);
+            pending_tx_blocks=blocks;
+            tx_worker.start([&,recent,digital_recent,first_id,pack_iq,blocks] {
+                for(unsigned block=0;block<blocks;++block) {
+                    auto samples=tx.render_active(recent);
+                    auto digital=tx2.render_active(digital_recent);
+                    if(samples.empty())samples=std::move(digital);
+                    else if(!digital.empty())for(size_t i=0;i<samples.size();++i)samples[i]+=digital[i];
+                    float peak=1.f;
+                    for(const auto& sample:samples)peak=std::max(peak,std::abs(sample));
+                    // Fixed 6-dB summing reserve. Exceptional overload reduces a complete
+                    // block uniformly rather than clipping individual digital samples.
+                    for(auto& sample:samples) sample*=.5f/peak;
+                    if(pack_iq) {
+                        constexpr size_t chunk=12000;
+                        for(size_t start=0;start<qo100::TxChannel::iq_block;start+=chunk) {
+                            const size_t count=std::min(chunk,qo100::TxChannel::iq_block-start);
+                            std::vector<uint8_t> p(16+count*4);
+                            const uint32_t h[4]={htonl(0x50545849),htonl(first_id+block),htonl(start*4),htonl(qo100::TxChannel::iq_block*4)};
+                            std::memcpy(p.data(),h,16);
+                            for(size_t i=0;!samples.empty() && i<count;++i) {
+                                const auto x=samples[start+i];
+                                const uint16_t v[2]={uint16_t(int16_t(std::lround(std::clamp(x.real(),-1.f,1.f)*32767))),
+                                                     uint16_t(int16_t(std::lround(std::clamp(x.imag(),-1.f,1.f)*32767)))};
+                                for(size_t k=0;k<2;++k) { p[16+4*i+2*k]=v[k]&255;p[17+4*i+2*k]=v[k]>>8; }
+                            }
+                            tx_packets.push_back(std::move(p));
+                        }
                     }
-                    if(sendto(tx_status->fd,p.data(),p.size(),0,reinterpret_cast<sockaddr*>(&driver),sizeof(driver))!=ssize_t(p.size())) ++send_errors;
                 }
-            }
-            ++tx_block_id;++tx_blocks;
+            });
         };
-        auto make_zoom = [&](size_t i) {
-            return std::make_unique<qo100::Spectrum>(75000,8192,c.spectrum_fps,
-                [&,i](const std::vector<int16_t>& bins,uint64_t index) {
-                    if (!active()) return;
-                    qo100::FrameInfo f{receivers[i].zoom_frame_id++,stamp(),index,rx_frequency(i),75000,8192,session_id,static_cast<uint32_t>(i+1)};
-                    for(const auto& packet:qo100::spectrum_packets(f,bins)) send_packet(packet);
-                });
-        };
+        struct PendingAudio { std::vector<int16_t> samples; uint64_t index; };
+        std::array<std::vector<PendingAudio>,5> rx_audio;
+        for(auto& packets:rx_audio) packets.reserve(2); // At most one input datagram in flight.
         for(size_t i=0;i<receivers.size();++i) {
-            if(i<2) receivers[i].zoom=make_zoom(i);
+            if(!c.rx_enabled[i]) continue;
             receivers[i].dsp=std::make_unique<qo100::RxChannel>(
                 static_cast<int64_t>(receivers[i].frequency)-static_cast<int64_t>(c.rx_center_hz),
-                [&,i](std::complex<float> x) { if(receivers[i].zoom) receivers[i].zoom->push(x); },
+                [](std::complex<float>) {},
                 [&,i](const std::vector<int16_t>& audio,uint64_t index) {
-                    if(!active()) return;
-                    const auto& rx=receivers[i];
-                    qo100::FrameInfo f{rx.epoch,stamp(),index,rx_frequency(i),12000,0,session_id,qo100::rx_streams[i]};
-                    send_packet(qo100::audio_packet(f,audio));
+                    // Each outbox has exactly one writer; main sends after the block barrier.
+                    rx_audio[i].push_back({audio,index});
                 }, i==0 ? c.rx1_filter : qo100::RxFilterSettings{},
                 i==0 ? std::optional<uint32_t>(c.rx1_nr_percent) : std::nullopt,
                 i==4 ? qo100::RxChannel::Profile::multimedia : qo100::RxChannel::Profile::normal);
         }
         std::cout << "RX1 NR: SpeexDSP 1.2.1 (bundled, static); strength=" << c.rx1_nr_percent << " percent\n";
         qo100::Spectrum spectrum(c.iq_rate(), c.fft_size, c.spectrum_fps,
-            [&](const std::vector<int16_t>& bins, uint64_t sample_index) {
+            [&](const std::vector<float>& powers, uint64_t sample_index) {
                 if (!active()) return;
-                const qo100::FrameInfo info{frame_id++,stamp(),sample_index,c.rx_center_hz,c.iq_rate(),c.fft_size,session_id};
-                for (const auto& packet : qo100::spectrum_packets(info,bins)) send_packet(packet);
+                const auto timestamp=stamp();
+                const auto wide=qo100::wide_spectrum(powers,c.rx_center_hz);
+                const qo100::FrameInfo info{frame_id++,timestamp,sample_index,wide.center_hz,
+                    wide.span_hz,uint32_t(wide.bins.size()),session_id};
+                for(const auto& packet:qo100::spectrum_packets(info,wide.bins)) send_packet(packet);
+                for(size_t i=0;i<2;++i) {
+                    const auto zoom=qo100::zoom_spectrum(powers,c.rx_center_hz,rx_frequency(i));
+                    const qo100::FrameInfo z{receivers[i].zoom_frame_id++,timestamp,sample_index,zoom.center_hz,
+                        zoom.span_hz,uint32_t(zoom.bins.size()),session_id,uint32_t(i+1)};
+                    for(const auto& packet:qo100::spectrum_packets(z,zoom.bins)) send_packet(packet);
+                }
                 ++frames_sent;
             });
-        auto feed = [&](std::complex<float> x) { spectrum.push(x); for(auto& rx:receivers) rx.dsp->push(x); };
+        // Use received datagrams directly; do not wait to assemble larger blocks.
+        std::array<std::complex<float>,65536/4> iq_samples;
+        qo100::RxWorkers rx_workers({receivers[0].dsp.get(),receivers[1].dsp.get(),
+            receivers[2].dsp.get(),receivers[3].dsp.get(),receivers[4].dsp.get()});
+        std::cout << "RX demodulators:";
+        for(size_t i=0;i<receivers.size();++i) std::cout << " RX" << i+1 << '=' << (c.rx_enabled[i]?"on":"off");
+        std::cout << "\nDSP threads: main/FFT + enabled RX groups (RX1, RX2/RX3, RX4/RX5) + TX1/TX2\n";
+        auto feed_block = [&](const std::complex<float>* samples,size_t count) {
+            rx_workers.process(samples,count,[&] {
+                for(size_t i=0;i<count;++i) spectrum.push(samples[i]);
+            },rx2_processing?31u:29u);
+            for(size_t i=0;i<receivers.size();++i) {
+                for(const auto& audio:rx_audio[i]) {
+                    if(!active()) break;
+                    qo100::FrameInfo f{receivers[i].epoch,stamp(),audio.index,rx_frequency(i),
+                        12000,0,session_id,qo100::rx_streams[i]};
+                    send_packet(qo100::audio_packet(f,audio.samples));
+                }
+                rx_audio[i].clear();
+            }
+        };
         auto feed_iq = [&](const uint8_t* data,size_t size) {
-            if (!size || size%4) return false;
+            if (!size || size%4 || size/4>iq_samples.size()) return false;
             for(size_t i=0;i<size;i+=4) {
                 const int r=data[i] | (int(data[i+1])<<8), q=data[i+2] | (int(data[i+3])<<8);
-                feed({(r>=32768?r-65536:r)/32768.f,(q>=32768?q-65536:q)/32768.f});
+                iq_samples[i/4]={(r>=32768?r-65536:r)/32768.f,(q>=32768?q-65536:q)/32768.f};
             }
+            feed_block(iq_samples.data(),size/4);
             return true;
         };
         if (source == "pluto") {
@@ -288,14 +340,13 @@ int main(int argc, char** argv) {
         std::array<uint8_t, 65536> buffer{};
         auto reset_rx=[&](size_t i) {
             auto& rx=receivers[i];++rx.epoch;
-            rx.dsp->tune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
-            if(i<2) rx.zoom=make_zoom(i);
+            if(rx.dsp) rx.dsp->tune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
             send_rx_state(i);
         };
         auto retune_rx=[&](size_t i) {
             // A dial change preserves the PCM timeline and the receiver's DSP state.
             // Changing the epoch here would force GUI jitter/ALSA buffers to flush.
-            receivers[i].dsp->retune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
+            if(receivers[i].dsp) receivers[i].dsp->retune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
         };
         auto apply_runtime=[&](const qo100::Config& old,bool reset_all) {
             for(size_t i=0;i<receivers.size();++i) {
@@ -376,7 +427,7 @@ int main(int argc, char** argv) {
                 // Commit only after fresh IQ proves the restarted driver is streaming.
             } else if(!loop_pending) commit_loop();
         };
-        while (running && (!duration || std::chrono::duration<double>(Clock::now() - start).count() < duration)) {
+        while (running.load(std::memory_order_relaxed) && (!duration || std::chrono::duration<double>(Clock::now() - start).count() < duration)) {
             pollfd fds[3]{{gui.fd, POLLIN, 0}, {iq ? iq->fd : -1, POLLIN, 0}, {tx_status ? tx_status->fd : -1,POLLIN,0}};
             if (poll(fds, 3, 5) < 0 && errno != EINTR) throw std::runtime_error("poll failed");
             if (fds[0].revents & POLLIN) {
@@ -391,6 +442,7 @@ int main(int argc, char** argv) {
                             std::cout << "GUI subscriber " << inet_ntoa(from.sin_addr) << ':' << ntohs(from.sin_port) << '\n';
                         if (!active() || from.sin_addr.s_addr!=peer.sin_addr.s_addr || from.sin_port!=peer.sin_port) {
                             for(auto& rx:receivers) rx.have_request=false;
+                            digital_managed=false;tx2_used=true;
                             mute_tx();tx_have_request=false;reset_tx2();tx2_have_request=false;tx2_request=0;
                             have_filter_request=false;have_compressor_request=false;have_nr_request=false;
                             have_settings_request=false;
@@ -403,6 +455,13 @@ int main(int argc, char** argv) {
                         for(size_t i=2;i<receivers.size();++i) send_rx_state(i);
                         send_tx2_state();
                     } else if (active() && from.sin_addr.s_addr==peer.sin_addr.s_addr && from.sin_port==peer.sin_port) {
+                        qo100::DigitalActivity activity{};
+                        if(qo100::parse_digital_activity(buffer.data(),size_t(n),activity)) {
+                            if(!c.digital_auto_idle || activity.session!=session_id || (digital_managed && int32_t(activity.request-digital_request)<0) ||
+                               (digital_managed && activity.request==digital_request && activity.flags!=digital_flags))continue;
+                            digital_managed=true;digital_request=activity.request;digital_flags=activity.flags;digital_at=Clock::now();
+                            continue;
+                        }
                         qo100::SettingsControl control_settings{};
                         if(qo100::parse_settings_control(buffer.data(),size_t(n),control_settings)) {
                             if((control_settings.set && control_settings.session!=session_id) ||
@@ -559,7 +618,7 @@ int main(int argc, char** argv) {
                         }
                         if(qo100::parse_tx_audio(buffer.data(),size_t(n),audio)) {
                             if(audio.stream==qo100::tx2_stream) {
-                                if(!hardware_online || loop_pending || loop_mode!=TestLoop::normal || audio.session!=session_id ||
+                                if(!tx2_used || !hardware_online || loop_pending || loop_mode!=TestLoop::normal || audio.session!=session_id ||
                                     audio.epoch!=tx2_epoch || audio.frequency!=tx2_frequency) continue;
                                 if(tx2.add(audio.index,audio.samples)) last_tx2_audio=Clock::now();
                                 continue;
@@ -596,6 +655,43 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+            // Apply demand only at the block boundary: all DSP workers are idle.
+            const bool lease=!digital_managed || Clock::now()-digital_at<std::chrono::seconds(2);
+            const bool want_rx2=!digital_managed || (lease && (digital_flags&1));
+            const bool want_tx2=!digital_managed || (lease && (digital_flags&2));
+            if(want_rx2)rx2_last_use=Clock::now();
+            const bool run_rx2=c.rx_enabled[1] && (want_rx2 || Clock::now()-rx2_last_use<std::chrono::milliseconds(750));
+            if(run_rx2!=rx2_processing) {
+                rx2_processing=run_rx2;
+                if(run_rx2)reset_rx(1); // New epoch/sample clock after an actual sleep.
+                std::cout<<"RX2 automatic "<<(run_rx2?"active":"idle")<<'\n';
+            }
+            if(want_tx2!=tx2_used) {
+                tx2_used=want_tx2;
+                reset_tx2();send_tx2_state(); // Discard queued samples on both edges.
+                std::cout<<"TX2 automatic "<<(tx2_used?"active":"idle")<<'\n';
+            }
+            if(tx_enabled && (!active() || Clock::now()-last_tx_control>std::chrono::milliseconds(1500))) {
+                mute_tx();send_tx_state();
+            }
+            if(!active() && !pending_settings) change_loop(TestLoop::normal);
+            if(tx_status && (fds[2].revents&POLLIN)) {
+                bool update=false;
+                for(int budget=0;budget<128;++budget) {
+                    sockaddr_in from{};socklen_t len=sizeof(from);
+                    const auto n=recvfrom(tx_status->fd,buffer.data(),buffer.size(),0,reinterpret_cast<sockaddr*>(&from),&len);
+                    if(n<0) break;
+                    if(n!=16 || ntohl(from.sin_addr.s_addr)!=INADDR_LOOPBACK || std::memcmp(buffer.data(),"PTXS",4)) continue;
+                    uint32_t h[4];std::memcpy(h,buffer.data(),16);
+                    const auto seq=ntohl(h[1]),fill=ntohl(h[2]),capacity=ntohl(h[3]);
+                    if(capacity!=8 || fill>capacity || (have_status && int32_t(seq-status_sequence)<=0)) continue;
+                    have_status=true;status_sequence=seq;pluto_fill=fill;update=true;last_tx_feedback=Clock::now();
+                }
+                if(update && pluto_fill<4) { start_tx(unsigned(4-pluto_fill));pluto_fill=4; }
+            }
+            if(source=="synthetic" && Clock::now()>=next_tx) {
+                start_tx(1);next_tx+=std::chrono::milliseconds(20);
+            }
             if (iq && (fds[1].revents & POLLIN)) {
                 for (int budget = 0; budget < 4; ++budget) {
                     sockaddr_in from{};
@@ -605,6 +701,8 @@ int main(int argc, char** argv) {
                     if (ntohl(from.sin_addr.s_addr) != INADDR_LOOPBACK || !n || n%4) ++malformed_iq;
                     else {
                         const bool recovered=hardware_recovering && !pending_settings && !loop_pending;
+                        // Hardware/LO commits can reset TX: first finish the old generation.
+                        if(recovered || pending_settings || loop_pending) finish_tx();
                         hardware_online=true;driver_error.clear();
                         if(recovered) {
                             hardware_recovering=false;
@@ -633,43 +731,26 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            if(tx_enabled && (!active() || Clock::now()-last_tx_control>std::chrono::milliseconds(1500))) {
-                mute_tx();send_tx_state();
-            }
-            if(!active() && !pending_settings) change_loop(TestLoop::normal);
-            if(tx_status && (fds[2].revents&POLLIN)) {
-                bool update=false;
-                for(int budget=0;budget<128;++budget) {
-                    sockaddr_in from{};socklen_t len=sizeof(from);
-                    const auto n=recvfrom(tx_status->fd,buffer.data(),buffer.size(),0,reinterpret_cast<sockaddr*>(&from),&len);
-                    if(n<0) break;
-                    if(n!=16 || ntohl(from.sin_addr.s_addr)!=INADDR_LOOPBACK || std::memcmp(buffer.data(),"PTXS",4)) continue;
-                    uint32_t h[4];std::memcpy(h,buffer.data(),16);
-                    const auto seq=ntohl(h[1]),fill=ntohl(h[2]),capacity=ntohl(h[3]);
-                    if(capacity!=8 || fill>capacity || (have_status && int32_t(seq-status_sequence)<=0)) continue;
-                    have_status=true;status_sequence=seq;pluto_fill=fill;update=true;last_tx_feedback=Clock::now();
-                }
-                if(update) while(pluto_fill<4) { render_tx();++pluto_fill; }
-            }
-            if(source=="synthetic" && Clock::now()>=next_tx) {
-                render_tx();next_tx+=std::chrono::milliseconds(20);
-            }
-            if(tx_have_request && active() && Clock::now()-last_tx_state>std::chrono::milliseconds(250)) send_tx_state();
-            if(active() && Clock::now()-last_tx2_state>std::chrono::milliseconds(250)) send_tx2_state();
             if (source == "synthetic" && Clock::now() >= next_synthetic) {
                 // Exact-bin test tones at -150 kHz (-12.04 dBFS) and +75 kHz (-20 dBFS).
-                for (uint32_t i = 0; i < c.iq_rate() / 100; ++i) {
-                    const double t = double(spectrum.samples()) / c.iq_rate();
+                const auto first=spectrum.samples();
+                const auto count=c.iq_rate()/100;
+                for (uint32_t i = 0; i < count; ++i) {
+                    const double t = double(first+i) / c.iq_rate();
                     const auto a = std::polar(0.25f, static_cast<float>(std::remainder(-2 * std::acos(-1.) * 150000 * t, 2 * std::acos(-1.))));
                     const auto b = std::polar(0.1f, static_cast<float>(std::remainder(2 * std::acos(-1.) * 75000 * t, 2 * std::acos(-1.))));
                     const auto usb = std::polar(0.12f,float(std::remainder(-2*std::acos(-1.)*500*t,2*std::acos(-1.))));
                     const auto lsb = std::polar(0.18f,float(std::remainder(-2*std::acos(-1.)*3500*t,2*std::acos(-1.))));
                     const auto usb2=std::polar(0.08f,float(std::remainder(-2*std::acos(-1.)*148300*t,2*std::acos(-1.))));
                     const auto lsb2=std::polar(0.13f,float(std::remainder(-2*std::acos(-1.)*152200*t,2*std::acos(-1.))));
-                    feed(a + b + usb + lsb + usb2 + lsb2);
+                    iq_samples[i]=a + b + usb + lsb + usb2 + lsb2;
                 }
+                feed_block(iq_samples.data(),count);
                 next_synthetic += std::chrono::milliseconds(10);
             }
+            finish_tx(); // No worker is active when commands/stats/restarts access DSP.
+            if(tx_have_request && active() && Clock::now()-last_tx_state>std::chrono::milliseconds(250)) send_tx_state();
+            if(active() && Clock::now()-last_tx2_state>std::chrono::milliseconds(250)) send_tx2_state();
             if (pluto) {
                 try {
                     pluto->check();

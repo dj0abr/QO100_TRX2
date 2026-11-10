@@ -59,9 +59,9 @@ target_compile_options(pluto PRIVATE -Wno-write-strings -Wno-narrowing)
 target_link_libraries(pluto PRIVATE ${IIO_LIBRARY} ${AD9361_LIBRARY}
     qo100_liquid Threads::Threads rt m)
 
-add_library(qo100_core src/dsp.cpp src/config.cpp src/spectrum.cpp src/protocol.cpp src/rx_channel.cpp src/rx_filter.cpp src/tx_channel.cpp src/speech_compressor.cpp src/noise_reduction.cpp src/settings.cpp)
+add_library(qo100_core src/dsp_workers.cpp src/dsp.cpp src/config.cpp src/spectrum.cpp src/protocol.cpp src/rx_channel.cpp src/rx_filter.cpp src/tx_channel.cpp src/speech_compressor.cpp src/noise_reduction.cpp src/settings.cpp)
 target_include_directories(qo100_core PUBLIC include)
-target_link_libraries(qo100_core PUBLIC qo100_liquid qo100_speex PkgConfig::FFTW PkgConfig::SAMPLERATE)
+target_link_libraries(qo100_core PUBLIC Threads::Threads qo100_liquid qo100_speex PkgConfig::FFTW PkgConfig::SAMPLERATE)
 target_compile_options(qo100_core PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(qo100_backend src/main.cpp src/pluto_process.cpp)
 target_link_libraries(qo100_backend PRIVATE qo100_core Threads::Threads)
@@ -70,7 +70,7 @@ target_compile_definitions(qo100_backend PRIVATE
     QO100_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf")
 add_dependencies(qo100_backend pluto)
 pkg_check_modules(PULSE REQUIRED IMPORTED_TARGET libpulse-simple)
-add_executable(qo100_digital_audio audio/digital_audio.cpp)
+add_executable(qo100_digital_audio audio/digital_audio.cpp audio/pulse_usage.cpp)
 target_include_directories(qo100_digital_audio PRIVATE webbridge)
 target_link_libraries(qo100_digital_audio PRIVATE qo100_core PkgConfig::PULSE Threads::Threads)
 target_compile_options(qo100_digital_audio PRIVATE -Wall -Wextra -Wpedantic)
@@ -106,6 +106,9 @@ if(BUILD_TESTING)
     add_executable(test_core tests/test_core.cpp)
     target_link_libraries(test_core PRIVATE qo100_core)
     add_test(NAME core COMMAND test_core)
+    add_executable(test_shared_spectrum tests/test_shared_spectrum.cpp)
+    target_link_libraries(test_shared_spectrum PRIVATE qo100_core)
+    add_test(NAME shared_spectrum COMMAND test_shared_spectrum)
     add_executable(test_tx_channel tests/test_tx_channel.cpp)
     target_link_libraries(test_tx_channel PRIVATE qo100_core)
     add_test(NAME tx_usb_dsp COMMAND test_tx_channel)
@@ -121,6 +124,20 @@ if(BUILD_TESTING)
     add_executable(test_rx_channel tests/test_rx_channel.cpp)
     target_link_libraries(test_rx_channel PRIVATE qo100_core)
     add_test(NAME usb_dsp COMMAND test_rx_channel)
+    add_executable(test_dsp_workers tests/test_dsp_workers.cpp)
+    target_link_libraries(test_dsp_workers PRIVATE qo100_core)
+    add_test(NAME dsp_worker_equivalence COMMAND test_dsp_workers)
+    add_test(NAME rx_enable_switches COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rx_enable_switches.py
+        $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(rx_enable_switches PROPERTIES TIMEOUT 20)
+    add_test(NAME dsp_worker_shutdown COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_backend_threads.py
+        $<TARGET_FILE:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf)
+    set_tests_properties(dsp_worker_shutdown PROPERTIES TIMEOUT 15)
+    add_executable(test_rx_blocks tests/test_rx_blocks.cpp)
+    target_link_libraries(test_rx_blocks PRIVATE qo100_core)
+    add_test(NAME rx_block_equivalence COMMAND test_rx_blocks)
     add_executable(test_mm_rx_chain tests/mm_rx_chain.cpp)
     add_test(NAME mm_diagnostics COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mm_diagnostics.py)
     target_link_libraries(test_mm_rx_chain PRIVATE qo100_core)
@@ -137,6 +154,12 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_digital_audio.py $<TARGET_FILE:qo100_digital_audio>)
     set_tests_properties(digital_virtual_audio PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
     if(TARGET qo100_webbridge)
+        add_test(NAME digital_auto_idle COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_digital_idle.py
+            $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web
+            $<TARGET_FILE:qo100_digital_audio>)
+        set_tests_properties(digital_auto_idle PROPERTIES TIMEOUT 40)
         add_test(NAME webbridge_udp COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_webbridge.py
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
@@ -157,6 +180,11 @@ if(BUILD_TESTING)
             $<TARGET_FILE:test_udp_text_decoder> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf
             ${CMAKE_CURRENT_SOURCE_DIR}/web)
         set_tests_properties(monitor_decoders_udp PROPERTIES TIMEOUT 40)
+        add_test(NAME load_switches_supervisor COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_load_switches_supervisor.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/start_all.sh $<TARGET_FILE_DIR:qo100_backend>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(load_switches_supervisor PROPERTIES TIMEOUT 40)
         add_test(NAME monitor_supervisor COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_monitor_supervisor.py
             ${CMAKE_CURRENT_SOURCE_DIR}/start_all.sh $<TARGET_FILE_DIR:qo100_backend>

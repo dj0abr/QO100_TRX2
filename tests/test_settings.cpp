@@ -13,6 +13,22 @@ int main() {
         std::filesystem::create_directory(directory);
         qo100::Config base;base.derive();base.validate();
         require(base.rx5_frequency_hz==10489993000ULL,"Wrong RX5 default");
+        auto disabled=base;disabled.rx_enabled[1]=false;disabled.rx_enabled[3]=false;
+        disabled.digital_auto_idle=false;
+        disabled.external_decoders_enabled=false;disabled.decoder_enabled[1]=false;
+        const auto edited=qo100::patch_settings(disabled,{{"gui_audio_gain","5"}});
+        require(!edited.rx_enabled[1] && !edited.rx_enabled[3] && !edited.external_decoders_enabled &&
+                !edited.decoder_enabled[1] && !edited.digital_auto_idle,"GUI patch re-enabled manually disabled components");
+        for(const auto* key:{"digital_auto_idle","rx2_enabled","rx3_enabled","rx4_enabled","rx5_enabled",
+                            "external_decoders_enabled","rx3_decoder_enabled","rx4_decoder_enabled","rx5_decoder_enabled"}) {
+            require(!qo100::settings_values(disabled).count(key),"Manual switch leaked into persisted GUI settings");
+            rejects([&]{qo100::patch_settings(disabled,{{key,"1"}});});
+        }
+        disabled.rx3_decoder_cpu_percent=3;disabled.rx4_decoder_cpu_percent=5;
+        auto budget_preserved=qo100::patch_settings(disabled,{{"gui_audio_gain","4"}});
+        require(budget_preserved.rx3_decoder_cpu_percent==3 && budget_preserved.rx4_decoder_cpu_percent==5,"GUI changed decoder budgets");
+        rejects([&]{qo100::patch_settings(base,{{"rx3_decoder_cpu_percent","10"}});});
+        rejects([&]{qo100::patch_settings(base,{{"rx4_decoder_cpu_percent","10"}});});
         auto monitors=qo100::patch_settings(base,{{"rx3_frequency_hz","10489540321"},{"rx4_frequency_hz","10489748821"},{"rx5_frequency_hz","10489993001"}});
         require(monitors.rx3_frequency_hz==10489540321ULL && monitors.rx4_frequency_hz==10489748821ULL && monitors.rx5_frequency_hz==10489993001ULL,"Monitoring RF lost precision");
         require(!qo100::hardware_settings_changed(base,monitors),"Monitoring frequency must not restart hardware");

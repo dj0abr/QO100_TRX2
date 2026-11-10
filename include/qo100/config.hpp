@@ -2,6 +2,7 @@
 #include "qo100/filter_settings.hpp"
 #include "qo100/compressor_settings.hpp"
 #include <cstdint>
+#include <array>
 #include <filesystem>
 #include <string>
 
@@ -23,13 +24,19 @@ struct Config {
     uint32_t rx_bandwidth_hz = 600000;
     std::string gui_bind = "0.0.0.0";
     uint16_t gui_port = 40900;
-    uint32_t fft_size = 8192;
+    uint32_t fft_size = 24000;
     uint32_t spectrum_fps = 20;
     uint64_t initial_rx_hz = 10489900000ULL;
     uint64_t initial_rx2_hz = 10489600000ULL;
     uint64_t rx3_frequency_hz = 10489540000ULL;
     uint64_t rx4_frequency_hz = 10489748821ULL;
     uint64_t rx5_frequency_hz = 10489993000ULL;
+    // Manual startup switches: intentionally excluded from GUI saved settings.
+    std::array<bool,5> rx_enabled{{true,true,true,true,true}}; // RX1 always enabled.
+    bool external_decoders_enabled = true;
+    bool digital_auto_idle = true;
+    uint32_t rx3_decoder_cpu_percent=10,rx4_decoder_cpu_percent=10;
+    std::array<bool,3> decoder_enabled{{true,true,true}}; // RX3 FT8, RX4 PSK, RX5 MM.
     uint64_t initial_tx_hz = 2400400000ULL;
     uint64_t initial_tx2_hz = 2400100000ULL;
     double tx_attenuation_db = 30;

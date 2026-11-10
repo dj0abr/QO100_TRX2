@@ -90,8 +90,8 @@ function packet(buffer) {
   }
   if(type!==2||stream>1||v.getUint16(54)!==1) return;
   const n=v.getUint32(44),first=v.getUint32(48),count=v.getUint16(52),rate=v.getUint32(40),center=Number(v.getBigUint64(32));
-  if(!n||n>65536||(n&(n-1))||v.getUint32(56)!==n||first+count>n||buffer.byteLength!==64+2*count) return;
-  if(stream===1 && center!==state.rx?.['1']?.frequency_hz) return;
+  if(!n||n>65536||v.getUint32(56)!==n||first+count>n||buffer.byteLength!==64+2*count) return;
+  if(stream===1 && !(Math.abs(center-(state.rx?.['1']?.frequency_hz??NaN))<=12)) return;
   if(lastFrames.has(stream) && time<=lastFrames.get(stream)) return;
   const key=`${stream}:${id}`,now=performance.now();
   for(const [key,f] of frames) if(now-f.started>500) frames.delete(key);
@@ -107,7 +107,7 @@ function packet(buffer) {
 function draw(frame) {
   const canvas=$(frame.stream?'zoom':'wide'),ctx=canvas.getContext('2d');
   ctx.drawImage(canvas,0,1);const row=ctx.createImageData(canvas.width,1);
-  const span=frame.stream?50000:frame.rate,floor=Number(state.settings?.gui_display_floor??-100);
+  const span=frame.rate,floor=Number(state.settings?.gui_display_floor??-100);
   for(let x=0;x<canvas.width;x++) {
     const bin=Math.min(frame.n-1,Math.max(0,Math.floor(frame.n/2+(x/canvas.width-.5)*span/frame.rate*frame.n)));
     const level=Math.min(1,Math.max(0,(frame.values[bin]/100-floor)/65));

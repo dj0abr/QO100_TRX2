@@ -20,6 +20,8 @@ public:
     void reset(int64_t offset);
     bool add(uint64_t index, const std::vector<int16_t>& samples);
     std::vector<std::complex<float>> render(bool audio_recent);
+    // Empty means known-silent IQ; caller still advances the hardware block clock.
+    std::vector<std::complex<float>> render_active(bool audio_recent);
     std::vector<float> pull_audio(bool audio_recent);
     size_t level() const;
     double ppm() const { return correction_ * 1e6; }

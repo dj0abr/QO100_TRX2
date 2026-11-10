@@ -58,6 +58,52 @@ werden selbst erzeugte Geräte entfernt. Bereits vorhandene virtuelle Geräte we
 nach einem harten Adapterabbruch wiederverwendet. Gleichzeitige Adapter mit demselben
 Präfix werden durch eine lokale Sperre verhindert.
 
+## Automatische Ruhefunktion
+
+In `config/backend.conf` ist `digital_auto_idle = 1` voreingestellt. Danach den
+gesamten Stack neu starten. `digital_auto_idle = 0` stellt den früheren
+dauerhaft aktiven Betrieb wieder her; `start_all.sh` übergibt dem Audioadapter
+dazu `--always-active`. Bei Einzelstarts diesen Schalter ebenfalls setzen.
+
+Der Adapter beobachtet mit einer dauerhaften libpulse-Verbindung die offenen,
+nicht pausierten Audioströme des PulseAudio-Servers bzw. der PulseAudio-Schnittstelle
+von PipeWire. Dafür werden keine laufenden `pactl`-Abfragen gestartet.
+
+- Aufnahme von **fromQO100** aktiviert RX2; ohne Aufnahme pausiert der RX2-Demodulator.
+  Auch direktes Abhören von `fromQO100_internal.monitor` zählt als Nutzung.
+- Wiedergabe nach **toQO100** aktiviert TX2; ohne Wiedergabe schließen Adapter
+  und Backend den dazugehörigen Audioweg und überspringen die Modulation.
+- Ein Browser, der RX2 bei eingeschaltetem Audio abhört, hält RX2 ebenfalls aktiv.
+  RX2-Auswahl allein bei ausgeschaltetem Audio benötigt keinen Demodulator.
+- Die virtuellen Geräte bleiben während der Pause sichtbar und können jederzeit
+  geöffnet werden. Eigene Adapterstreams und die interne Remap-Verbindung zählen
+  nicht als externe Benutzer. Fehler bei der Erkennung lassen beide Wege aktiv.
+
+Entscheidend ist die Benutzung des Geräts, **nicht der Audiopegel**. Ein Programm,
+das seinen Ausgabestream zwischen Sendungen offen hält und Nullen schreibt,
+hält TX2 deshalb aktiv. Das vermeidet eine pegelabhängige Einschaltverzögerung.
+Ein lediglich geöffnetes Geräteeinstellungsfenster oder ein Pegelmesser kann
+ebenfalls einen Audiostream öffnen und den zugehörigen Weg aktiv halten.
+
+RX2 pausiert nach etwa 750 ms ohne Bedarf. Beim Wiederanlauf beginnen seine
+DSP-Zustände und Audioepoche frisch; TX2 verwirft beim Umschalten alte Audiodaten
+und bestätigt eine neue Epoche, bevor Index null akzeptiert wird. Die Einrichtung
+der Audiowege und die bestehenden Audiopuffer benötigen beim Öffnen eine kurze
+Anlaufzeit. RX1/TX1, RX3–5 und alle Wasserfälle laufen weiter. Ohne Sendeaudio
+bleibt der Pluto-TX-Datenstrom mit Null-IQ getaktet; eine zweite Hardwareverbindung
+wird nicht aufgebaut. `rx2_enabled = 0` hat weiterhin Vorrang vor der Automatik.
+
+Der Adapter meldet den Bedarf an die Webbridge alle 500 ms sowie bei Änderungen.
+Ein ausbleibender Adapter wird nach zwei Sekunden als inaktiv behandelt; ein
+Browser kann RX2 weiterhin benutzen. Ältere Adapter ohne Bedarfsmeldungen
+behalten ihren dauerhaft aktiven Betrieb. Die Webbridge erneuert den Backend-Bedarf
+ebenfalls alle 500 ms mit einer Gültigkeit von zwei Sekunden. Alte GUIs ohne
+diese Erweiterung behalten den bisherigen Betrieb; ältere Browser ohne explizite
+Audioanmeldung halten aus Kompatibilitätsgründen RX2 aktiv.
+
+Im Adapterlog stehen Zustandswechsel als `Digital audio users: RX2=0 TX2=0`,
+im Backendlog als `RX2 automatic idle/active` bzw. `TX2 automatic idle/active`.
+
 ## Bedienung im WebGUI
 
 RX1 oder RX2 anklicken wählt das zugehörige RX/TX-Paar und den hörbaren Audiokanal.
@@ -153,3 +199,12 @@ Dieser Treibertest benötigt freie lokale Pluto-Ports oder einen getrennten
 Netzwerk-Namensraum; niemals parallel zur laufenden Station im selben Netz ausführen.
 `digital_virtual_audio` prüft die wirklichen virtuellen Geräte und die 48-/12-kHz-
 Umsetzung auf einem privaten PulseAudio-Server ohne physische Audiogeräte.
+
+`digital_auto_idle` prüft die automatische Ruhefunktion mit echtem Backend und
+Webbridge an synthetischem IQ und, sofern PulseAudio verfügbar ist, mit dem
+echten Audioadapter: unabhängige Richtungen, mehrere Browser, neue
+RX2-Epoche, abgelaufene Bedarfsmeldungen und ununterbrochene übrige Kanäle.
+`digital_virtual_audio` schließt und öffnet beide realen virtuellen Geräte
+unabhängig, prüft aktive Stille, frische Audioaufnahme und fehlende eigene
+Audioströme im Ruhezustand. Ein privater PipeWire-Server gehört nicht zu diesem
+Test; dort wird dieselbe libpulse-Schnittstelle verwendet.

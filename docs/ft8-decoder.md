@@ -56,7 +56,21 @@ erscheinen als Zeitversatz im Decoder. Optional lässt sich die Zuordnung korrig
 `--time-offset-ms`: −5000 bis +5000 ms; positiv ordnet Audio einer späteren UTC-Zeit
 zu. Alternativ gilt `FT8_TIME_OFFSET_MS`. Ohne Angabe ist der Offset 0.
 `--decoder DATEI` wählt einen anderen Rechenkern, `--decode-timeout-ms` begrenzt
-dessen Laufzeit (Standard 45000 ms). Die Decodierung läuft separat und blockiert
+dessen Laufzeit in verstrichener Zeit (Standard 45000 ms).
+
+Der komplette FT8-Prozessbaum einschließlich des WSJT-X-Rechenkerns hat
+standardmäßig **10 % eines CPU-Kerns** als Budget. `rx3_decoder_cpu_percent` in
+`backend.conf` kann es auf 1–10 % einstellen; Einzelstart: `--cpu-percent 10`.
+Alle Rechenprozesse laufen mit nice 19/SCHED_IDLE. Der Monitoring-Empfänger
+verwendet die schnelle WSJT-X-Stufe `--depth 1`. Der eigenständige Rechenkern
+`ft8-decoder` behält für direkte Offline-Aufrufe seinen bisherigen Default.
+Ein laufender Slot und höchstens der neueste wartende Slot werden behalten.
+Langsame, veraltete oder nach 45 Sekunden nicht fertige Dekodierungen dürfen
+entfallen; Audiowiedergabe und RX5 haben Vorrang. Die Begrenzung erfolgt auch
+beim Einzelstart und benötigt keine Root-Rechte oder zusätzliche Programme.
+[Details und Tests der CPU-Budgetierung](decoder-cpu.md).
+
+Die Decodierung läuft separat und blockiert
 den UDP-Empfang nicht. RX1, TX und Backend-DSP werden dafür nicht verändert.
 
 ## Build und Test

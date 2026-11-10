@@ -41,6 +41,11 @@ int main() {
     require(tx.underruns==0 && tx.overruns==0,"Steady clock underrun");
     auto silent=tx.render(false);
     require(std::all_of(silent.begin(),silent.end(),[](auto x){return x==std::complex<float>{};}),"Missing audio is not exact silence");
+    require(tx.render_active(false).empty(),"Inactive TX must expose known-silent IQ");
+    TxChannel waking(-150000,{},TxChannel::Profile::digital);
+    require(waking.render_active(true).empty(),"Empty FIFO was modulated");
+    for(int i=0;i<6;++i)require(waking.add(i*240,std::vector<int16_t>(240)),"Silent client packet rejected");
+    require(waking.render_active(true).size()==TxChannel::iq_block,"Connected silent client was put to sleep");
     // Five virtual minutes with both positive and negative soundcard drift.
     // Exercise the real sinc clock correction without the expensive IQ stage.
     for(double drift:{.0015,-.0015}) {

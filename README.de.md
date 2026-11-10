@@ -18,6 +18,12 @@ Ein einzelner Pluto versorgt fünf parallel arbeitende Empfangskanäle und zwei 
 **RX5** empfängt zusätzlich die Multimedia-Bake und stellt DX-Cluster, CW-Skimmer und Bulletins im WebGUI bereit.
 Die beiden Sendezweige werden zu einem gemeinsamen IQ-Signal für den Pluto zusammengeführt.
 
+Das Backend verteilt die DSP-Arbeit standardmäßig auf drei RX-Worker (RX1, RX2/RX3, RX4/RX5) und einen TX-Worker. Der Hauptthread übernimmt die gemeinsame FFT und die Kommunikation; Linux verteilt diese Arbeit auf die vier Kerne eines Raspberry Pi.
+
+Für Lastmessungen lassen sich RX2–RX5 sowie FT8-/PSK-/MM-Decoder einzeln in
+[`config/backend.conf`](config/backend.conf) abschalten. Nach Änderungen den
+kompletten Stack neu starten; Beispiele stehen in [DSP-Threading](docs/dsp-threading.md).
+
 ## Benötigte Hardware
 
 - Pluto SDR, angeschlossen über USB oder einen USB-Ethernet-Adapter.
@@ -143,7 +149,7 @@ Der erste Browser erhält die Steuerung; weitere Browser können zuschauen und m
 
 ### Die beiden Wasserfälle
 
-**Fullband** zeigt den gesamten QO-100-Schmalbandtransponder. **Zoom** zeigt zur Feinabstimmung ±25 kHz um den ausgewählten Empfänger. **RX1** oder **RX2** anklicken, um das zugehörige RX/TX-Paar auszuwählen; Zoom und Audio folgen der Auswahl.
+**Fullband** zeigt den gesamten QO-100-Schmalbandtransponder. **Zoom** zeigt zur Feinabstimmung ±30 kHz um den ausgewählten Empfänger. **RX1** oder **RX2** anklicken, um das zugehörige RX/TX-Paar auszuwählen; Zoom und Audio folgen der Auswahl.
 
 ### Abstimmen mit der Maus
 

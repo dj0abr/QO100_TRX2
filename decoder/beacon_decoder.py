@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""RX4 UDP -> QO-100 PSK beacon -> UTF-8 UDP, monitoring receiver.
+"""Legacy Python DSP reference; production receiver is qo100_beacon_decoder (C++).
 
 DSP adapted from ta2ldv/qo100-beacon-decoder (GPL-3.0); see the pinned
 sources and provenance in external/qo100-beacon-decoder/ORIGIN.md.
 Transport, bounded worker and overlap handling are specific to QO100_TRX4.
 """
 import os
+if __name__ == '__main__':
+    import sys
+    from pathlib import Path
+    binary=Path(__file__).resolve().parents[1]/'build/bin/qo100_beacon_decoder'
+    os.execv(str(binary),[str(binary),*sys.argv[1:]])
 # Small FIR solves must not spawn dozens of BLAS threads on a desktop.
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 os.environ['OMP_NUM_THREADS'] = '1'
@@ -260,7 +265,3 @@ def main():
               f'{sum(f.kind == "FEC" for f in frames)} FEC blocks.')
         return 0 if frames else 1
     return serve(args.port)
-
-
-if __name__ == '__main__':
-    sys.exit(main())

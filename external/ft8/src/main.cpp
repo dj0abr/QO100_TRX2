@@ -4,6 +4,10 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+#include <csignal>
+#include <sys/prctl.h>
+#include <unistd.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -245,6 +249,12 @@ void print(const Options& o, const Audio& a, const Results& results) {
 }
 } // namespace
 int main(int argc, char** argv) {
+    // A throttled solver must not remain stopped if its receiver/guard dies.
+    if(std::getenv("QO100_DECODER_GUARDED")) {
+        const auto parent=getppid();
+        prctl(PR_SET_PDEATHSIG,SIGKILL);
+        if(getppid()!=parent)return 125;
+    }
     std::locale::global(std::locale::classic());
     try {
         const auto options = parse(argc, argv);

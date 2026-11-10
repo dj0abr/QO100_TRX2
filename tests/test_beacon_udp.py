@@ -65,7 +65,11 @@ def main():
                                for p in client.messages), 'RX4 PCM leaked to browser'
             # Let the latest overlapping window finish: only one copy of each real frame.
             wait(lambda: (root/'receiver.log').read_text().count('Window ') >= 2, timeout=12)
-            time.sleep(.3)
+            # The native decoder can finish the 30-s window before the 40-s
+            # job, producing a legitimate N frame later. Wait for that final
+            # window's new frame before testing replay/overlap suppression.
+            for client in clients:
+                wait(lambda: '[PSK N | CRC OK' in text(client),timeout=12)
             first = text(owner)
             assert first.count('[PSK M | CRC OK') == 1, first
             assert first.count('[PSK M | FEC/RS OK') == 1, first

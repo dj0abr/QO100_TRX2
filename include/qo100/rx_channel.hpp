@@ -4,6 +4,7 @@
 #include "qo100/noise_reduction.hpp"
 #include <array>
 #include <complex>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -27,17 +28,22 @@ public:
     // Change frequency while keeping oscillator phase, DSP history and sample clock.
     void retune(int64_t offset_hz);
     void push(std::complex<float> sample);
+    // Read-only input shared by receivers. Boundaries do not reset DSP state.
+    void push_block(const std::complex<float>* samples, size_t count);
     void set_filter(RxFilterSettings settings) { usb_filter_.set(settings); }
     RxFilterSettings filter_settings() const { return usb_filter_.target(); }
     void set_nr(uint32_t percent) { if(!nr_) throw std::logic_error("NR unavailable on this receiver"); nr_->set(percent); }
     uint32_t nr_percent() const { return nr_ ? nr_->percent() : 0; }
 private:
+    void push_mixed(std::complex<float> sample);
     void resample();
     LiquidDecimator decimator_;
     RxAudioFilter usb_filter_;
     LiquidFir mm_filter_;
     std::unique_ptr<NoiseReduction> nr_;
     FrequencyShifter mixer_{600000};
+    // Reused scratch limits temporary storage to 32 KiB; no allocation per block.
+    std::array<std::complex<float>, 4096> block_;
     std::array<std::complex<float>, 8> mixed_{};
     unsigned decimation_ = 0;
     SrcPtr src_{nullptr, src_delete};

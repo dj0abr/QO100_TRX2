@@ -8,6 +8,7 @@
 #include <chrono>
 #include <map>
 #include <memory>
+#include <optional>
 
 namespace bridge {
 namespace net=boost::asio;
@@ -29,7 +30,7 @@ struct Peer {
     virtual void close(const std::string& reason)=0;
 };
 class Bridge {
-    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;bool mm_diagnostics=false;};
+    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;bool mm_diagnostics=false;std::optional<bool> rx2_audio{};};
     struct Pending {
         Bytes packet;uint8_t reply;uint64_t client=0;Json id;std::string command;
         Clock::time_point sent{},started=Clock::now();bool safety=false;
@@ -54,6 +55,9 @@ class Bridge {
     uint64_t next_client_=0,owner_=0;
     uint32_t session_=0;
     uint64_t digital_nonce_=0;
+    unsigned digital_usage_=0,last_activity_=UINT32_MAX;uint32_t activity_sequence_=0;
+    bool digital_usage_known_=false;
+    Clock::time_point digital_seen_{},next_activity_{};
     Json state_;
     bool initialized_=false,barrier_=true,off_ack_=false,normal_ack_=false,stopping_=false,dirty_=true;
     bool ptt_requested_=false,hardware_change_=false;
@@ -63,7 +67,7 @@ class Bridge {
     void send_udp(Bytes p);
     void receive_decoder(size_t index);void send_decoder(size_t index,Bytes p);
     void receive_digital();void send_digital(Bytes p);
-    void update_mm_subscription();
+    void update_mm_subscription();void update_digital_activity();
     void control(Bytes p,uint8_t reply,uint64_t client=0,Json id=nullptr,std::string command="",bool safety=false);
     void discover();void safety();void tx_off();void roles();void broadcast(const Json& j);
     void text(uint64_t client,const Json& j);void error(uint64_t client,const Json& id,const std::string& code,const std::string& message);

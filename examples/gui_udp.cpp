@@ -79,7 +79,7 @@ int main(int argc,char** argv) {
                 next_index[stream]=index+240;++audio[stream];
             } else if(p[5]==2 && stream<=1 && get(p,54,2)==1) {
                 const auto size=get(p,44,4),first=get(p,48,4),count=get(p,52,2);
-                if(size<1024 || size>65536 || (size&(size-1)) || get(p,56,4)!=size || !count ||
+                if(size<1024 || size>65536 || get(p,56,4)!=size || !count ||
                    first>=size || count>size-first || p.size()!=64+2*count) continue;
                 // Hook: assemble bins by (session, stream, frame_id); each signed int16 / 100 is dBFS.
                 // Bin k: center_hz + (k - fft_size/2) * sample_rate / fft_size.

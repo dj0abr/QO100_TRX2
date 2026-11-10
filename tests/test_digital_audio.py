@@ -107,7 +107,9 @@ def main():
             except socket.timeout: pass
             udp.sendto(state(), ('127.0.0.1', audio_port))
             udp.settimeout(1)
-            packet, _ = udp.recvfrom(65536); h = HEADER.unpack_from(packet)
+            while True:
+                packet, _ = udp.recvfrom(65536); h = HEADER.unpack_from(packet)
+                if h[2] == 8: break
             assert h[2] == 8 and h[5] == epoch and h[7] > 0, h
             epoch += 1; udp.sendto(state(), ('127.0.0.1', audio_port))
             while True:
@@ -121,12 +123,69 @@ def main():
                 try: udp.recvfrom(65536)
                 except BlockingIOError: break
             udp.settimeout(.2)
-            packet, _ = udp.recvfrom(65536)
-            assert HEADER.unpack_from(packet)[2] == 8, 'Rejected tuning command disabled a valid audio path'
+            while True:
+                packet, _ = udp.recvfrom(65536)
+                if HEADER.unpack_from(packet)[2] == 8: break
+            # No amplitude/VOX heuristic: an open writer sending zeros is a user.
+            # The adapter's own capture/playback and the remap-source link are not.
+            def phase(expected, seconds=.8, zeros=False):
+                nonlocal nonce, epoch, index
+                packets = []; mask = None; start = time.monotonic(); tick = start
+                udp.settimeout(.01)
+                while time.monotonic()-start < seconds:
+                    if time.monotonic() >= tick:
+                        udp.sendto(state(), ('127.0.0.1', audio_port))
+                        pcm = np.rint(.2*32767*np.cos(2*np.pi*1000*(index+np.arange(240))/12000)).astype('>i2')
+                        rx = HEADER.pack(b'QTR2', 1, 5, 64, 2, 21, time.time_ns(), index, 10489600000, 12000, 0, 0, 240, 2, 240, 99)
+                        udp.sendto(rx+pcm.tobytes(), ('127.0.0.1', audio_port)); index += 240
+                        if zeros: player.stdin.write(bytes(480)); player.stdin.flush()
+                        tick += .02
+                    try: packet, _ = udp.recvfrom(65536)
+                    except socket.timeout: continue
+                    h = HEADER.unpack_from(packet)
+                    if h[2] == 19:
+                        if nonce != h[6]: epoch += 1
+                        nonce = h[6]; udp.sendto(state(), ('127.0.0.1', audio_port))
+                    elif h[2] == 20: mask = h[11]
+                    elif h[2] == 8: packets.append((time.monotonic(), h, packet[64:]))
+                assert mask == expected, ('usage mask', mask, expected)
+                if not expected & 2:
+                    assert not any(at > time.monotonic()-.2 for at, _, _ in packets), 'Idle TX emitted PCM'
+                return packets
+
+            writing.clear(); player.terminate(); player.wait(timeout=3)
+            phase(1)  # RX recorder alone keeps only RX2 alive.
+            recorder.terminate(); recorder.wait(timeout=3)
+            phase(0)
+            def own_streams():
+                values = []
+                for kind in ('sink-inputs', 'source-outputs'):
+                    values += json.loads(subprocess.check_output(['pactl', '--format=json', 'list', kind], env=env))
+                return [v for v in values if v.get('properties', {}).get('application.process.id') == str(adapter.pid)]
+            assert not own_streams(), 'Adapter kept audio streams open while idle'
+            assert prefix in subprocess.check_output(['pactl', 'list', 'short', 'sinks'], env=env).decode(), 'Idle devices disappeared'
+            old_nonce = nonce
+            player = subprocess.Popen(['pacat', '--playback', '--raw', '--format=s16le', '--rate=12000', '--channels=1',
+                '--latency-msec=40', '--device='+prefix+'_toQO100'], stdin=subprocess.PIPE, stderr=logs[2], env=env)
+            packets = phase(2, seconds=1.2, zeros=True)
+            assert nonce != old_nonce, 'Reopened TX did not request a fresh backend epoch'
+            assert len(packets) > 20 and packets[0][1][7] == 0, 'Reopened TX did not start cleanly'
+            assert all(not any(data) for _, _, data in packets), 'Reopened silent TX replayed old audio'
+            player.terminate(); player.wait(timeout=3); phase(0)
+            # Reopen RX by itself and verify fresh tone, with TX remaining asleep.
+            chunks.clear()
+            recorder = subprocess.Popen(['parec', '--raw', '--format=s16le', '--rate=48000', '--channels=1',
+                '--latency-msec=40', '--device='+prefix+'_fromQO100'], stdout=subprocess.PIPE, stderr=logs[2], env=env)
+            thread = threading.Thread(target=read_audio, daemon=True); thread.start(); threads.append(thread)
+            phase(1, seconds=1.4)
+            captured = b''.join(data for _, data in chunks)
+            assert len(captured) >= 48000
+            tone(np.frombuffer(captured, dtype='<i2')[-24000:], 48000, 1000, .2)
+            recorder.terminate(); recorder.wait(timeout=3); phase(0)
             adapter.terminate(); assert adapter.wait(timeout=6) == 0
             devices = subprocess.check_output(['pactl', 'list', 'short', 'sinks'], env=env).decode()
             assert prefix not in devices, 'Owned virtual devices leaked'
-            print('Virtual audio: real 48/12-kHz RX2/TX2 tones, continuous TX clock, nonce/epoch reset, disabled silence and device cleanup passed on private PulseAudio')
+            print('Virtual audio: real 48/12-kHz RX2/TX2 tones, continuous TX clock, nonce/epoch reset, disabled silence, independent idle/reopen, silent active clients, own-stream exclusion and device cleanup passed on private PulseAudio')
         finally:
             writing.clear()
             for process in (adapter, player, recorder, server):

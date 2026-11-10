@@ -25,15 +25,15 @@ def main():
         try:
             f = receiver.frames.get(timeout=6)
             assert f.center_hz == 10489750000 and f.sample_rate == 600000
-            assert len(f.db) == 8192
-            negative = int(8192 / 2 - 150000 * 8192 / 600000)
-            positive = int(8192 / 2 + 75000 * 8192 / 600000)
+            assert len(f.db) == 2000
+            negative = int(2000 / 2 - 150000 * 2000 / 600000)
+            positive = int(2000 / 2 + 75000 * 2000 / 600000)
             assert np.argmax(f.db) == negative, (np.argmax(f.db), negative)
             assert abs(float(f.db[negative]) + 12.04) < 0.05, f.db[negative]
             assert abs(float(f.db[positive]) + 20) < 0.05, f.db[positive]
             assert receiver.assembler.invalid_packets == 0
             zoom = receiver.zoom_frames.get(timeout=4)
-            assert zoom.stream_id==1 and zoom.center_hz==10489748500 and zoom.sample_rate==75000
+            assert zoom.stream_id==1 and zoom.center_hz==10489748500 and zoom.sample_rate==60000 and len(zoom.db)==2400
             audio = [receiver.audio_frames.get(timeout=3) for _ in range(40)]
             assert all(p.center_hz==10489748500 for p in audio)
             samples=np.concatenate([p.samples for p in audio])[3000:]

@@ -2,7 +2,7 @@
 
 C++-Backend für einen QO-100-Transceiver mit getrenntem GUI über UDP.
 Der aktuelle Stand empfängt **600 kHz**, berechnet das Gesamtspektrum sowie
-einen abstimmbaren **Zoom von ±25 kHz** und demoduliert **zwei unabhängig abstimmbare USB-Audiokanäle**.
+einen abstimmbaren **Zoom von ±30 kHz** und demoduliert **zwei unabhängig abstimmbare USB-Audiokanäle**.
 Das Python-Test-GUI zeigt beide Wasserfälle und spielt RX1 über die
 Default-Soundkartenausgabe ab. RX2 wird für Tests getrennt empfangen und überwacht.
 Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
@@ -39,7 +39,12 @@ Alternative Konfigurationen: `--backend-config DATEI --webbridge-config DATEI`.
 
 **Monitoring:** RX3/FT8, RX4/PSK und RX5/MM besitzen eigene USB-Demodulatoren und feste,
 im WebGUI unter **Setup → Monitoring-Empfänger** als ganze Hz einstellbare Frequenzen.
-`./start_all.sh` startet die drei externen Decoder. Die Webbridge leitet die getrennten
+`./start_all.sh` startet die drei externen Decoder. FT8 und der native C++-PSK-
+Decoder laufen jeweils mit standardmäßig 10 % CPU-Budget eines Kerns sowie
+nice 19/SCHED_IDLE. Einstellbar mit `rx3_decoder_cpu_percent` und
+`rx4_decoder_cpu_percent` (1–10) in `backend.conf`; RX5 bleibt unbegrenzt.
+Die Begrenzung umfasst auch den FT8-Unterprozess und benötigt keine Root-Rechte.
+[Verarbeitung, Messwerte, Lasttests und Auslassungsregeln](docs/decoder-cpu.md). Die Webbridge leitet die getrennten
 Audioströme (Transport-IDs 5/6/8) lokal weiter und verteilt alle Textquellen gleichzeitig
 an die Browser. Radiobuttons wählen die sichtbare Quelle mit getrennten Textpuffern.
 RX2 bleibt unabhängig abstimmbar und besitzt keinen Monitoringdecoderanschluss.
@@ -272,25 +277,89 @@ Der QO100-Build verwendet 24.000 Hardware-Samples je Empfangsblock (20 ms).
 Die Original-Vorgabe von 180.000 wird nur für diesen Build überschrieben.
 
 Das Backend verarbeitet I16/Q16 Little Endian und akzeptiert auch kürzere letzte
-Treiberpakete. FFT: 8.192 Punkte, Hann-Fenster, 50 % Überlappung,
-lineare Leistungsmittelung vor der logarithmischen Darstellung. Voreinstellung:
-im Mittel 20 FFT-Zeilen/s; die einzelnen Zeitabstände sind durch das FFT-Hopraster gerastert.
-Die Binbreite beträgt 73,2421875 Hz.
+Treiberpakete. Eine gemeinsame FFT mit **24.000 Punkten**, Hann-Fenster und
+50 % Überlappung analysiert den vollständigen 600-kHz-Strom mit **25 Hz/Bin**.
+Es werden 50 FFTs/s berechnet und ihre linearen Leistungen auf standardmäßig
+20 Ausgabezeilen/s gemittelt. Es gibt keine separaten Zoom-FFTs mehr.
 
-Die Pegel sind auf einen komplexen Vollaussteuerungston normierte **dBFS je Bin**.
-Sie sind nicht auf dBm kalibriert; Rauschpegel hängen von Fenster und FFT-Länge ab.
-Auf dem GUI-Link sind alle Ganzzahlen Big Endian und ein Paket höchstens
-1.200 Byte lang. Details: [`docs/udp-protocol.md`](docs/udp-protocol.md).
-Die kleinen Pakete gelten für den neuen GUI-Link; die vorhandenen größeren
-Treiberpakete bleiben auf Loopback.
+Fullband erhält **2.000 Werte**: jeweils zwölf FFT-Bins werden per Spitzenwert
+zusammengefasst. Beide RX-Zooms sind **60-kHz-Ausschnitte mit je 2.400 Bins**
+derselben Analyse. Die Zoom-Mitte liegt auf dem 25-Hz-Raster und höchstens
+12 Hz neben der weiterhin in 1-Hz-Schritten abstimmbaren Audiofrequenz.
+GUI-Achsen und Klicks beziehen sich auf die tatsächliche Mitte aus dem Frame.
+Außerhalb des Empfangsfensters liegende Zoom-Bins sind am Rand leer.
+
+Die Pegel sind **dBFS je Analyse-Bin**, nicht dBm. Bei Fullband wird der
+Spitzenwert je Gruppe übertragen; Rauschpegel hängen von Fenster, FFT-Länge
+und Zusammenfassung ab. Alle Ganzzahlen auf dem GUI-Link sind Big Endian;
+Datagramme bleiben höchstens 1.200 Byte groß. Details: [UDP-Schnittstelle](docs/udp-protocol.md).
+`fft_size=24000` ist fest; bisherige Zweierpotenz-Werte in älteren Configs
+werden beim Laden automatisch übernommen und auf 24.000 umgestellt.
 
 ## Zoom und USB-Audio
 
-Ein unabhängiger digitaler Mischer verschiebt die gewünschte Frequenz auf null.
-Ein liquid-dsp-321-Tap-Kaiser-FIR mit Dezimation 8 erzeugt **75 kS/s komplex** für den Zoom.
-Die Zoom-FFT hat 8192 Punkte (9,155 Hz/Bin); angezeigt werden die mittleren
-50 kHz. Wegen des 50-%-Hoprasters werden maximal etwa 18,3 Zoomzeilen/s erzeugt.
-Das Gesamtspektrum läuft parallel weiter.
+Die fünf Audiokanäle behalten ihre eigenen digitalen Mischer und Filter.
+Der liquid-dsp-321-Tap-Kaiser-FIR dezimiert den jeweiligen Kanal von
+600 auf **75 kS/s komplex**. Dieser Audio-Signalweg bleibt unabhängig von den
+nun gemeinsam berechneten Wasserfällen.
+
+Das Backend wandelt jedes vorhandene I/Q-Datagramm einmal um und verarbeitet
+es anschließend parallel in drei dauerhaften RX-Workern: RX1 allein, RX2/RX3
+zusammen und RX4/RX5 zusammen. `RxChannel::push_block()` verwendet
+den bestehenden interpolierenden liquid-Blockmischer. Ein wiederverwendeter
+32-KiB-Arbeitspuffer pro Kanal begrenzt den Speicherbedarf; es gibt keine
+Allokation im Blockmischer und kein Warten auf zusätzliche Samples. Auch Teilblöcke
+und nicht durch acht teilbare Blockgrenzen erhalten Oszillatorphase,
+Dezimator-, Resampler- und Filterzustände sowie die Audio-Samplezähler.
+Abstimmung, Filter und NR werden weiterhin zwischen empfangenen Blöcken
+angewendet. Wasserfall- und Audio-Paketformate bleiben gleich.
+
+`rx_block_equivalence` vergleicht die komplexen Kanalsamples und PCM-Pakete
+exakt mit der Einzel-Sample-Verarbeitung, einschließlich NR, MM-Profil,
+Vorzeichenwechseln beim Abstimmen, leeren/großen/ungeraden Blöcken und Resets.
+`dsp_worker_equivalence` prüft zusätzlich alle fünf PCM-Streams und drei
+Wasserfälle exakt gegen serielle Blockverarbeitung, einschließlich Steuerung,
+Ausnahmen, Wiederverwendung des IQ-Puffers und Beenden der Worker.
+`dsp_worker_shutdown` sendet SIGINT/SIGTERM gezielt an jeden Backend-Thread und
+prüft das ordnungsgemäße Aufräumen. `rx2_enabled` bis `rx5_enabled` schalten
+Demodulatoren beim Start ab; leere Worker-Gruppen werden nicht gestartet.
+`external_decoders_enabled` und `rx3_decoder_enabled` bis `rx5_decoder_enabled`
+steuern im gemeinsamen Startskript die externen Prozesse samt Datenverbindungen.
+Diese manuellen Schalter stehen nur in `backend.conf`, bleiben unabhängig von
+GUI-Speicherung und erfordern einen Stack-Neustart.
+Messwerte, Lasttests und die geklärte Ursache des damaligen Live-Befunds
+(zweites Backend auf einem anderen Raspi) stehen in [DSP-Threading](docs/dsp-threading.md).
+
+Der Hauptthread berechnet währenddessen die gemeinsame FFT und übernimmt
+Steuerung, Zeitstempel und sämtliche UDP-Ausgaben. Pro RX-Datagramm gibt es
+nur einen laufenden Auftrag; vor Puffer-Wiederverwendung und Steueränderungen
+werden alle drei RX-Worker abgewartet. Jeder Empfänger schreibt seine
+Audioausgabe in einen eigenen Zwischenpuffer, den danach der Hauptthread leert.
+Es entstehen weder eine zusätzliche Block-Sammellatenz noch wachsende Queues.
+
+Ein vierter dauerhafter Worker berechnet TX1/TX2, Summierung und IQ-Paketierung.
+Die FIFO-Rückmeldungen des Pluto bleiben der Taktgeber: höchstens vier
+20-ms-Blöcke werden zum Sollfüllstand vorbereitet. Währenddessen verarbeitet
+der Hauptthread mit den RX-Workern vorhandene Empfangsdaten. Vor TX-Abfragen,
+weiteren Befehlen und Hardware-/LO-Resets wird auch dieser Auftrag beendet;
+Steuerflags werden beim Start kopiert. UDP-Versand bleibt im Hauptthread.
+So laufen insgesamt fünf Backend-Threads auf den vier Kernen, die Linux nach
+Last verteilt; es gibt keine feste Kernbindung und kein aktives Warten.
+In `htop` sind `qo100-rx1`, `qo100-rx2-3`, `qo100-rx4-5` und `qo100-tx` sichtbar,
+wenn Benutzer-Threads eingeblendet werden. Die Aufteilung ist standardmäßig aktiv.
+
+`benchmark_dsp` vergleicht Einzel-Samples, serielle Blöcke und die tatsächlichen
+drei RX-Worker samt gemeinsamer FFT ohne Hardware. Es meldet Laufzeit,
+gesamte CPU-Zeit und CPU-Zeit des Hauptthreads getrennt: Parallelisierung
+entlastet den am stärksten beanspruchten Thread, kann aber durch Synchronisation
+mehr gesamte CPU-Zeit benötigen. Belastbare Raspi-Werte müssen auf dem Zielgerät
+mit dem mitlaufenden Pluto-Treiber und den Decodern gemessen werden:
+
+
+```sh
+cmake --build build --target benchmark_dsp
+./build/bin/benchmark_dsp
+```
 
 Ein zweikanaliger Sinc-Resampler reduziert den Kanal auf 12 kS/s komplex.
 Ein komplexer liquid-dsp-513-Tap-FIR wählt standardmäßig das obere Seitenband **+100 bis +4000 Hz**;
@@ -311,8 +380,7 @@ Bei einer normalen RX-Frequenzänderung wird nur die Mischfrequenz geändert.
 Oszillatorphase, Kanalfilter, NR, Resampler, Zoom und Audiopuffer laufen weiter;
 Audio-Epoche und Sample-Zähler bleiben kontinuierlich. Die Tonhöhe folgt der
 Abstimmung ohne Stummschaltung. Nur echte Hardware-/Signalweg-Resets wechseln
-die Audio-Epoche und leeren die Puffer. Verspätete ältere Befehle werden ignoriert. Ein vollständiger ±25-kHz-Zoom muss
-innerhalb des 600-kHz-Empfangsfensters bleiben.
+die Audio-Epoche und leeren die Puffer. Verspätete ältere Befehle werden ignoriert. Am Empfangsrand werden außerhalb der 600 kHz liegende Zoom-Bins leer dargestellt.
 
 ## RX1: Untere und obere Filtergrenze
 
@@ -366,7 +434,7 @@ Paketanzahl, Sample-Anzahl, RMS und Spitzenpegel. RX2 wird weder auf die
 Soundkarte gemischt noch einer Sprachbearbeitung oder einem Digitaldecoder
 zugeführt. Seine kurze Test-Queue ist begrenzt und wird nach der Auswertung
 verworfen. Das Backend erzeugt zusätzlich einen unabhängigen RX2-Zoom
-(8192 Bins bei 75 kHz, nutzbarer Ausschnitt ±25 kHz um RX2). Dieser kommt als
+(2.400 Bins über 60 kHz aus der gemeinsamen 25-Hz-FFT um RX2). Dieser kommt als
 `SPECTRUM`, Stream 2, über UDP und den Webadapter bis zum Browser. Die Webseiten
 und die beiden bestehenden Anzeigen des Test-GUIs bleiben vorerst unverändert.
 

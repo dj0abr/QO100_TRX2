@@ -82,10 +82,11 @@ GUI-Schlüssel werden vom Backend gespeichert, aber **vom GUI ausgeführt**. Kei
 |---|---:|---|
 | **3 TUNE** → | 1/2 | `id=Request`, `frequency=RX-Träger`, `session=aktuell` |
 | **4 STATE** ← | 1/2 | `id=Request`, `frequency=bestätigter Träger`, `index=Audio-Epoche`, `rate=12000`, `format=0 OK / 1 außerhalb des Fensters` |
-| **2 SPECTRUM** ← | 0/1/2 | `id=Frame`, `timestamp`, `index=exklusives Sample-Ende`, `frequency=Mitte`, `rate`, `size=total=FFT-Größe`, `first`, `count`, `format=1`; Payload: `count × int16` |
+| **2 SPECTRUM** ← | 0/1/2 | `id=Frame`, `timestamp`, `index=exklusives Sample-Ende`, `frequency=Mitte`, `rate`, `size=total=übertragene Binanzahl`, `first`, `count`, `format=1`; Payload: `count × int16` |
 | **5 AUDIO** ← | 1/2/4 | `id=Epoche`, `timestamp`, `index=Sample-Start`, `frequency=Träger`, `rate=12000`, `count=total=240`, `format=2`; Payload: **240 × int16 PCM**, 544 Byte inkl. Header |
 
-**FFT:** Stream 0 = 600 kHz Gesamtspektrum; Stream 1/2 = unabhängige 75-kHz-Zooms um RX1/RX2; für eine Anzeige von ±25 kHz den mittleren 50-kHz-Ausschnitt verwenden. Standard-FFT jeweils 8192 Bins. Bin `k`: `frequency + (k − size/2) × rate/size`.
+**Spektren:** Eine gemeinsame Hann-FFT mit 24.000 Punkten bei 600 kS/s erzeugt 25-Hz-Bins; 50 % Überlappung, standardmäßig 20 Ausgabezeilen/s. Stream 0 überträgt 2.000 Werte über 600 kHz (je zwölf FFT-Bins als Spitzenwert). Stream 1/2 überträgt je 2.400 Bins über 60 kHz um RX1/RX2. `size=total` bezeichnet die übertragene Binanzahl und ist keine Zweierpotenz. `rate` ist die dargestellte Frequenzspanne. Bin `k`: `frequency + (k − size/2) × rate/size`.
+Alle drei Frames einer Zeile haben dieselbe Zeit und denselben `index` auf der 600-kS/s-Eingangszeitachse. Die Zoom-Mitte liegt auf dem festen 25-Hz-Raster relativ zur Fullband-Mitte und weicht höchstens 12 Hz von der bestätigten RX-Frequenz ab. GUIs müssen diese tatsächliche Mitte für Achsen und Klicks verwenden und passende Zooms mit dieser Toleranz annehmen; die Audioabstimmung bleibt bei 1 Hz. Am äußeren Empfangsrand werden außerhalb der 600 kHz liegende Zoom-Bins mit −160 dBFS gefüllt.
 Pegel = vorzeichenbehafteter int16 / **100 dBFS**. Maximal 568 Bins pro Datagramm.
 Fragmente anhand **(Session, Stream, Frame-ID)** sammeln; Metadaten müssen übereinstimmen.
 Erst anzeigen, wenn alle Bins vorliegen; Duplikate ignorieren, alte/unvollständige Frames verwerfen (z. B. nach 500 ms).
@@ -208,3 +209,28 @@ IQ-Pegel. Die Hardware-Dämpfung bleibt unverändert.
 
 Der separate Audioadapter meldet sich ausschließlich bei der Webbridge an, nicht
 als Backend-Abonnent. [Geräte, UDP-Handschlag und Digitalprofil](digital-audio.md).
+
+## Optionaler RX2/TX2-Bedarf
+
+Ein Backend mit `digital_auto_idle=1` meldet im Settings-Snapshot die nur lesbare
+Fähigkeit `digital_activity_control=1`; bei deaktivierter Automatik ist sie 0.
+Ohne Bedarfsmeldungen bleibt der bisherige Betrieb erhalten.
+
+**Typ 20 DIGITAL_ACTIVITY**, Stream 7: genau 64 Byte, `id` ist eine eigene
+aufsteigende uint32-Sequenz, `session` die aktuelle Backend-Session, `first`
+(Offset 48) ist eine Bitmaske: Bit 0 RX2 benötigt, Bit 1 TX2 benötigt. Alle
+übrigen Felder bleiben 0. Nur der aktuelle UDP-Abonnent kann diese Meldung senden.
+Ältere Sequenzen, widersprüchliche Wiederholungen und fremde Sessions werden
+ignoriert. Keine Bestätigung; alle 500 ms und bei Änderungen erneuern. Nach
+zwei Sekunden ohne Meldung fällt der Bedarf auf 0. RX2 hat zusätzlich 750 ms
+Nachlauf; `rx2_enabled=0` bleibt maßgeblich. RX2-Wiederanlauf setzt ausschließlich
+seine Epoche zurück, TX2-Umschaltungen ausschließlich dessen Epoche/Puffer.
+
+Auf dem lokalen Adapterlink verwendet Typ 20 zusätzlich die aktuelle
+Adapterkennung bei Offset 16 und lässt `id=0`. Die Webbridge prüft Kennung und
+Session und erstellt daraus eine eigene Backend-Sequenz ohne Adapterkennung.
+Browser melden ihren persönlichen RX2-Audiobedarf mit
+`{"type":"audio_subscription","stream":2,"enabled":true}` bzw. `false`,
+auch als Zuschauer. Ohne diese Nachricht gilt der Browser für RX2 als aktiv.
+Die Webbridge verknüpft externe Aufnahme und alle Browser mit ODER für RX2;
+TX2 richtet sich ausschließlich nach externer Wiedergabe.

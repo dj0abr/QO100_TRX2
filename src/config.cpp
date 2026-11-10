@@ -21,6 +21,11 @@ uint64_t integer(const std::string& s) {
     if (used != s.size()) throw std::runtime_error("Invalid integer: " + s);
     return value;
 }
+bool enabled(const std::string& s) {
+    if(s=="0") return false;
+    if(s=="1") return true;
+    throw std::runtime_error("Expected switch value 0 or 1: "+s);
+}
 uint32_t u32(const std::string& s) {
     const auto v = integer(s);
     if (v > std::numeric_limits<uint32_t>::max()) throw std::runtime_error("Integer out of range");
@@ -70,13 +75,25 @@ void set_config_value(Config& c,const std::string& k,const std::string& v) {
             if (p > 65535) throw std::runtime_error("gui_port out of range");
             c.gui_port = static_cast<uint16_t>(p);
         }
-        else if (k == "fft_size") c.fft_size = u32(v);
+        else if (k == "fft_size") {
+            const auto n=u32(v);
+            // Upgrade legacy power-of-two configurations to the shared 25-Hz FFT.
+            c.fft_size=(n>=1024 && n<=65536 && !(n&(n-1))) ? 24000 : n;
+        }
         else if (k == "spectrum_fps") c.spectrum_fps = u32(v);
         else if (k == "initial_rx_hz") c.initial_rx_hz = integer(v);
         else if (k == "initial_rx2_hz") c.initial_rx2_hz = integer(v);
         else if (k == "rx3_frequency_hz") c.rx3_frequency_hz = integer(v);
         else if (k == "rx4_frequency_hz") c.rx4_frequency_hz = integer(v);
         else if (k == "rx5_frequency_hz") c.rx5_frequency_hz = integer(v);
+        else if (k=="rx2_enabled" || k=="rx3_enabled" || k=="rx4_enabled" || k=="rx5_enabled")
+            c.rx_enabled[k[2]-'1']=enabled(v);
+        else if (k=="rx3_decoder_cpu_percent") c.rx3_decoder_cpu_percent=u32(v);
+        else if (k=="rx4_decoder_cpu_percent") c.rx4_decoder_cpu_percent=u32(v);
+        else if (k=="digital_auto_idle") c.digital_auto_idle=enabled(v);
+        else if (k=="external_decoders_enabled") c.external_decoders_enabled=enabled(v);
+        else if (k=="rx3_decoder_enabled" || k=="rx4_decoder_enabled" || k=="rx5_decoder_enabled")
+            c.decoder_enabled[k[2]-'3']=enabled(v);
         else if (k == "rx1_filter_low_hz") c.rx1_filter = RxFilterSettings::from_edges(real(v), c.rx1_filter.high_hz());
         else if (k == "rx1_filter_high_hz") c.rx1_filter = RxFilterSettings::from_edges(c.rx1_filter.low_hz(), real(v));
         else if (k == "rx1_filter_bandwidth_hz") c.rx1_filter.bandwidth_hz = u32(v);
@@ -114,8 +131,8 @@ void set_config_value(Config& c,const std::string& k,const std::string& v) {
 void Config::validate() const {
     // The vendored driver is built with RX_DECIMATION=2. Keep this milestone explicit.
     if (pluto_sample_rate != 1200000) throw std::runtime_error("This backend requires pluto_sample_rate=1200000");
-    if (fft_size < 1024 || fft_size > 65536 || (fft_size & (fft_size - 1)))
-        throw std::runtime_error("fft_size must be a power of two from 1024 to 65536");
+    if (fft_size != 24000)
+        throw std::runtime_error("Shared 25-Hz spectrum requires fft_size=24000");
     if (spectrum_fps < 1 || spectrum_fps > 60) throw std::runtime_error("spectrum_fps must be 1..60");
     if (gui_port == 0 || gui_port == pluto_tx_port || gui_port == pluto_iq_port || gui_port == pluto_status_port)
         throw std::runtime_error("gui_port must be nonzero and different from the Pluto ports");
@@ -149,6 +166,9 @@ void Config::validate() const {
     if (!std::isfinite(tx_attenuation_db) || tx_attenuation_db < 0 || tx_attenuation_db > 40 || std::abs(tx_attenuation_db*4-std::round(tx_attenuation_db*4))>1e-6)
         throw std::runtime_error("tx_attenuation_db must be 0..40 in 0.25 dB steps");
     if (!rx1_filter.valid()) throw std::runtime_error("RX1 filter requires BW 500..3900 Hz and edges inside 100..4000 Hz");
+    if(rx3_decoder_cpu_percent<1 || rx3_decoder_cpu_percent>10 ||
+       rx4_decoder_cpu_percent<1 || rx4_decoder_cpu_percent>10)
+        throw std::runtime_error("RX3/RX4 decoder CPU budgets must be 1..10 percent of one core");
     if (rx1_nr_percent>100) throw std::runtime_error("rx1_nr_percent must be 0..100");
     if (!tx1_compressor.valid()) throw std::runtime_error("tx1_compressor_percent must be 0..140");
     if (!std::isfinite(subscription_seconds) || subscription_seconds < 2 || subscription_seconds > 60)

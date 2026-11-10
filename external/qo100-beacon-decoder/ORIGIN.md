@@ -16,10 +16,18 @@ The following upstream files are copied **unchanged**:
 | sample.wav | 8788f0385db5ca201e8e113a6f5bb0acb1fb2fe763f9c96ddf7533e6a6a79b6f |
 | README.md | 3fe63d8e2f0ed20ae2e3d2a5fd314c0ecdbfb4a338e2b0dc38c88146d5e90b8c |
 
-`decoder/beacon_decoder.py` adapts the upstream DSP for live RX2 input, carrier
-search relative to the RX dial, sample-clock estimation, bounded overlapping
-windows, UDP validation and browser text output. This adaptation is GPL-3.0.
-The upstream frame/CRC/FEC functions are imported directly, without modification.
-Only NumPy and SciPy are required at runtime; no matplotlib or GNU Radio.
+`decoder/beacon_dsp.cpp`, `beacon_fec.cpp` and `beacon_main.cpp` implement the
+production RX4 receiver in C++ (GPL-3.0-only), adapting the framing/FEC parameters
+and algorithms from this pinned reference. The fast path uses FIR decimation to
+4 kHz, squared-carrier acquisition/tracking, matched chip sampling, native
+Viterbi and Reed-Solomon with fixed tables. Low audio carriers retain an analytic
+input fallback for image rejection. UDP validation, bounded latest-window jobs,
+overlap suppression and best-effort CPU budgeting are QO100_TRX2 adaptations.
+The unmodified upstream files above remain the independent comparison reference.
+`decoder/beacon_decoder.py` retains the previous Python DSP for regression tests;
+its command-line entry delegates to the native executable. The production PSK
+receiver does not import NumPy/SciPy; those packages remain used by fixtures and
+other project components. Tests compare every CRC/FEC payload of the recording
+and use independent gr-satellites Viterbi/RS vectors.
 The WAV is a historical recording, not current beacon announcements. Its RIFF
 size is eight bytes too large; SciPy reads all valid audio with a known warning.

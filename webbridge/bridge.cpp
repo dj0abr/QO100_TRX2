@@ -100,19 +100,37 @@ void Bridge::receive_digital() {
                     std::all_of(p.begin()+24,p.end(),[](uint8_t b){return b==0;})) {
                     // Adapter restart: establish a new epoch before accepting index zero.
                     if(digital_nonce_!=get(p,16,8)) {
-                        digital_nonce_=get(p,16,8);
+                        digital_nonce_=get(p,16,8);digital_usage_known_=false;digital_seen_=Clock::now();next_activity_={};
                         auto reset=header(6,qo100::tx2_stream);put(reset,32,state_["tx2"]["frequency_hz"].get<uint64_t>(),8);
                         put(reset,54,1,2);control(std::move(reset),7);
                     }
+                } else if(p[5]==20 && n==64 && get(p,16,8)==digital_nonce_ && digital_nonce_ &&
+                    get(p,60,4)==session_ && !get(p,12,4) && !get(p,24,8) && !get(p,32,8) &&
+                    !get(p,40,8) && get(p,48,4)<=3 && !get(p,52,8)) {
+                    digital_usage_known_=true;digital_usage_=unsigned(get(p,48,4));digital_seen_=Clock::now();next_activity_={};
                 } else if(p[5]==8 && n==544 && !(state_["flags"].get<unsigned>()&6) && state_["loop"].value("mode",0)==0 &&
                     get(p,60,4)==session_ && get(p,12,4)==state_["tx2"]["epoch"].get<uint32_t>() &&
                     get(p,32,8)==state_["tx2"]["frequency_hz"].get<uint64_t>() && !get(p,16,8) && !get(p,44,8) &&
                     get(p,40,4)==12000 && get(p,52,2)==240 && get(p,54,2)==2 && get(p,56,4)==240 &&
-                    get(p,24,8)%240==0 && get(p,24,8)<=UINT64_MAX-240) send_udp(p);
+                    get(p,24,8)%240==0 && get(p,24,8)<=UINT64_MAX-240) {
+                    digital_seen_=Clock::now();send_udp(p);
+                }
             }
         }
         if(!stopping_ && ec!=net::error::operation_aborted) receive_digital();
     });
+}
+void Bridge::update_digital_activity() {
+    if(!initialized_ || stopping_ || state_["settings"].value("digital_activity_control",std::string{})!="1")return;
+    const auto now=Clock::now();
+    const bool live=digital_nonce_ && (!digital_usage_known_ || now-digital_seen_<std::chrono::seconds(2));
+    // Older adapters have no usage report and retain their always-active path.
+    unsigned flags=live?(digital_usage_known_?digital_usage_:3u):0;
+    for(const auto& item:clients_)if(!item.second.rx2_audio.has_value() || *item.second.rx2_audio)flags|=1;
+    if(flags!=last_activity_ || now>=next_activity_) {
+        auto p=header(20,qo100::tx2_stream,++activity_sequence_,session_);put(p,48,flags,4);
+        send_udp(std::move(p));last_activity_=flags;next_activity_=now+std::chrono::milliseconds(500);
+    }
 }
 void Bridge::send_decoder(size_t index,Bytes p) {
     if(!decoders_[index] || !decoders_[index]->socket.is_open()) return;
@@ -177,6 +195,7 @@ uint64_t Bridge::join(std::shared_ptr<Peer> peer) {
     return id;
 }
 void Bridge::leave(uint64_t id) {
+    next_activity_={};
     const bool owned=id && id==owner_;clients_.erase(id);
     update_mm_subscription();
     if(owned) revoke("disconnected");else roles();
@@ -226,7 +245,7 @@ void Bridge::reset_backend() {
     ptt_requested_=false;hardware_change_=false;barrier_=true;off_ack_=normal_ack_=false;
     state_["session"]=0;state_["ready"]=false;
     for(const auto& key:{"rx","tx","tx2","filter","compressor","nr","loop"}) state_[key]=Json::object();
-    next_settings_={};dirty_=true;
+    next_settings_={};next_activity_={};last_activity_=UINT32_MAX;dirty_=true;
 }
 void Bridge::bootstrap() {
     initialized_=true;
@@ -307,7 +326,10 @@ void Bridge::packet(Bytes p) {
             send_decoder(stream==qo100::rx3_stream?0:1,std::move(p));return;
         }
         auto bytes=std::make_shared<const Bytes>(std::move(p));const auto copy=clients_;
-        for(const auto& c:copy) c.second.peer->send(bytes,true);
+        for(const auto& c:copy) {
+            if(type==5 && stream==2 && c.second.rx2_audio.has_value() && !*c.second.rx2_audio)continue;
+            c.second.peer->send(bytes,true);
+        }
         return;
     }
     uint8_t command=0;
@@ -374,6 +396,11 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
         // Retained for existing GUIs. WebSocket ping/pong checks liveness without
         // depending on JavaScript timers in a background or briefly busy tab.
         if(type=="heartbeat") return;
+        if(type=="audio_subscription") {
+            if(integer(j,"stream",2)!=2 || !j.contains("enabled") || !j["enabled"].is_boolean())
+                throw std::runtime_error("Expected RX2 audio enabled boolean");
+            clients_.at(client).rx2_audio=j["enabled"].get<bool>();next_activity_={};return;
+        }
         if(type=="mm_diagnostics") {
             if(!j.contains("enabled") || !j["enabled"].is_boolean()) throw std::runtime_error("Expected diagnostics enabled boolean");
             clients_.at(client).mm_diagnostics=j["enabled"].get<bool>();update_mm_subscription();return;
@@ -467,6 +494,7 @@ void Bridge::tick() {
         }
     }
     if(ptt_requested_ && now>ptt_until_) tx_off();
+    update_digital_activity();
     if(initialized_ && now>=next_rx_) {
         for(unsigned stream:{1u,2u}) {
             const auto key=group(3,stream);

@@ -1,3 +1,8 @@
+// Shared zoom bins remain on the 25-Hz RF grid while audio tuning stays at 1 Hz.
+export function zoomMatchesFrequency(center, frequency) {
+  return Number.isSafeInteger(center) && Number.isSafeInteger(frequency) && Math.abs(center - frequency) <= 12;
+}
+
 const COLORS = {rx1: '#55d9ee', rx2: '#e8bd68', tx: '#fa8f82'};
 export const AXIS_MODES = [
   {value: 'bandplan', label: 'Bandplan'},
@@ -197,7 +202,7 @@ export class FrameAssembler {
     if (v.getUint32(0) !== 0x51545232 || v.getUint8(4) !== 1 || v.getUint8(5) !== 2 || v.getUint16(6) !== 64 || v.getUint32(60) !== session) return;
     const stream = v.getUint32(8), id = v.getUint32(12), time = v.getBigUint64(16), index = v.getBigUint64(24);
     const center = Number(v.getBigUint64(32)), rate = v.getUint32(40), n = v.getUint32(44), first = v.getUint32(48), count = v.getUint16(52);
-    if (stream > 2 || time < cutoff || v.getUint16(54) !== 1 || !rate || !n || n > 65536 || (n & (n - 1)) || v.getUint32(56) !== n || !count || first + count > n || buffer.byteLength !== 64 + count * 2) return;
+    if (stream > 2 || time < cutoff || v.getUint16(54) !== 1 || !rate || !n || n > 65536 || v.getUint32(56) !== n || !count || first + count > n || buffer.byteLength !== 64 + count * 2) return;
     if (this.last.has(stream) && time <= this.last.get(stream)) return;
     const now = performance.now();
     for (const [key, frame] of this.frames) if (now - frame.started > 500) this.frames.delete(key);
@@ -322,8 +327,8 @@ export class RadioDisplay {
     this.color = color; this.drawSpectrum(); return color;
   }
   accept(frame) {
-    if (this.zoom && (frame.stream !== this.selected || frame.center !== this.state.rx?.[String(this.selected)]?.frequency_hz)) return;
-    const geometry = {center: frame.center, span: this.zoom ? 50000 : frame.rate};
+    if (this.zoom && (frame.stream !== this.selected || !zoomMatchesFrequency(frame.center, this.state.rx?.[String(this.selected)]?.frequency_hz))) return;
+    const geometry = {center: frame.center, span: frame.rate};
     if (this.geometry) {
       const canvas = this.waterfall, ctx = canvas.getContext('2d');
       if (geometry.span !== this.geometry.span) {
@@ -453,7 +458,7 @@ export class RadioDisplay {
     this.axis.replaceChildren(...points.map(({hz, position}, i) => {
       const label = document.createElement('span');
       label.style.setProperty('--position', `${position}%`);
-      // The zoom follows the selected RX at 1-Hz resolution; never round edge labels to kHz.
+      // Retain the actual shared RF grid, including 25-Hz offsets, in edge labels.
       const displayed = axisFrequency(hz, this.zoom ? 'downlink' : this.axisMode, this.state.settings);
       label.textContent = Number.isFinite(displayed) ? (displayed / 1e6).toFixed(step < 1000 || displayed % 1000 !== 0 ? 6 : 3) : '—';
       if (i === points.length - 1) label.textContent += ' MHz';
@@ -481,7 +486,7 @@ export class RadioDisplay {
   }
   frequencyAt(event) {
     if (!this.geometry) return null;
-    if (this.zoom && this.geometry.center !== this.state.rx?.[String(this.selected)]?.frequency_hz) return null;
+    if (this.zoom && !zoomMatchesFrequency(this.geometry.center, this.state.rx?.[String(this.selected)]?.frequency_hz)) return null;
     const bounds = event.currentTarget.getBoundingClientRect();
     return Math.round(this.geometry.center + ((event.clientX - bounds.left) / bounds.width - .5) * this.geometry.span);
   }

@@ -10,18 +10,29 @@ from protocol import nr_control,nr_state
 from protocol import settings_control,settings_state
 
 
-def packets(frame=1, stamp=100, session=7):
-    values = np.arange(1024, dtype=np.int16) - 500
+def packets(frame=1, stamp=100, session=7, n=1024, stream=0, rate=600000):
+    values = np.arange(n, dtype=np.int16) - 500
     result = []
     for first in range(0, len(values), 568):
         count = min(568, len(values) - first)
-        header = HEADER.pack(b"QTR2", 1, 2, 64, 0, frame, stamp, 30000,
-                             10489750000, 600000, 1024, first, count, 1, 1024, session)
+        header = HEADER.pack(b"QTR2", 1, 2, 64, stream, frame, stamp, 30000,
+                             10489750000, rate, n, first, count, 1, n, session)
         result.append(header + values[first:first+count].astype(">i2").tobytes())
     return result
 
 
 class ProtocolTest(unittest.TestCase):
+    def test_shared_spectrum_sizes(self):
+        for stream,n,rate in [(0,2000,600000),(1,2400,60000),(2,2400,60000)]:
+            assembler=Assembler(stream)
+            frame=None
+            for packet in reversed(packets(n=n,stream=stream,rate=rate)):
+                frame=assembler.push(packet) or frame
+            self.assertIsNotNone(frame)
+            self.assertEqual((frame.fft_size,frame.sample_rate),(n,rate))
+            self.assertEqual(assembler.invalid_packets,0)
+            self.assertAlmostEqual(frame.frequencies_hz[1]-frame.frequencies_hz[0],rate/n)
+
     def test_settings_wire(self):
         query=HEADER.unpack(settings_control(8))
         self.assertEqual((query[2],query[4],query[5],query[7],query[13],query[15]),(17,0,8,0,0,0))

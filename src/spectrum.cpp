@@ -5,10 +5,42 @@
 #include <utility>
 
 namespace qo100 {
+namespace {
+int16_t dbfs(float power) {
+    return static_cast<int16_t>(std::lround(std::clamp(10.f * std::log10(std::max(power, 1e-16f)), -160.f, 20.f) * 100.f));
+}
+void check_powers(const std::vector<float>& powers) {
+    if(powers.size()!=spectrum_fft_size) throw std::invalid_argument("Shared spectrum requires 24000 bins");
+}
+}
+SpectrumView wide_spectrum(const std::vector<float>& powers, uint64_t center_hz) {
+    check_powers(powers);
+    SpectrumView view{center_hz,spectrum_fft_size*spectrum_bin_hz,std::vector<int16_t>(spectrum_wide_bins)};
+    constexpr size_t group=spectrum_fft_size/spectrum_wide_bins;
+    for(size_t i=0;i<view.bins.size();++i) {
+        const auto first=powers.begin()+i*group;
+        view.bins[i]=dbfs(*std::max_element(first,first+group));
+    }
+    return view;
+}
+SpectrumView zoom_spectrum(const std::vector<float>& powers, uint64_t center_hz, uint64_t receiver_hz) {
+    check_powers(powers);
+    const int64_t offset=int64_t(receiver_hz)-int64_t(center_hz);
+    // Integer Hz and an odd 25-Hz step have no rounding ties. Preserve the actual
+    // RF grid in the metadata; the receiver itself remains tunable in 1-Hz steps.
+    const int64_t bin=offset>=0 ? (offset+12)/25 : -((-offset+12)/25);
+    SpectrumView view{uint64_t(int64_t(center_hz)+bin*25),spectrum_zoom_span,std::vector<int16_t>(spectrum_zoom_bins,-16000)};
+    const int64_t first=int64_t(powers.size()/2)+bin-spectrum_zoom_bins/2;
+    for(size_t i=0;i<view.bins.size();++i) {
+        const int64_t source=first+int64_t(i);
+        if(source>=0 && source<int64_t(powers.size())) view.bins[i]=dbfs(powers[size_t(source)]);
+    }
+    return view;
+}
 Spectrum::Spectrum(uint32_t rate, size_t n, uint32_t fps, Callback callback)
     : n_(n), frame_interval_(fps ? rate / fps : 0), ring_(n), window_(n),
-      powers_(n, 0), db_(n), callback_(std::move(callback)) {
-    if (n < 2 || (n & (n - 1)) || !rate || !fps || !frame_interval_)
+      powers_(n, 0), callback_(std::move(callback)) {
+    if (n < 2 || n%2 || !rate || !fps || !frame_interval_)
         throw std::runtime_error("Invalid spectrum parameters");
     double sum = 0;
     for (size_t i = 0; i < n; ++i) {
@@ -46,7 +78,7 @@ bool Spectrum::push_iq(const uint8_t* data, size_t size) {
 }
 void Spectrum::push(std::complex<float> sample) {
     ring_[write_] = sample;
-    write_ = (write_ + 1) % n_;
+    if(++write_==n_) write_=0;
     ++samples_;
     if (count_ < n_) ++count_;
     ++since_fft_;
@@ -56,26 +88,25 @@ void Spectrum::push(std::complex<float> sample) {
     }
 }
 void Spectrum::transform() {
+    size_t source=write_;
     for (size_t i = 0; i < n_; ++i) {
-        const auto x = ring_[(write_ + i) % n_] * window_[i];
+        const auto x = ring_[source] * window_[i];
         input_[i][0] = x.real(); input_[i][1] = x.imag();
+        if(++source==n_) source=0;
     }
     fftwf_execute(plan_);
+    size_t k=n_/2;
     for (size_t i = 0; i < n_; ++i) {
-        const auto k = (i + n_ / 2) % n_;
         powers_[i] += (output_[k][0] * output_[k][0] + output_[k][1] * output_[k][1]) * normalization_;
+        if(++k==n_) k=0;
     }
     ++averages_;
     if (samples_ - last_frame_ < frame_interval_) return;
-    for (size_t i = 0; i < n_; ++i) {
-        const float p = powers_[i] / averages_;
-        const float db = 10.f * std::log10(std::max(p, 1e-16f));
-        db_[i] = static_cast<int16_t>(std::lround(std::clamp(db, -160.f, 20.f) * 100.f));
-        powers_[i] = 0;
-    }
-    averages_ = 0;
+    for(auto& power:powers_) power/=averages_;
     // Keep the publication clock on the sample timeline; don't accumulate hop rounding.
     last_frame_ += frame_interval_;
-    callback_(db_, samples_);
+    callback_(powers_, samples_);
+    std::fill(powers_.begin(),powers_.end(),0.f);
+    averages_ = 0;
 }
 }

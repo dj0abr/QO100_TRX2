@@ -27,6 +27,12 @@ bool parse_settings_control(const uint8_t* p,size_t n,SettingsControl& c) {
     c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),get(p,24,8),set,
         std::string(reinterpret_cast<const char*>(p+64),n-64)};return true;
 }
+bool parse_digital_activity(const uint8_t* p,size_t n,DigitalActivity& c) {
+    if(n!=64 || std::memcmp(p,"QTR2",4) || p[4]!=1 || p[5]!=20 || get(p,6,2)!=64 ||
+       get(p,8,4)!=7 || get(p,16,8) || get(p,24,8) || get(p,32,8) || get(p,40,8) ||
+       get(p,48,4)>3 || get(p,52,8))return false;
+    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),uint32_t(get(p,48,4))};return true;
+}
 std::vector<uint8_t> settings_state_packet(uint32_t request,uint32_t session,uint64_t revision,
     uint16_t status,uint32_t flags,const std::string& payload) {
     if(payload.size()>max_datagram-64) throw std::runtime_error("Settings snapshot too large");

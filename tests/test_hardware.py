@@ -58,26 +58,27 @@ def main():
             assert len(zoom_received)>20 and len(audio_received)>100 and len(audio2_received)>100
             assert receiver.channels[2].applied_hz==int(settings['initial_rx2_hz'])
             assert all(p.stream_id==2 and p.center_hz==int(settings['initial_rx2_hz']) for p in audio2_received)
-            assert all(b.sample_index==a.sample_index+len(a.samples) and b.epoch==a.epoch
-                       for a,b in zip(audio2_received,audio2_received[1:])), "RX2 sample discontinuity"
+            for stream,packets in ((1,audio_received),(2,audio2_received)):
+                assert all(b.sample_index==a.sample_index+len(a.samples) and b.epoch==a.epoch
+                           for a,b in zip(packets,packets[1:])), f"RX{stream} sample discontinuity"
             decoded2=np.concatenate([p.samples for p in audio2_received])
             assert np.isfinite(decoded2).all() and np.std(decoded2)>.00001
             with wave.open(str(captures/'rx2-usb.wav'),'wb') as wav:
                 wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(12000)
                 wav.writeframes((np.clip(decoded2,-1,1)*32767).astype('<i2').tobytes())
-            assert zoom_received[-1].center_hz==int(settings['initial_rx_hz'])
-            assert zoom_received[-1].sample_rate==75000
+            assert abs(zoom_received[-1].center_hz-int(settings['initial_rx_hz']))<=12
+            assert zoom_received[-1].sample_rate==60000 and zoom_received[-1].fft_size==2400
             assert receiver.applied_hz==int(settings['initial_rx_hz'])
             decoded=np.concatenate([p.samples for p in audio_received])
             assert np.isfinite(decoded).all() and np.std(decoded)>.00001
             with wave.open(str(captures/'rx-usb.wav'),'wb') as wav:
                 wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(12000)
                 wav.writeframes((np.clip(decoded,-1,1)*32767).astype('<i2').tobytes())
-            draw_image(zoom_received,span_hz=50000).save(captures/'zoom-live.png')
+            draw_image(zoom_received,span_hz=60000).save(captures/'zoom-live.png')
             first, last = received[0], received[-1]
             assert last.sample_rate == int(settings["pluto_sample_rate"]) // 2
             assert last.center_hz == int(settings["rx_center_hz"])
-            assert last.fft_size == int(settings["fft_size"])
+            assert last.fft_size == 2000
             assert np.isfinite(last.db).all() and float(np.ptp(last.db)) > 5
             observed = (last.sample_index - first.sample_index) / ((last.timestamp_ns - first.timestamp_ns) / 1e9)
             assert abs(observed / last.sample_rate - 1) < 0.02, observed

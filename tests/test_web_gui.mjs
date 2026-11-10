@@ -34,7 +34,7 @@ assert.deepEqual(filterValues(2500,2700,'low'),{low_hz:2200,high_hz:2700});
 assert.deepEqual(filterValues(301,500,'high'),{low_hz:301,high_hz:801});
 assert.deepEqual(filterValues(449.5,950.5),{low_hz:449.5,high_hz:950.5});
 
-const {FrameAssembler, displayOffsets, NoiseFloor, SpectrumPeaks, peakLabels, SpectrumAverage, axisFrequency, NB_BANDPLAN, bandplanSegments, AXIS_MODES} = await moduleAt('radio-display.js');
+const {zoomMatchesFrequency, FrameAssembler, displayOffsets, NoiseFloor, SpectrumPeaks, peakLabels, SpectrumAverage, axisFrequency, NB_BANDPLAN, bandplanSegments, AXIS_MODES} = await moduleAt('radio-display.js');
 assert.deepEqual(AXIS_MODES.map(mode=>mode.value),['bandplan','downlink','uplink','pluto-rx','pluto-tx']);
 assert.equal(NB_BANDPLAN[0].start,10489500000);assert.equal(NB_BANDPLAN.at(-1).end,10490000000);
 for(let i=1;i<NB_BANDPLAN.length;i++)assert.equal(NB_BANDPLAN[i-1].end,NB_BANDPLAN[i].start,'Bandplan has a gap or overlap');
@@ -139,6 +139,9 @@ for(let i=0;i<mobileLabels.length;i++)for(let j=i+1;j<mobileLabels.length;j++){
   const a=mobileLabels[i].box,b=mobileLabels[j].box;
   assert(a.right<=b.left || a.left>=b.right || a.bottom<=b.top || a.top>=b.bottom,'Mobile labels overlap');
 }
+assert(zoomMatchesFrequency(100,112));assert(zoomMatchesFrequency(100,88));
+assert(!zoomMatchesFrequency(100,113));assert(!zoomMatchesFrequency(100,undefined));
+assert(!zoomMatchesFrequency(100,NaN));
 const complete = [], assembler = new FrameAssembler(frame=>complete.push(frame));
 function fragment(first, {session=7,stream=0,id=1,time=10n,n=8,rate=600000}={}) {
   const buffer=new ArrayBuffer(72),v=new DataView(buffer);
@@ -165,7 +168,19 @@ assembler.accept(fragment(0,{stream:3}),7);assert.equal(assembler.frames.size,0)
 for(const first of [0,4])assembler.accept(fragment(first,{stream:2,time:11n,id:2,rate:75000}),7);
 assert.equal(complete.length,4);assert.equal(complete.at(-1).stream,2);
 
-const source = await readFile(new URL('../web/audio-worklet.js',import.meta.url),'utf8');
+for(const [stream,n,rate] of [[0,2000,600000],[1,2400,60000],[2,2400,60000]]) {
+  const done=[], a=new FrameAssembler(frame=>done.push(frame));
+  for(let first=0;first<n;first+=568) {
+    const count=Math.min(568,n-first),b=new ArrayBuffer(64+2*count),v=new DataView(b);
+    v.setUint32(0,0x51545232);v.setUint8(4,1);v.setUint8(5,2);v.setUint16(6,64);
+    v.setUint32(8,stream);v.setUint32(12,1);v.setBigUint64(16,1n);v.setBigUint64(32,10489750000n);
+    v.setUint32(40,rate);v.setUint32(44,n);v.setUint32(48,first);v.setUint16(52,count);
+    v.setUint16(54,1);v.setUint32(56,n);v.setUint32(60,7);a.accept(b,7);
+  }
+  assert.equal(done.length,1);assert.equal(done[0].n,n);assert.equal(done[0].rate,rate);
+}
+
+const source = await readFile(new URL('../web/audio-worklet.js' ,import.meta.url),'utf8');
 for(const rate of [12000,44100,48000]) {
   let Processor;const messages=[];
   const context=vm.createContext({sampleRate:rate,Float32Array,Math,
