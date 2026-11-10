@@ -160,6 +160,12 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web
             $<TARGET_FILE:qo100_digital_audio>)
         set_tests_properties(digital_auto_idle PROPERTIES TIMEOUT 40)
+        add_test(NAME desktop_start COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_desktop_start.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/start.sh ${CMAKE_CURRENT_SOURCE_DIR}/start_all.sh
+            $<TARGET_FILE_DIR:qo100_backend> ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf
+            ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(desktop_start PROPERTIES TIMEOUT 60)
         add_test(NAME webbridge_udp COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_webbridge.py
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>

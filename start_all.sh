@@ -7,12 +7,13 @@ backend_config="$project_dir/config/backend.conf"
 webbridge_config="$project_dir/config/webbridge.conf"
 source=pluto
 digital_audio=1
+open_browser=0
 mm_data_dir="$project_dir/data/mm-beacon"
 
 usage() {
     echo "Aufruf: ./start_all.sh [--source pluto|synthetic]"
     echo "                      [--backend-config DATEI] [--webbridge-config DATEI]"
-    echo "                      [--no-digital-audio]"
+    echo "                      [--no-digital-audio] [--open-browser]"
     echo "                      [--mm-data-dir VERZEICHNIS]"
     echo "Laeuft im Vordergrund; Strg+C beendet alle gestarteten Programme."
 }
@@ -20,6 +21,7 @@ while (($#)); do
     case "$1" in
         --help) usage; exit 0 ;;
         --no-digital-audio) digital_audio=0; shift ;;
+        --open-browser) open_browser=1; shift ;;
         --source|--backend-config|--webbridge-config|--mm-data-dir)
             if (($# < 2)); then usage >&2; exit 2; fi
             case "$1" in
@@ -280,6 +282,29 @@ if ((digital_audio)); then echo "RX2/TX2 Audioschnittstelle: fromQO100 / toQO100
 echo "Browser auf diesem Rechner: http://$http_host:$http_port/"
 echo "Im LAN: http://<IP-dieses-Rechners>:$http_port/ oder die OPNsense-HTTPS-Adresse."
 echo "Dieses Terminal offen lassen. Strg+C beendet alle Programme samt Pluto-Treiber."
+
+# Open only after the complete stack passed its startup checks. The browser
+# belongs to the desktop session, not to the supervised radio processes.
+if ((open_browser)); then
+    browser_url="http://$http_host:$http_port/"
+    browser_command=()
+    if command -v xdg-open >/dev/null 2>&1; then
+        browser_command=(xdg-open)
+    elif command -v gio >/dev/null 2>&1; then
+        browser_command=(gio open)
+    fi
+    if ((${#browser_command[@]})); then
+        echo "Oeffne Standardbrowser: $browser_url"
+        (
+            trap - EXIT INT TERM HUP
+            if ! "${browser_command[@]}" "$browser_url" >"$log_dir/browser.log" 2>&1; then
+                echo "Browser konnte nicht geoeffnet werden. Bitte $browser_url manuell oeffnen. Details: $log_dir/browser.log" >&2
+            fi
+        ) &
+    else
+        echo "Kein Browserstarter gefunden (xdg-open/gio). Bitte $browser_url manuell oeffnen oder xdg-utils installieren." >&2
+    fi
+fi
 
 # A failed monitor must not interrupt the QSO or the other decoder.
 # The two-second poll also bounds restart frequency for a repeatedly failing decoder.

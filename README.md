@@ -98,7 +98,19 @@ From the project folder:
 ./start_all.sh
 ```
 
-Open the GUI in your browser:
+For the backend and browser on the same computer, use this single command:
+
+```sh
+./start.sh
+```
+
+This starts the same stack as `start_all.sh` and then opens the default browser
+at **http://127.0.0.1:8080/**. A different configured HTTP port is respected.
+All `start_all.sh` options, such as `--no-digital-audio`, can also be passed to
+`start.sh`. Browser launch uses `xdg-open` (the `xdg-utils` package), falling back
+to `gio open`. Leave the terminal open; **Ctrl+C** stops the backend stack.
+
+You can also open the GUI manually in your browser:
 
 - **On the same computer:** <http://localhost:8080/>
 - **From another computer:** `http://<SBC-IP>:8080/`, or your HTTPS reverse-proxy address.

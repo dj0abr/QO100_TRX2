@@ -98,7 +98,20 @@ Im Projektverzeichnis:
 ./start_all.sh
 ```
 
-Die Bedienoberfläche im Browser öffnen:
+Für Backend und Browser auf demselben Rechner genügt alternativ:
+
+```sh
+./start.sh
+```
+
+Das Skript startet denselben Verbund wie `start_all.sh` und öffnet nach dessen
+Start den Standardbrowser unter **http://127.0.0.1:8080/**. Ein abweichend
+konfigurierter HTTP-Port wird übernommen. Alle Optionen von `start_all.sh`,
+z. B. `--no-digital-audio`, können auch an `start.sh` übergeben werden.
+Der Browserstart verwendet `xdg-open` (Paket `xdg-utils`), ersatzweise `gio open`.
+Das Terminal offen lassen; **Strg+C** beendet den Backend-Verbund.
+
+Die Bedienoberfläche lässt sich auch manuell im Browser öffnen:
 
 - **Auf demselben Rechner:** <http://localhost:8080/>
 - **Von einem anderen Rechner:** `http://<SBC-IP>:8080/` oder die HTTPS-Adresse des Reverse-Proxys.
