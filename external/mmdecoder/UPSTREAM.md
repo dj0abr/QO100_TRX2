@@ -3,8 +3,11 @@
 ## Integration in QO100_TRX2
 
 Quellstand aus `/Daten/funk/sat/mmdecoder`, übernommen am 09.11.2026.
-Die Quellen und Lizenz sind vollständig lokal enthalten; Build, Logs und Daten
-des eigenständigen Entwicklungsprojekts werden nicht benötigt.
+Die für Empfang und Tests benötigten Quellen und die Lizenz sind lokal
+enthalten; Build, Logs und Daten des eigenständigen Entwicklungsprojekts werden
+nicht benötigt. Unbenutzte Schifra-Hilfsheader für Datei-Codecs, Interleaving,
+Produktcodes und Benchmarks wurden entfernt. Die transitiv eingebundenen Header
+des Decoders und des Testsignal-Encoders bleiben enthalten.
 `CMakeLists.txt` bindet die gepinnte liquid-dsp-Bibliothek des Hauptprojekts ein.
 `rx_probe` unterstützt zusätzlich `--input-rate 12000` mit kontinuierlicher
 80-dB-Interpolation auf 48 kHz. Die 8APSK-/FEC-/CRC-Dekodierung bleibt unverändert.

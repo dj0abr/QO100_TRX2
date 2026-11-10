@@ -5,10 +5,14 @@
 - Commit: `8a65dd0a3cc33b11a675b2e27d2aa479d9e81310`
 - Commit date: 2022-04-04
 - Original sources and LICENSE are retained in `external/Pluto/`.
-- The upstream executable is retained as part of the copy but is never executed
-  by the backend or used by the CMake build.
+- Only the driver sources and license needed by the integrated build are kept.
+  The obsolete upstream executable, liquid-dsp 1.3.2 header, standalone Makefile,
+  installer/start scripts and example configuration have been removed.
+  `build_all.sh` and the root CMake project build the driver; the backend generates
+  its private `pluto_config.txt` at runtime.
 
-Local integration changes are recorded in `pluto-integration.patch`:
+The initial integration changes are recorded in `pluto-integration.patch`
+(including the example configuration that has since been removed):
 
 1. Allow CMake to override UDP ports and buffer sizes via preprocessor defines.
    QO100 build: input 40808, output 40809, status 40810; 24000-sample buffers.
@@ -35,8 +39,7 @@ driver's `TX_GAIN - 10` hardwaregain convention. No PTT command is provided by
 upstream; the GUI gates audio, while backend and driver continue zero IQ.
 
 Both backend and driver now compile against the bundled liquid-dsp 1.8.3
-header and link its local static archive. The copied upstream 1.3.2 header is
-retained but unused. Legacy TX complex sample access uses std::complex getters
+header and link its local static archive. Legacy TX complex sample access uses std::complex getters
 and setters, matching the shared C++ API of the new header.
 
 Test-loop integration verifies RX and TX LO readback before starting streaming.

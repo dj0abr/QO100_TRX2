@@ -347,9 +347,6 @@ Ein Gerätewechsel beendet PTT. Browser ohne
 beispielsweise über pavucontrol. Audiofehler bleiben im Statusbereich sichtbar;
 ein blockierter Start bricht nach sechs Sekunden mit einer Meldung ab.
 
-Das ursprüngliche technische Test-GUI bleibt unter **`/test.html`** erreichbar;
-die statische Entwurfsvorschau unter **`/layout-preview.html`**.
-
 ## Rollen und Abschaltung
 
 - Eine **neue WebSocket-Verbindung** erhält bei freiem Steuerplatz die Rolle `operator`.
@@ -443,7 +440,7 @@ Wertebereiche und Settings-Schlüssel entsprechen der [UDP-Referenz](udp-protoco
 Settings stehen im Snapshot (`error`/`hardware_error`). ACK-Status 0 bestätigt die Ausführung;
 Status 2 bei Settings bedeutet Revisionskonflikt: aktuellen Snapshot übernehmen und neu versuchen.
 
-**Binär RX:** FFT Typ 2 der Streams **0/1/2** (Fullband/RX1-Zoom/RX2-Zoom) und Audio Typ 5 der Streams **1/2/4**, unverändert an alle Browser. Die Zooms verwenden jeweils 8192 Bins bei 75 kHz, zentriert auf ihrer eigenen RX-Frequenz. Das WebGUI zeigt den ausgewählten RX als ±25-kHz-Ausschnitt; das einfache Test-GUI verwendet weiterhin RX1. **RX2-Audio (Stream 2)** geht zusätzlich an den lokalen Digital-Audioadapter. **RX3/RX4-Audio (Stream 5/6)** geht ausschließlich an die jeweiligen lokalen Decoder. Fragment-, Session- und
+**Binär RX:** FFT Typ 2 der Streams **0/1/2** (Fullband/RX1-Zoom/RX2-Zoom) und Audio Typ 5 der Streams **1/2/4**, unverändert an alle Browser. Die Zooms verwenden jeweils 2400 Bins über 60 kHz aus der gemeinsamen 25-Hz-FFT, zentriert auf ihrer eigenen RX-Frequenz. Das WebGUI zeigt den ausgewählten RX als ±30-kHz-Ausschnitt. **RX2-Audio (Stream 2)** geht zusätzlich an den lokalen Digital-Audioadapter. **RX3/RX4-Audio (Stream 5/6)** geht ausschließlich an die jeweiligen lokalen Decoder. Fragment-, Session- und
 Epochenregeln aus der UDP-Referenz gelten auch hier. **Binär TX:** ausschließlich Typ 8,
 544 Byte mit 240 PCM16-Samples bei 12 kHz. Erst nach bestätigtem `tx.ptt=true` senden, mit
 aktueller Session/TX-Epoche und bestätigter TX-Frequenz; Sample-Index 0, 240, 480, … .
@@ -453,8 +450,8 @@ aktueller Session/TX-Epoche und bestätigter TX-Frequenz; Sample-Index 0, 240, 4
 `ctest --test-dir build -R webbridge_udp --output-on-failure` startet ein privates synthetisches
 Backend und prüft echte HTTP-/WebSocket-Verbindungen inklusive Paketverlust, Rechteprüfung,
 TX-Audio-Loop, langsamen Zuschauern, Abschaltung, Neustart und Inaktivität. Kein Pluto-Zugriff.
-Optionaler Browsertest: `tests/test_webbridge_browser.py` mit Chromium/ChromeDriver; Argumente:
-Adapter-Binary, Backend-Binary, Backend-Config, `web`-Verzeichnis, Screenshot-Pfad.
+Der optionale vollständige Browsertest `tests/test_web_gui_browser.py` prüft das
+produktive WebGUI; Aufruf und Prüfumfang stehen im folgenden Abschnitt.
 
 ## WebGUI-Tests
 
@@ -486,5 +483,4 @@ Tastenwiederholung, ausgeschlossene Eingabefelder und den Fünf-Minuten-Timeout
 mit simulierter Zeit. Weitere Prüfungen:
 Kopiertasten, DSP, Settings, Mikrofonpakete, PTT-Loslassen/Fokusverlust, echte
 Touch-Ereignisse, Bildschirmbreiten 320–1920 Pixel, Backend-Neustart, Zuschauer
-und explizites Trennen. Die Browserprüfung des ursprünglichen Test-GUIs unter
-`tests/test_webbridge_browser.py` verwendet jetzt `/test.html`.
+und explizites Trennen.

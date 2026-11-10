@@ -112,8 +112,9 @@ Der normale Build erzeugt Backend und Pluto-Treiber aus Quellcode:
 kommen `qo100_webbridge`, `qo100_ft8_decoder` und dessen Rechenkern `ft8-decoder`
 im selben Verzeichnis hinzu.
 Auch ein gezielter Build von `qo100_backend` baut den Treiber mit.
-Die Originalkopie unter `external/Pluto/` ist im Projekt enthalten; beim Bauen
-erfolgt kein Download. Das mitkopierte ursprüngliche Binary wird nicht benutzt.
+Die eingebundenen Treiberquellen unter `external/Pluto/` sind im Projekt
+enthalten; beim Bauen erfolgt kein Download. Der Build verwendet ausschließlich
+die gepinnte liquid-dsp-Bibliothek des Hauptprojekts.
 
 **SpeexDSP 1.2.1 ist ebenfalls lokal enthalten**: statische Bibliothek für Linux
 x86-64, öffentliche Header, BSD-Lizenz und Prüfsummen unter
@@ -653,7 +654,7 @@ Künftige Empfänger erhalten eigene Stream-/Kanal-IDs innerhalb derselben
 GUI-Schnittstelle.
 
 Die ursprünglichen Lizenzdateien und Copyright-Hinweise des Pluto-Projekts sind
-unter `external/Pluto/` unverändert enthalten. Herkunft und lokale Anpassungen:
+unter `external/Pluto/` enthalten. Herkunft und lokale Anpassungen:
 [`docs/pluto-upstream.md`](docs/pluto-upstream.md).
 
 ## Zentrale, dauerhaft gespeicherte Settings

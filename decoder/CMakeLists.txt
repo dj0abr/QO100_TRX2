@@ -25,11 +25,6 @@ else()
     set(FT8_BIN_DIR ${CMAKE_BINARY_DIR})
 endif()
 set_target_properties(qo100_ft8_decoder ft8-decoder PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${FT8_BIN_DIR})
-# Existing start scripts using the old dummy name now start the real FT8 receiver.
-add_custom_command(TARGET qo100_ft8_decoder POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E rm -f $<TARGET_FILE_DIR:qo100_ft8_decoder>/qo100_dummy_decoder
-    COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:qo100_ft8_decoder>
-        $<TARGET_FILE_DIR:qo100_ft8_decoder>/qo100_dummy_decoder)
 install(TARGETS qo100_ft8_decoder RUNTIME DESTINATION bin)
 # The RX4 beacon receiver runs beside the RX3 FT8 service.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)

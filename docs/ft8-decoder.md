@@ -16,7 +16,6 @@ zusätzlichen Terminal aufrufen:
 
 Der normale Projektbuild erzeugt **`qo100_ft8_decoder`** und den automatisch
 aufgerufenen Rechenkern **`ft8-decoder`** nebeneinander in `build/bin`.
-Der bisherige Name `qo100_dummy_decoder` verweist ebenfalls auf den FT8-Empfänger.
 Es darf jeweils nur ein Decoder denselben UDP-Port belegen.
 
 Unter **Setup → Monitoring-Empfänger** den USB-Träger als **RX3 · FT8 (Hz)**
