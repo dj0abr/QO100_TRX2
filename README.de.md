@@ -160,6 +160,11 @@ Hintergrund: [Chromium: Ausnahmen für sichere Browser-Kontexte](https://www.chr
 
 Der erste Browser erhält die Steuerung; weitere Browser können zuschauen und mithören. Die Verbindung bleibt auch ohne Bedienung bestehen. PTT wird nach spätestens fünf Minuten automatisch ausgeschaltet.
 
+Unter **Setup → Darstellung** lässt sich das Design sofort zwischen **Dunkel**
+und **Hell** umschalten. Die Auswahl wird nur im jeweiligen Browser gespeichert;
+**Änderungen speichern** ist dafür nicht nötig. Spektren und Wasserfälle behalten
+ihren dunklen Hintergrund. Ohne gespeicherte Auswahl startet das dunkle Design.
+
 ## Bedienung
 
 ### Die beiden Wasserfälle

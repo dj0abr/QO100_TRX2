@@ -155,6 +155,22 @@ der Zoom des ausgewählten Empfängers enthalten jeweils Spektrum, Frequenzachse
 RX1, Gelb RX2 und die gestrichelte rote Linie die TX-Downlinkposition. Der RX1-
 Durchlassbereich wird eingezeichnet. Die Anzeigen stammen ausschließlich vom Backend.
 
+### Hell/Dunkel
+
+**Setup → Darstellung** enthält einen Umschalter zwischen **Dunkel** und **Hell**.
+Die Auswahl wirkt sofort, auch für Zuschauer. `qo100.theme` im lokalen
+Browser-Speicher erhält sie über Seitenneuladen hinweg; weitere Tabs desselben
+Browsers übernehmen Änderungen. Ohne gültige Auswahl gilt Dunkel. Das kleine
+Skript `web/theme.js` setzt das Design bereits vor dem Laden des Stylesheets,
+damit ein gespeichertes helles Design ohne dunkles Aufblitzen erscheint.
+Bei blockiertem Browser-Speicher bleibt das Umschalten in der aktuellen Seite
+möglich. Backend-Settings und deren Speicherschaltfläche sind davon unabhängig.
+
+Bedienflächen, Dialoge und Decodertexte verwenden gemeinsame Farbvariablen aus
+`web/style.css`. Spektren, Wasserfälle, Bandplan und Diagnose-Canvases behalten
+ihre dunklen Signalpaletten. Umschalten setzt weder Audio noch WebSocket,
+Frequenzen oder Wasserfallhistorie zurück.
+
 ### Sprache
 
 Unter **Setup → Sprache** stehen **Automatisch**, **Deutsch** und **English**

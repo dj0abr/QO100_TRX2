@@ -771,6 +771,8 @@ for (const event of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'touchsta
 }, {passive: true});
 setInterval(() => send({type: 'heartbeat'}), 1000);
 setInterval(() => { if (!ptt.checkTimeout() && pttHeld && operator) send({type: 'ptt_keepalive'}); renderPttHint(); renderNoiseLevels(); }, 250);
+$('theme').checked = window.QO100Theme.value === 'light';
+$('theme').onchange = () => window.QO100Theme.set($('theme').checked ? 'light' : 'dark');
 $('language').value = languagePreference();
 $('language').onchange = () => {
   setLanguagePreference($('language').value);

@@ -352,3 +352,32 @@ assert.equal(resolveLanguage('auto','DE'),'de');assert.equal(resolveLanguage('au
 assert.equal(resolveLanguage('auto','fr-FR'),'en');assert.equal(resolveLanguage('en','de-DE'),'en');
 assert.equal(resolveLanguage('de','en-US'),'de');assert.equal(resolveLanguage('invalid','en-US'),'en');
 console.log('WebGUI: RF mapping, split tuning, RX2, bounds, FFT assembly, robust noise estimation/tracking, relative display ranges, 12/44.1/48 kHz audio, USB device selection and language detection passed.');
+
+// The head bootstrap applies the saved appearance before the UI module starts.
+const themeSource = await readFile(new URL('../web/theme.js', import.meta.url), 'utf8');
+function themePage(saved, blocked = false) {
+  const store = new Map(saved === null ? [] : [['qo100.theme', saved]]), listeners = new Map();
+  const meta = {}, control = {checked:false}, document = {documentElement:{dataset:{}},
+    querySelector:()=>meta, getElementById:()=>control};
+  const window = {addEventListener:(name, callback)=>listeners.set(name,callback)};
+  vm.runInNewContext(themeSource, {document,window,localStorage:{
+    getItem:key=>{if(blocked)throw new Error('Storage blocked');return store.get(key);},
+    setItem:(key,value)=>{if(blocked)throw new Error('Storage blocked');store.set(key,value);},
+  }});
+  return {api:window.QO100Theme,document,store,meta,control,storage:listeners.get('storage')};
+}
+for (const [saved, expected] of [[null,'dark'],['dark','dark'],['light','light'],['unknown','dark']]) {
+  const page=themePage(saved);assert.equal(page.api.value,expected);assert.equal(page.meta.content,expected);
+  assert.equal(page.control.checked,expected==='light');
+}
+const appearance=themePage(null);
+appearance.api.set('light');assert.equal(appearance.api.value,'light');assert(appearance.control.checked);
+assert.equal(appearance.store.get('qo100.theme'),'light');assert.equal(appearance.meta.content,'light');
+appearance.storage({key:'qo100.language',newValue:'de'});assert.equal(appearance.api.value,'light');
+appearance.storage({key:'qo100.theme',newValue:'dark'});assert.equal(appearance.api.value,'dark');assert(!appearance.control.checked);
+assert.equal(appearance.store.get('qo100.theme'),'light','Storage notifications must not write back');
+appearance.api.set('light');appearance.storage({key:null,newValue:null});assert.equal(appearance.api.value,'dark');
+appearance.api.set('invalid');assert.equal(appearance.api.value,'dark');
+const restrictedAppearance=themePage('light',true);assert.equal(restrictedAppearance.api.value,'dark');
+restrictedAppearance.api.set('light');assert.equal(restrictedAppearance.api.value,'light');
+console.log('Appearance: early saved theme, dark default, invalid/blocked storage, immediate switch and cross-tab updates passed.');

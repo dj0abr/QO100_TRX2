@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="description" content="QO-100 Web-Transceiver mit zwei Empfängern und unabhängiger Sendeabstimmung.">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
   <title>QO100 Multichannel Transceiver Version.2 by DJ0ABR</title>
 </head>
@@ -158,6 +159,10 @@
     <div class="dialog-heading"><h2 id="setup-title">Setup</h2><button class="dialog-close" type="button" data-close="setup-dialog" aria-label="Setup schließen">×</button></div>
     <div class="dialog-scroll">
       <fieldset><legend data-en="Language">Sprache</legend><label class="field-label" for="language" data-en="Display language">Anzeigesprache</label><select id="language" class="menu-select"><option value="auto" data-en="Automatic · Browser language">Automatisch · Browsersprache</option><option value="de">Deutsch</option><option value="en">English</option></select></fieldset>
+      <fieldset><legend data-en="Appearance">Darstellung</legend>
+        <label class="theme-switch" for="theme"><span data-en="Dark">Dunkel</span><input id="theme" type="checkbox" role="switch" aria-label="Helles Design" data-en-aria-label="Light theme"><span data-en="Light">Hell</span></label>
+        <p class="field-help" data-en="Applied immediately and saved in this browser. Spectra and waterfalls retain their dark backgrounds.">Wirkt sofort und wird in diesem Browser gespeichert. Spektren und Wasserfälle behalten ihren dunklen Hintergrund.</p>
+      </fieldset>
       <fieldset><legend>Audio</legend><div class="form-grid">
         <p class="field-help" data-en="Audio: RX1/RX2. Monitoring: RX3 · FT8, RX4 · PSK and RX5 · MM beacon.">Audio: RX1/RX2. Monitoring: RX3 · FT8, RX4 · PSK und RX5 · MM-Bake.</p>
         <div class="form-action"><span id="audio-details">Audio ausgeschaltet</span></div>

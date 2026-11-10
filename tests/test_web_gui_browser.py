@@ -171,6 +171,11 @@ def main():
                     localStorage.setItem('qo100.fullbandAxis','pluto-tx');
                     localStorage.setItem('qo100.testDbSeeded','true');
                 }
+                const themeObserver=new MutationObserver(()=>{
+                    if(document.querySelector('link[rel="stylesheet"]')){
+                        window.__themeAtStylesheet=document.documentElement.dataset.theme;themeObserver.disconnect();
+                    }
+                });themeObserver.observe(document,{childList:true,subtree:true});
                 window.__dbLabels={};const drawText=CanvasRenderingContext2D.prototype.fillText;
                 CanvasRenderingContext2D.prototype.fillText=function(text,...args){
                     if(['wide-spectrum','zoom-spectrum'].includes(this.canvas.id) && String(text).endsWith(' dBFS'))window.__dbLabels[this.canvas.id]=text;
@@ -807,6 +812,48 @@ def main():
             wait(lambda:execute('return !document.getElementById("ptt").disabled'))
             assert execute('return localStorage.getItem("qo100.audioOutput")')=='default'
             assert execute('return localStorage.getItem("qo100.audioInput")')=='default'
+            # Appearance changes are local and must preserve live radio state/audio/history.
+            theme_state=snapshot()
+            assert execute('return document.documentElement.dataset.theme')=='dark'
+            execute('window.__themeAudioNode=window.__radioNode;window.__themeResets=0;window.__themePost=window.__radioNode.port.postMessage;window.__radioNode.port.postMessage=function(message,...args){if(message.type==="reset")window.__themeResets++;return window.__themePost.call(this,message,...args)}')
+            assert execute('return document.getElementById("setup-dialog").open')
+            theme_history=mark_history()
+            assert execute('return !document.getElementById("theme").checked && document.getElementById("theme").getAttribute("role")==="switch"')
+            click('#theme')
+            assert execute('return document.documentElement.dataset.theme==="light" && document.getElementById("theme").checked && localStorage.getItem("qo100.theme")==="light" && document.querySelector("meta[name=color-scheme]").content==="light"')
+            assert execute('return getComputedStyle(document.body).backgroundColor')=='rgb(237, 242, 247)'
+            assert execute('return getComputedStyle(document.documentElement).colorScheme')=='light'
+            assert execute('return getComputedStyle(document.querySelector(".plot-body")).backgroundColor')=='rgb(8, 15, 22)'
+            # Check the real text/background combinations rather than just palette tokens.
+            contrast=execute(r'''const rgb=value=>value.match(/[\d.]+/g).slice(0,3).map(Number);
+                const luminance=color=>rgb(color).map(x=>{x/=255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4}).reduce((sum,x,i)=>sum+x*[.2126,.7152,.0722][i],0);
+                const background=node=>{while(node){const c=getComputedStyle(node).backgroundColor;if(c!=='rgba(0, 0, 0, 0)' && c!=='transparent')return c;node=node.parentElement;}return 'rgb(255,255,255)';};
+                return ['.dialog-heading h2','.setup-dialog legend','.setup-dialog .field-help','.setup-dialog .option-label','.setup-dialog .form-grid label','.setup-dialog .form-grid input','.theme-switch','.sidebar .menu-button','.sidebar .field-label','.page-footer','#rx1','#rx2'].map(selector=>{
+                    const node=document.querySelector(selector),fg=luminance(getComputedStyle(node).color),bg=luminance(background(node));return [selector,(Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05)];
+                });''')
+            save_screenshot(capture.with_name(capture.stem+'-light-setup.png'))
+            assert all(ratio>=4.5 for _,ratio in contrast),contrast
+            expect_history(theme_history)
+            assert execute('return window.__themeResets===0 && window.__radioNode===window.__themeAudioNode && window.__radioNode.context.state==="running"')
+            theme_after=snapshot()
+            assert all(theme_state.get(key)==theme_after.get(key) for key in ('session','rx','tx','tx2','settings')),'Appearance modified radio settings'
+            save_screenshot(capture.with_name(capture.stem+'-light-setup.png'))
+            click('[data-close="setup-dialog"]')
+            save_screenshot(capture.with_name(capture.stem+'-light.png'))
+            for width in (390,320):
+                cdp('Emulation.setDeviceMetricsOverride',{'width':width,'height':844,'deviceScaleFactor':1,'mobile':True})
+                execute('window.scrollTo(0,0)')
+                assert execute('return document.documentElement.scrollWidth<=innerWidth')
+                save_screenshot(capture.with_name(capture.stem+f'-light-{width}.png'))
+                click('#setup')
+                assert execute('return document.getElementById("theme").checked && document.getElementById("setup-dialog").scrollWidth<=document.getElementById("setup-dialog").clientWidth')
+                if width==390:save_screenshot(capture.with_name(capture.stem+'-light-setup-mobile.png'))
+                click('[data-close="setup-dialog"]')
+            cdp('Emulation.setDeviceMetricsOverride',{'width':1440,'height':1000,'deviceScaleFactor':1,'mobile':False})
+            click('#setup');click('#theme')
+            assert execute('return document.documentElement.dataset.theme==="dark" && !document.getElementById("theme").checked && getComputedStyle(document.documentElement).colorScheme==="dark"')
+            assert execute('return getComputedStyle(document.body).backgroundColor')=='rgb(11, 16, 22)'
+            execute('window.__radioNode.port.postMessage=window.__themePost')
             # Language changes keep controls, unsaved Setup values, FFT history and audio alive.
             assert execute('return document.documentElement.lang')=='de'
             assert execute('return document.getElementById("language").value')=='auto'
@@ -909,8 +956,11 @@ def main():
             # Preferences survive a reload; transmitting is never restored.
             click('#decoder-source5-bulletin')
             changed('#language','en')
+            click('#setup');click('#theme')
+            assert execute('return document.documentElement.dataset.theme')=='light'
             call('POST',f'/session/{session}/url',{'url':url})
             wait(lambda:execute('return document.getElementById("role").textContent')=='Operator')
+            assert execute('return document.documentElement.dataset.theme==="light" && window.__themeAtStylesheet==="light" && document.getElementById("theme").checked'),'Theme was not restored before stylesheet loading'
             assert execute('return document.documentElement.lang==="en" && document.getElementById("language").value==="en"')
             changed('#language','de')
             assert execute('return document.getElementById("ptt-toggle").checked && document.getElementById("ptt-space").checked')
@@ -948,11 +998,15 @@ def main():
             click('#frequency2');assert execute('return document.getElementById("frequency2").getAttribute("aria-pressed")')=='true'
             wait(zoom_follows_rx)
             assert execute('return document.getElementById("zoom-display").dataset.stream')=='2'
+            click('#setup');assert execute('return !document.getElementById("theme").disabled')
+            click('#theme');assert execute('return document.documentElement.dataset.theme')=='dark'
+            click('[data-close="setup-dialog"]')
             before=snapshot();wheel('#zoom')
             after=snapshot();assert after['rx']['2']['frequency_hz']==before['rx']['2']['frequency_hz']
             errors=call('POST',f'/session/{session}/log',{'type':'browser'})
             assert not [e for e in errors if e['level']=='SEVERE'],errors
             call('POST',f'/session/{session}/window',{'handle':owner})
+            wait(lambda:execute('return document.documentElement.dataset.theme')=='dark')
             click('#connect');wait(lambda:execute('return document.getElementById("role").textContent')=='Getrennt')
             time.sleep(.5);assert execute('return document.getElementById("connect").textContent')=='Verbinden'
             errors=call('POST',f'/session/{session}/log',{'type':'browser'})

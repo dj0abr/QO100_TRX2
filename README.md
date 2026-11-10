@@ -158,6 +158,11 @@ as well. Background: [Chromium: secure-context exceptions](https://www.chromium.
 
 The first browser gets control; additional browsers can watch and listen. The connection stays open without user activity. PTT turns off automatically after five minutes at the latest.
 
+Under **Setup → Appearance**, switch immediately between **Dark** and **Light**.
+The choice is saved in the current browser; **Save changes** is not required.
+Spectra and waterfalls retain their dark backgrounds. Dark is the default when
+no preference has been saved.
+
 ## Operation
 
 ### The two waterfalls
