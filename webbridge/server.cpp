@@ -94,10 +94,10 @@ public:
         const auto now=Clock::now();
         if(!queue_.empty() && now-queue_.front().time>std::chrono::seconds(5)) {abort_later("slow_client");return;}
         // Recover from short browser/network stalls without replaying old audio
-        // and spectra. Never erase the buffer held by the active async_write.
+        // and spectra. Keep SSTV image lines. Never erase the buffer held by the active async_write.
         if(!queue_.empty()) {
             for(auto it=std::next(queue_.begin());it!=queue_.end();) {
-                if(it->binary && it->bytes->size()>=6 && ((*it->bytes)[5]==2 || (*it->bytes)[5]==5)
+                if(it->binary && it->bytes->size()>=6 && ((*it->bytes)[5]==2 || (*it->bytes)[5]==5 || (*it->bytes)[5]==sstv_spectrum_type)
                     && now-it->time>std::chrono::milliseconds(200)) {
                     queued_-=it->bytes->size();it=queue_.erase(it);
                 } else ++it;

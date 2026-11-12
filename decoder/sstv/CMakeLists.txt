@@ -1,0 +1,23 @@
+add_library(qo100_sstv STATIC encoder.cpp decoder.cpp)
+target_include_directories(qo100_sstv PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_compile_features(qo100_sstv PUBLIC cxx_std_17)
+target_compile_options(qo100_sstv PRIVATE -Wall -Wextra -Wpedantic)
+
+find_package(PkgConfig REQUIRED)
+if(NOT TARGET PkgConfig::FFTW)
+    pkg_check_modules(FFTW REQUIRED IMPORTED_TARGET fftw3f)
+endif()
+add_library(qo100_sstv_rx STATIC receiver.cpp)
+target_link_libraries(qo100_sstv_rx PUBLIC qo100_sstv PRIVATE PkgConfig::FFTW Threads::Threads)
+target_compile_options(qo100_sstv_rx PRIVATE -Wall -Wextra -Wpedantic)
+
+add_library(qo100_sstv_tx STATIC sender.cpp)
+target_link_libraries(qo100_sstv_tx PUBLIC qo100_sstv PRIVATE Threads::Threads)
+target_compile_options(qo100_sstv_tx PRIVATE -Wall -Wextra -Wpedantic)
+
+if(BUILD_TESTING)
+    add_executable(test_sstv ../../tests/test_sstv.cpp)
+    target_link_libraries(test_sstv PRIVATE qo100_sstv Threads::Threads)
+    target_compile_options(test_sstv PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME sstv_codec COMMAND test_sstv)
+endif()

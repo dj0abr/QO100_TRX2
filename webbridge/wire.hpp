@@ -7,6 +7,10 @@
 
 namespace bridge {
 using Bytes = std::vector<uint8_t>;
+// Browser-only media packet types.
+inline constexpr uint8_t sstv_line_type = 21;
+inline constexpr uint8_t sstv_spectrum_type = 22;
+inline constexpr uint8_t sstv_tx_chunk_type = 23;
 inline uint64_t get(const Bytes& p, size_t off, size_t n) {
     if(n>8 || off>p.size() || n>p.size()-off) throw std::runtime_error("Short QTR2 packet");
     uint64_t v=0; for(size_t i=0;i<n;++i) v=(v<<8)|p[off+i]; return v;

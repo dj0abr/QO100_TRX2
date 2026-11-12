@@ -639,6 +639,81 @@ html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text
 @media (max-width: 800px) { .mm-values { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 
+.sstv-panel { position: absolute; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 6px; padding: 8px 10px; background: var(--monitor-bg); font-size: 11px; }
+.sstv-toolbar, .sstv-toolbar label, .sstv-reception { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.sstv-toolbar select, .sstv-tx-actions select { background: var(--button-bg); border: 1px solid var(--button-border); border-radius: 4px; color: var(--text); font: inherit; padding: 3px 5px; }
+.sstv-media {
+  --sstv-column-gap: 12px;
+  --sstv-strip-gap: 5px;
+  --sstv-strip-height: clamp(32px, 22cqh, 46px);
+  container-type: size;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--sstv-column-gap);
+}
+.sstv-frame {
+  width: min(320px, calc((100cqw - var(--sstv-column-gap)) / 2),
+    calc((100cqh - var(--sstv-strip-gap) - var(--sstv-strip-height)) * 1.25));
+  min-width: 0;
+}
+.sstv-picture { display: block; width: 100%; aspect-ratio: 5 / 4; background: #080f16; border-radius: 4px; }
+.sstv-tx-preview { position: relative; display: grid; place-items: center; padding: 6px; text-align: center; color: #bac8d4; cursor: pointer; }
+.sstv-tx-preview > span, .sstv-tx-preview > canvas { pointer-events: none; }
+.sstv-tx-preview > canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; }
+.sstv-tx-preview:focus-within, .sstv-tx-preview[data-dragging] { outline: 2px solid var(--rx2); outline-offset: -2px; }
+.sstv-tx-preview[data-dragging] > canvas { opacity: .75; }
+.sstv-tx-frame { container: sstv-tx / inline-size; }
+.sstv-tx-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: var(--sstv-strip-height); margin-top: var(--sstv-strip-gap); }
+.sstv-tx-level { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 4px; padding: 0 2px; }
+.sstv-tx-actions { display: flex; gap: 4px; }
+.sstv-tx-actions .small-button { padding: 4px 6px; }
+#sstv-tx-toggle { min-width: 44px; }
+#sstv-tx-toggle[data-active="true"] { background: var(--ptt-bg); border-color: var(--ptt-border); color: #fff; }
+.sstv-tx-level output { font-family: var(--mono); white-space: nowrap; }
+.sstv-tx-level .range { grid-column: 1 / -1; --range-color: var(--tx); width: 100%; height: 14px; margin: 0; background-size: 100% 5px; background-position: center; background-repeat: no-repeat; }
+.sstv-tx-error:not(:empty) { margin-top: 4px; color: var(--error); }
+@container sstv-tx (max-width: 212px) {
+  .sstv-tx-controls { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .sstv-tx-level { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+  .sstv-tx-level .range { grid-column: 2; grid-row: 1; }
+  .sstv-tx-level output { grid-column: 3; grid-row: 1; }
+  .sstv-tx-actions { justify-content: flex-end; }
+}
+.sstv-editor { width: min(820px, calc(100% - 24px)); max-height: calc(100dvh - 24px); }
+.sstv-editor[open] { display: flex; flex-direction: column; }
+.sstv-editor-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(240px, 1fr); gap: 16px; padding-block: 16px; }
+.sstv-editor-stage { position: relative; aspect-ratio: 5 / 4; overflow: hidden; border-radius: 4px; background: #000; }
+.sstv-editor-stage canvas { display: block; width: 100%; height: 100%; }
+.sstv-editor-handle { position: absolute; padding: 0; border: 0; background: transparent; cursor: move; touch-action: none; }
+.sstv-editor-handle:is(:hover, :focus-visible, [data-selected]) { outline: 1px dashed #ffdf86; outline-offset: -1px; }
+.sstv-editor-help { margin: 7px 0 0; font-size: 12px; color: var(--text-secondary); }
+.sstv-editor-fields { display: grid; gap: 10px; font-size: 12px; }
+.sstv-editor-fields label { display: grid; gap: 3px; min-width: 0; }
+.sstv-editor-station, .sstv-editor-format { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
+.sstv-editor-station { align-items: end; }
+.sstv-editor-fields fieldset { min-width: 0; margin: 0; padding: 8px; border: 1px solid var(--line); border-radius: 4px; }
+.sstv-editor-fields legend { padding: 0 4px; }
+.sstv-editor-texts { display: grid; gap: 4px; }
+.sstv-editor-texts label { grid-template-columns: 14px minmax(0, 1fr); align-items: center; }
+.sstv-editor-fields :is(input:not([type=checkbox]), select) { width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid var(--input-border); border-radius: 4px; background: var(--input-bg); color: var(--text); font: inherit; }
+.sstv-editor-texts input[data-preview] { border-color: var(--rx2); }
+.sstv-editor-fields .sstv-editor-bold { display: flex; align-items: center; gap: 5px; align-self: end; min-height: 25px; }
+@media (max-width: 640px) { .sstv-editor-layout { grid-template-columns: minmax(0, 1fr); } }
+.sstv-rx-preview { display: grid; gap: var(--sstv-strip-gap); }
+.sstv-waterfall { position: relative; height: var(--sstv-strip-height); overflow: hidden; background: #080f16; border-radius: 4px; }
+.sstv-waterfall canvas { display: block; width: 100%; height: 100%; }
+.sstv-waterfall canvas:focus-visible { outline: 2px solid var(--rx2); outline-offset: -2px; }
+.sstv-waterfall[data-tunable="true"] canvas { cursor: ns-resize; }
+.sstv-sync-reference, .sstv-picture-band, #sstv-sync-marker { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+.sstv-picture-band { left: 37.5%; right: 42.5%; background: #5ce4fb14; border-inline: 1px solid #7fefffaa; }
+.sstv-sync-reference { left: 30%; border-left: 1px dashed #ffd071; }
+#sstv-sync-marker { border-left: 2px solid #91fcb5; }
+#sstv-status[data-state="locked"] { color: var(--locked); }
+#sstv-status[data-state="searching"] { color: var(--searching); }
+#sstv-frequency, #sstv-line-count, #sstv-afc { font-family: var(--mono); }
+@media (max-width: 560px) { .sstv-panel { padding: 6px; } .sstv-media { --sstv-column-gap: 8px; } }
+
 /* Radio plots keep their calibrated dark palettes in both page themes. */
 .plot-body, .waterfall, .mm-chart { color-scheme: dark; }
 .plot-body, .mm-chart { background: #080f16; }

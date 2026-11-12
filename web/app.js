@@ -3,6 +3,8 @@ import {FrameAssembler, RadioDisplay, displayOffsets, AXIS_MODES} from './radio-
 import {RadioAudio} from './audio.js';
 import {PttControl} from './ptt-control.js';
 import {MmDiagnostics} from './mm-diagnostics.js';
+import {SstvView} from './sstv.js';
+import {SstvTxView} from './sstv-tx.js';
 import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
 
 const $ = id => document.getElementById(id);
@@ -23,6 +25,9 @@ const frames = new FrameAssembler(frame => {
 });
 const radio = new RadioAudio(transmitSamples, mediaChanged);
 const mmDiagnostics = new MmDiagnostics($('mm-diagnostics'));
+const sstv = new SstvView($('sstv-panel'));
+const sstvTx = new SstvTxView($('sstv-panel'), $('sstv-tx-editor'), renderSstvTxControls);
+let sstvUpload = null, sstvStopRequested = false;
 const ptt = new PttControl({start: startPtt, stop: stopPtt, isActive: () => pttHeld,
   mode: readPreference('pttMode'), spaceEnabled: readPreference('pttSpace') === 'true',
   timeout: () => notify('PTT nach 5 Minuten automatisch ausgeschaltet.', false, 8000)});
@@ -78,15 +83,16 @@ function waitState(predicate, timeout = 2500) {
 function connect() {
   if (socket && socket.readyState < WebSocket.CLOSING) return;
   operator = false; state = {}; wanted.clear(); guiLoaded = false; session = 0; clearTimers();
-  frames.reset(); views.forEach(view => view.clear()); radio.reset();
+  frames.reset(); views.forEach(view => view.clear()); radio.reset(); sstv.reset();
   cursor = null; queueCursorUpdate();
   const url = new URL('/ws', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = socket = new WebSocket(url); ws.binaryType = 'arraybuffer';
   notify('Verbindung wird hergestellt …', false, 0); controls();
-  ws.onopen = () => { if (ws === socket) { rx2AudioSubscription = null; notify('Adapter verbunden. Warte auf Backend …', false, 0); send({type:'mm_diagnostics',enabled:!$('mm-diagnostics').hidden}); controls(); } };
+  ws.onopen = () => { if (ws === socket) { rx2AudioSubscription = null; notify('Adapter verbunden. Warte auf Backend …', false, 0); send({type:'mm_diagnostics',enabled:!$('mm-diagnostics').hidden}); send({type:'sstv_subscribe',enabled:sstv.visible}); controls(); } };
   ws.onmessage = event => {
     if (ws !== socket) return;
     if (typeof event.data !== 'string') {
+      if (sstv.binary(event.data, session)) return;
       frames.accept(event.data, session, cutoff);
       radio.receive(event.data, state, selected, cutoff);
       return;
@@ -103,12 +109,13 @@ function connect() {
     else if (message.type === 'decoder_text' && [3, 4].includes(message.stream) && typeof message.text === 'string') appendDecoderText(message.stream, message.text);
     else if (message.type === 'decoder_text' && message.stream === 5 && typeof message.text === 'string' && ['dx-cluster', 'cw-skimmer', 'bulletin'].includes(message.channel)) appendDecoderText(`5-${message.channel}`, message.text, true);
     else if (message.type === 'mm_diagnostics' && message.stream === 5) mmDiagnostics.update(message);
+    else if (['sstv_begin', 'sstv_end', 'sstv_reset'].includes(message.type)) sstv.message(message, session);
     else if (message.type === 'ack' || message.type === 'error') {
       const item = pending.get(message.id);
       if (item) {
         pending.delete(message.id); clearTimeout(item.timeout);
         if (message.type === 'ack') item.resolve(message);
-        else item.reject(fail(({read_only: 'Nur der Bediener darf diese Einstellung ändern.', not_ready: 'Backend noch nicht bereit.', busy: 'Einstellungen werden gerade verarbeitet.', backend_reset: 'Backend wurde neu gestartet.', timeout: 'Backend antwortet nicht.'})[message.code] || message.message, message.code));
+        else item.reject(fail(({read_only: 'Nur der Bediener darf diese Einstellung ändern.', not_ready: 'Backend noch nicht bereit.', busy: 'Einstellungen werden gerade verarbeitet.', tx2_busy: t('TX2 ist belegt.', 'TX2 is busy.'), backend_reset: 'Backend wurde neu gestartet.', timeout: 'Backend antwortet nicht.'})[message.code] || message.message, message.code));
       } else if (message.type === 'error' && message.code !== 'superseded' && message.code !== 'not_ready') notify(message.message, true);
     } else if (message.type === 'closed') {
       notify(message.reason === 'idle' ? 'Wegen Inaktivität abgemeldet. Mit „Verbinden“ erneut anmelden.' : 'Verbindung wegen fehlendem Heartbeat beendet. Bitte erneut verbinden.', true, Infinity);
@@ -117,7 +124,8 @@ function connect() {
   ws.onerror = () => { if (ws === socket) notify('WebSocket-Verbindung fehlgeschlagen.', true); };
   ws.onclose = event => {
     if (ws !== socket) return;
-    stopPtt(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset(); mmDiagnostics.reset();
+    stopPtt(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset(); mmDiagnostics.reset(); sstv.reset(true);
+    sstvUpload = null; sstvStopRequested = false;
     for (const item of pending.values()) { clearTimeout(item.timeout); item.reject(fail('Verbindung getrennt.', 'closed')); }
     pending.clear(); frames.reset(); views.forEach(view => view.clear());
     cursor = null; queueCursorUpdate();
@@ -156,6 +164,9 @@ function fineTune(channel, delta) {
   if (!canControl()) return;
   try { setFrequency(channel, frequency(channel) + delta); } catch (error) { report(error); }
 }
+function canTuneSstv() {
+  return canControl() && Number.isSafeInteger(frequency(2));
+}
 function selectReceiver(channel) {
   if (selected !== channel) { stopPtt(); radio.reset(); }
   selected = channel;
@@ -189,6 +200,7 @@ function renderFrequencies() {
     $(id).dataset.hz = Number.isSafeInteger(hz) ? String(hz) : '';
     $(id).classList.toggle('pending', wanted.has(channel === 'tx' && selected === 2 ? 'tx2' : String(channel)));
   }
+  $('sstv-frequency').textContent = `RX2 · ${frequencyText(frequency(2))}`;
   const tx = frequency('tx'), rx = frequency(selected);
   $('tx-downlink').textContent = frequencyText(Number.isSafeInteger(tx) ? tx + DOWNLINK_UPLINK_HZ : undefined);
   const offset = tx - (rx - DOWNLINK_UPLINK_HZ);
@@ -238,6 +250,7 @@ function setSpectrumAverage(value) {
 function setDisplayColor(value) {
   const color = views[0].setColor(value);
   views[1].setColor(color);
+  sstv.color = color;
   $('display-color').value = color; writePreference('displayColor', color);
 }
 function setFullbandAxis(mode) {
@@ -285,14 +298,16 @@ function applyFilter(values) {
 function update(next) {
   if (next.session !== session) {
     stopPtt(); session = next.session; wanted.clear(); guiLoaded = false;
-    loopGeneration = null; cutoff = 0n; clearTimers(); frames.reset(); views.forEach(view => view.clear()); radio.reset();
+    loopGeneration = null; cutoff = 0n; clearTimers(); frames.reset(); views.forEach(view => view.clear()); radio.reset(); sstv.reset();
   }
   if (next.loop?.generation !== undefined && next.loop.generation !== loopGeneration) {
     if (loopGeneration !== null) cutoff = BigInt(next.loop.timestamp_ns || '0');
     loopGeneration = next.loop.generation; frames.reset(); views.forEach(view => view.clear()); radio.reset();
   }
   if ((next.flags & 6) && !(state.flags & 6)) radio.reset();
+  updateSstvTx(next.sstv_tx);
   state = next;
+  $('sstv-mode').value = next.sstv_mode ?? 'auto';
   for (const [key, value] of wanted) {
     const actual = key === 'tx2' ? next.tx2?.frequency_hz : key === 'tx' ? next.tx?.frequency_hz : next.rx?.[key]?.frequency_hz;
     if (actual === value.hz) wanted.delete(key);
@@ -332,6 +347,8 @@ function controls() {
   syncRx2Subscription();
   const writable = canControl();
   for (const element of document.querySelectorAll('[data-control]')) element.disabled = !writable;
+  $('sstv-waterfall').parentElement.dataset.tunable = String(canTuneSstv());
+  renderSstvTxControls();
   $('ptt').disabled = selected === 2 || !writable || !!(state.flags & 6) || !radio.microphone || !radio.running;
   $('ptt-label').textContent = selected === 2 ? 'TX2' : 'PTT';
   $('audio').disabled = !!radio.starting;
@@ -346,9 +363,10 @@ function controls() {
   $('hardware-status').textContent = state.flags & 2 ? t('Hardware startet', 'Hardware starting') : state.flags & 4 ? 'Hardware offline' : hardwareOnline ? t('Hardware bereit', 'Hardware ready') : t('Hardware unbekannt', 'Hardware unknown');
   $('hardware-dot').className = `live-dot${state.flags & 4 ? ' error' : hardwareOnline ? '' : ' offline'}`;
   const transmitting = !!state.tx?.ptt;
+  const sstvSending = state.sstv_tx?.phase === 'sending';
   $('tx-status').textContent = transmitting ? (state.loop?.mode === 1 ? t('Audio-Test', 'Audio test') : t('Senden', 'Transmitting')) : state.loop?.mode ? t(`Empfang · ${state.loop.mode === 1 ? 'Audio' : 'HF'}-Loop`, `Receiving · ${state.loop.mode === 1 ? 'Audio' : 'RF'} loop`) : t('Empfang', 'Receiving');
-  if (selected === 2) $('tx-status').textContent = 'RX2 / TX2 · Digital';
-  $('tx-dot').className = `live-dot${transmitting ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
+  if (selected === 2) $('tx-status').textContent = sstvSending ? t('SSTV · Senden', 'SSTV · Transmitting') : 'RX2 / TX2 · Digital';
+  $('tx-dot').className = `live-dot${transmitting || selected === 2 && sstvSending ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
   $('ptt').classList.toggle('sending', transmitting); $('ptt').setAttribute('aria-pressed', String(transmitting));
   applyMonitorGain();
   renderPttHint();
@@ -359,7 +377,7 @@ function controls() {
   renderDevices();
   if (performance.now() >= noticeUntil) {
     const error = !!(state.flags & 4);
-    const message = !isOpen() ? 'Getrennt. Zum Anmelden „Verbinden“ wählen.' : !state.ready ? 'Warte auf Backend und bestätigte Abschaltung …' : error ? `Hardware offline: ${state.settings?.hardware_error || state.settings?.error || 'Verbindung prüfen'}` : !operator ? 'Zuschauer · Empfang aktiv. Für Steuerrecht bei freiem Platz neu verbinden.' : selected === 2 ? (radio.running ? t('Bedienbereit · RX2-Audiokontrolle aktiv. TX2 erhält externes Audio.', 'Ready · RX2 audio monitoring active. TX2 receives external audio.') : t('Bedienbereit · Audio starten, um RX2 zu hören. TX2 erhält externes Audio.', 'Ready · Start audio to listen to RX2. TX2 receives external audio.')) : radio.running && radio.microphone ? 'Bedienbereit · Audio und Mikrofon aktiv.' : 'Bedienbereit · Audio starten und Mikrofon freigeben, um PTT zu verwenden.';
+    const message = !isOpen() ? 'Getrennt. Zum Anmelden „Verbinden“ wählen.' : !state.ready ? 'Warte auf Backend und bestätigte Abschaltung …' : error ? `Hardware offline: ${state.settings?.hardware_error || state.settings?.error || 'Verbindung prüfen'}` : !operator ? 'Zuschauer · Empfang aktiv. Für Steuerrecht bei freiem Platz neu verbinden.' : sstvSending ? t('SSTV sendet über TX2.', 'SSTV is transmitting over TX2.') : selected === 2 ? (radio.running ? t('Bedienbereit · RX2-Audiokontrolle aktiv. TX2 erhält externes Audio.', 'Ready · RX2 audio monitoring active. TX2 receives external audio.') : t('Bedienbereit · Audio starten, um RX2 zu hören. TX2 erhält externes Audio.', 'Ready · Start audio to listen to RX2. TX2 receives external audio.')) : radio.running && radio.microphone ? 'Bedienbereit · Audio und Mikrofon aktiv.' : 'Bedienbereit · Audio starten und Mikrofon freigeben, um PTT zu verwenden.';
     notify(message, error, 0);
   }
 }
@@ -645,7 +663,7 @@ $('tx-listen-mute').addEventListener('keydown', e => {
   if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') e.stopPropagation();
 });
 const decoderSources = [3, 4, '5-dx-cluster', '5-cw-skimmer', '5-bulletin'];
-const zoomSources = ['zoom', ...decoderSources, '5-diagnostics'];
+const zoomSources = ['zoom', ...decoderSources, '5-diagnostics', 'sstv'];
 let decoderSource = decoderSources.find(source => String(source) === readPreference('decoderSource')) ?? 3;
 const decoderScroll = Object.fromEntries(decoderSources.map(source => [source, {top: 0, follow: source !== '5-bulletin'}]));
 const decoderPending = Object.fromEntries(decoderSources.map(source => [source, null]));
@@ -665,22 +683,26 @@ function selectDecoder(source) {
   rememberDecoderScroll();
   const monitoring = source !== 'zoom';
   const diagnostics = source === '5-diagnostics';
-  if (monitoring && !diagnostics) decoderSource = source;
+  const textView = decoderSources.includes(source), sstvView = source === 'sstv';
+  if (textView) decoderSource = source;
   for (const channel of decoderSources) {
     decoderOutput(channel).hidden = channel !== decoderSource;
     $(`decoder-source${channel}`).checked = channel === source;
   }
   $('decoder-sourcezoom').checked = !monitoring;
   $('decoder-source5-diagnostics').checked = diagnostics;
-  $('decoder-panel').hidden = !monitoring || diagnostics;
-  $('decoder-clear').hidden = !monitoring || diagnostics;
+  $('decoder-sourcesstv').checked = sstvView;
+  $('decoder-panel').hidden = !textView;
+  $('decoder-clear').hidden = !textView;
+  sstv.show(sstvView);
   mmDiagnostics.show(diagnostics);
   send({type:'mm_diagnostics',enabled:diagnostics});
+  send({type:'sstv_subscribe',enabled:sstvView});
   $('zoom-plots').setAttribute('aria-hidden', String(monitoring));
   $('zoom-plots').inert = monitoring;
   $('zoom-output').dataset.view = String(source);
   writePreference('zoomView', source);
-  if (monitoring && !diagnostics) { writePreference('decoderSource', source); restoreDecoderScroll(); }
+  if (textView) { writePreference('decoderSource', source); restoreDecoderScroll(); }
 }
 function appendDecoderText(source, text, replace = false) {
   // FT8 returns a whole slot in a burst. Keep its per-line WebSocket handlers
@@ -713,8 +735,127 @@ function flushDecoderText() {
 $('decoder-clear').onclick = () => { decoderPending[decoderSource] = null; decoderOutput(decoderSource).textContent = ''; decoderScroll[decoderSource] = {top: 0, follow: decoderSource !== '5-bulletin'}; };
 for (const source of zoomSources) $(`decoder-source${source}`).onchange = () => selectDecoder(source);
 // Keep local decoder controls and log scrolling independent of global Space PTT.
-for (const id of ['zoom-sources', 'decoder-clear', 'decoder-panel', 'mm-diagnostics']) $(id).addEventListener('keydown', event => {
+for (const id of ['zoom-sources', 'decoder-clear', 'decoder-panel', 'mm-diagnostics', 'sstv-panel']) $(id).addEventListener('keydown', event => {
   if (event.code === 'Space' || event.key === ' ') event.stopPropagation();
+});
+const sstvTuneStep = 10;
+$('sstv-waterfall').addEventListener('wheel', event => {
+  if (!canTuneSstv() || event.ctrlKey || event.metaKey) return;
+  const delta = wheelTurns(event) * sstvTuneStep;
+  if (!delta) return;
+  event.preventDefault();
+  fineTune(2, delta);
+}, {passive: false});
+$('sstv-waterfall').addEventListener('keydown', event => {
+  if (!canTuneSstv() || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  event.preventDefault();
+  fineTune(2, event.key === 'ArrowUp' ? sstvTuneStep : -sstvTuneStep);
+});
+const sstvTxLevel = $('sstv-tx-level');
+function renderSstvTxLevel() {
+  rangePaint(sstvTxLevel);
+  $('sstv-tx-level-value').textContent = `${sstvTxLevel.value} %`;
+  renderSstvTxControls();
+}
+const savedSstvTxLevel = Number(readPreference('sstvTxLevel') ?? sstvTxLevel.defaultValue);
+if (Number.isInteger(savedSstvTxLevel) && savedSstvTxLevel >= 0 && savedSstvTxLevel <= 100) {
+  sstvTxLevel.value = savedSstvTxLevel;
+}
+sstvTxLevel.addEventListener('input', () => {
+  renderSstvTxLevel();
+  writePreference('sstvTxLevel', sstvTxLevel.value);
+  if (operator && sstvTxActive() && !sstvStopRequested) {
+    send({type: 'sstv_tx_level', level: Number(sstvTxLevel.value)});
+  }
+});
+renderSstvTxLevel();
+function sstvTxActive() {
+  return sstvUpload !== null || (state.sstv_tx?.phase ?? 'idle') !== 'idle';
+}
+function renderSstvTxControls() {
+  const button = $('sstv-tx-toggle');
+  const busy = sstvStopRequested || sstvTxActive();
+  const available = state.sstv_tx && state.tx2?.frequency_hz && !(state.flags & 6) && !state.loop?.mode;
+  const hasLevel = Number(sstvTxLevel.value) > 0;
+  button.textContent = busy ? 'Stop' : 'Start';
+  button.dataset.active = String(busy);
+  button.disabled = busy ? sstvStopRequested || !operator || !isOpen() :
+    !canControl() || !available || sstvTx.image.hidden || !hasLevel;
+  button.title = busy ? t('SSTV-Sendung abbrechen', 'Stop SSTV transmission') :
+    sstvTx.image.hidden ? t('Ein TX-Bild auswählen', 'Choose a TX image') :
+    !hasLevel ? t('Sendepegel einstellen', 'Set the TX level') : t('SSTV über TX2 senden', 'Transmit SSTV over TX2');
+  sstvTxLevel.disabled = busy && !operator;
+  sstvTx.setBusy(busy);
+  $('sstv-mode').disabled = busy || !canControl();
+}
+
+function updateSstvTx(next) {
+  if (!next) return;
+  if (sstvUpload?.sent) sstvUpload = null;
+  if (next.phase !== 'idle') return;
+  sstvStopRequested = false;
+  const previous = state.sstv_tx;
+  if (!next.result || (previous?.phase === 'idle' && previous.result === next.result)) return;
+  const status = {
+    complete: t('SSTV-Bild gesendet.', 'SSTV image sent.'),
+    stopped: t('SSTV-Sendung gestoppt.', 'SSTV transmission stopped.'),
+    retuned: t('SSTV-Sendung wegen TX2-Abstimmung gestoppt.', 'SSTV transmission stopped after TX2 tuning.'),
+    tx2_busy: t('TX2 ist belegt.', 'TX2 is busy.'),
+    upload_error: t('TX-Bild konnte nicht übertragen werden.', 'Could not upload the TX image.'),
+  };
+  notify(status[next.result] || t('SSTV-Sendung unterbrochen.', 'SSTV transmission interrupted.'),
+    !['complete', 'stopped'].includes(next.result));
+}
+
+$('sstv-tx-toggle').onclick = async () => {
+  const button = $('sstv-tx-toggle');
+  if (button.disabled) return;
+  if (button.dataset.active === 'true') {
+    sstvUpload = null;
+    sstvStopRequested = send({type: 'sstv_tx_stop'});
+    renderSstvTxControls();
+    return;
+  }
+  const upload = {socket, session, sent: false};
+  sstvUpload = upload;
+  renderSstvTxControls();
+  try {
+    const canvas = sstvTx.image;
+    const rgba = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    const rgb = new Uint8Array(rgba.length * 3 / 4);
+    for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+      rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
+    }
+    const ack = await checked('sstv_tx_start', {
+      level: Number(sstvTxLevel.value), frequency_hz: state.tx2.frequency_hz,
+    });
+    if (sstvUpload !== upload || socket !== upload.socket || session !== upload.session) return;
+    for (let offset = 0; offset < rgb.length; offset += 1024) {
+      const frame = new Uint8Array(64 + 1024);
+      const header = new DataView(frame.buffer);
+      header.setUint32(0, 0x51545232); // QTR2
+      header.setUint8(4, 1);
+      header.setUint8(5, 23); // SSTV image upload
+      header.setUint16(6, 64);
+      header.setUint32(8, 7); // TX2
+      header.setUint32(12, ack.id);
+      header.setUint32(28, offset);
+      header.setUint32(60, session);
+      frame.set(rgb.subarray(offset, offset + 1024), 64);
+      socket.send(frame);
+    }
+    upload.sent = true;
+  } catch (error) {
+    if (sstvUpload !== upload) return;
+    sstvUpload = null;
+    renderSstvTxControls();
+    report(error);
+  }
+};
+$('sstv-mode').onchange = () => checked('sstv_mode', {mode: $('sstv-mode').value}).catch(error => {
+  $('sstv-mode').value = state.sstv_mode ?? 'auto';
+  report(error);
 });
 const savedZoomView = zoomSources.find(source => String(source) === readPreference('zoomView'));
 selectDecoder(savedZoomView ?? (readPreference('decoderVisible') === 'true' ? decoderSource : 'zoom'));
@@ -755,7 +896,7 @@ window.addEventListener('keydown', event => {
   const enter = event.key === 'Enter' && event.target === $('ptt');
   if (!space && !enter) return;
   if (event.target === $('ptt')) event.preventDefault();
-  if (space && !ptt.spaceEnabled || event.altKey || event.ctrlKey || event.metaKey || document.querySelector('dialog[open]') || event.target?.isContentEditable || event.target?.closest?.('input,textarea,select')) return;
+  if (space && !ptt.spaceEnabled || event.altKey || event.ctrlKey || event.metaKey || document.querySelector('dialog[open]') || event.target?.isContentEditable || event.target?.closest?.('input,textarea,select,#sstv-tx-edit')) return;
   event.preventDefault(); if (!event.repeat) ptt.press(space ? 'Space' : 'Enter');
 });
 window.addEventListener('keyup', event => {
@@ -777,6 +918,7 @@ $('language').value = languagePreference();
 $('language').onchange = () => {
   setLanguagePreference($('language').value);
   txVolumeChanged(false);
+  sstv.render();
   views.forEach(view => view.setLanguage(language));
   selectReceiver(selected); renderFilter(); renderNoiseLevels();
   setFullbandAxis(views[0].axisMode); controls();

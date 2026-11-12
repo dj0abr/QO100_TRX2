@@ -116,7 +116,7 @@
           <footer class="display-footer"><span id="wide-help" class="desktop-note">Links: RX1 + TX · Rechts: nur RX1 · Shift + Rad: TX</span><span id="touch-help" class="mobile-note">Tippen: RX1 + TX</span><span>600 kHz</span></footer>
         </section>
         <section id="zoom-display" class="display zoom-tile" aria-labelledby="zoom-title">
-          <header class="display-heading zoom-heading"><h2 id="zoom-title" class="visually-hidden">RX1-ZOOM</h2><div id="zoom-sources" class="decoder-sources" role="radiogroup" aria-label="Zoom- oder Monitoransicht" data-en-aria-label="Zoom or monitor view"><label><input id="decoder-sourcezoom" type="radio" name="zoom-source" value="zoom" checked><span id="zoom-choice-label">RX1-Zoom</span></label><label><input id="decoder-source3" type="radio" name="zoom-source" value="3"><span data-en="FT8 monitor">FT8-Monitor</span></label><label><input id="decoder-source4" type="radio" name="zoom-source" value="4"><span data-en="PSK monitor">PSK-Monitor</span></label><label><input id="decoder-source5-dx-cluster" type="radio" name="zoom-source" value="5-dx-cluster">DX-Cluster</label><label><input id="decoder-source5-cw-skimmer" type="radio" name="zoom-source" value="5-cw-skimmer">CW-Skimmer</label><label><input id="decoder-source5-bulletin" type="radio" name="zoom-source" value="5-bulletin">QO100-Bulletin</label><label><input id="decoder-source5-diagnostics" type="radio" name="zoom-source" value="5-diagnostics"><span data-en="RX5 diagnostics">RX5-Diagnose</span></label></div><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den ausgewählten Text in diesem Browser löschen" data-en-title="Clear only the selected text in this browser" hidden>Text löschen</button></header>
+          <header class="display-heading zoom-heading"><h2 id="zoom-title" class="visually-hidden">RX1-ZOOM</h2><div id="zoom-sources" class="decoder-sources" role="radiogroup" aria-label="Zoom- oder Monitoransicht" data-en-aria-label="Zoom or monitor view"><label><input id="decoder-sourcezoom" type="radio" name="zoom-source" value="zoom" checked><span id="zoom-choice-label">RX1-Zoom</span></label><label><input id="decoder-source3" type="radio" name="zoom-source" value="3"><span data-en="FT8 monitor">FT8-Monitor</span></label><label><input id="decoder-source4" type="radio" name="zoom-source" value="4"><span data-en="PSK monitor">PSK-Monitor</span></label><label><input id="decoder-source5-dx-cluster" type="radio" name="zoom-source" value="5-dx-cluster">DX-Cluster</label><label><input id="decoder-source5-cw-skimmer" type="radio" name="zoom-source" value="5-cw-skimmer">CW-Skimmer</label><label><input id="decoder-source5-bulletin" type="radio" name="zoom-source" value="5-bulletin">QO100-Bulletin</label><label><input id="decoder-source5-diagnostics" type="radio" name="zoom-source" value="5-diagnostics"><span data-en="RX5 diagnostics">RX5-Diagnose</span></label><label><input id="decoder-sourcesstv" type="radio" name="zoom-source" value="sstv">SSTV</label></div><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den ausgewählten Text in diesem Browser löschen" data-en-title="Clear only the selected text in this browser" hidden>Text löschen</button></header>
           <div id="zoom-output" class="zoom-output" data-view="zoom">
             <div id="zoom-plots" class="zoom-plots" aria-hidden="false">
               <div class="plot-body"><canvas id="zoom-spectrum" class="spectrum" data-spectrum data-tune aria-label="RX1-Zoom-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty">Warte auf RX1-Zoom …</span></div>
@@ -135,6 +135,59 @@
               <div class="mm-status"><strong id="mm-lock" role="status">Warte auf RX5-Daten</strong><span id="mm-warning"></span></div>
               <dl class="mm-values"><div><dt>Pilot</dt><dd id="mm-pilot">—</dd></div><div><dt>AFC</dt><dd id="mm-afc">—</dd></div><div><dt data-en="PLL residual">PLL-Rest</dt><dd id="mm-pll">—</dd></div><div><dt data-en="Audio level">Audiopegel</dt><dd id="mm-level">—</dd></div><div><dt>RX5</dt><dd id="mm-frequency">—</dd></div><div><dt data-en="AFC state">AFC-Zustand</dt><dd id="mm-afc-state">—</dd></div></dl>
               <div class="mm-charts"><div class="mm-chart"><canvas id="mm-spectrum" aria-label="RX5-Audiospektrum von 0 bis 4000 Hz" data-en-aria-label="RX5 audio spectrum from 0 to 4000 Hz"></canvas></div><div class="mm-chart"><canvas id="mm-constellation" aria-label="RX5 8APSK-Konstellation" data-en-aria-label="RX5 8APSK constellation"></canvas></div></div>
+            </section>
+            <section id="sstv-panel" class="sstv-panel" aria-label="SSTV" hidden>
+              <header class="sstv-toolbar">
+                <label><span data-en="Mode">Modus</span>
+                  <select id="sstv-mode" data-control disabled><option value="auto">Auto</option><option value="M1">Martin M1</option><option value="S1">Scottie 1</option></select>
+                </label>
+                <strong id="sstv-frequency">RX2</strong>
+                <div class="sstv-reception">
+                  <strong id="sstv-status" role="status"></strong>
+                  <output id="sstv-line-count" aria-live="off"></output>
+                  <span id="sstv-afc"></span>
+                </div>
+              </header>
+              <div class="sstv-media">
+                <div class="sstv-frame sstv-tx-frame">
+                  <label id="sstv-tx-drop" class="sstv-picture sstv-tx-preview">
+                    <input id="sstv-tx-file" class="visually-hidden" type="file" accept="image/*"
+                      aria-label="TX-Bild auswählen" data-en-aria-label="Choose TX image">
+                    <span id="sstv-tx-hint" data-en="Drop or choose a TX image">TX-Bild ablegen oder auswählen</span>
+                    <canvas id="sstv-tx-image" width="320" height="256" aria-label="Vorschau des TX-Bilds"
+                      data-en-aria-label="TX image preview" hidden></canvas>
+                  </label>
+                  <div class="sstv-tx-controls">
+                    <div class="sstv-tx-level">
+                      <label for="sstv-tx-level" data-en="TX level">Pegel</label>
+                      <output id="sstv-tx-level-value" for="sstv-tx-level" aria-live="off">50 %</output>
+                      <input id="sstv-tx-level" class="range" type="range" min="0" max="100" step="1" value="50">
+                    </div>
+                    <div class="sstv-tx-actions">
+                      <select id="sstv-tx-text-slot" aria-label="Freitext für das TX-Bild"
+                        data-en-aria-label="Free text for the TX image" title="Freitext für das TX-Bild"
+                        data-en-title="Free text for the TX image" disabled>
+                        <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                        <option value="4">4</option><option value="5">5</option>
+                      </select>
+                      <button id="sstv-tx-edit" class="small-button" type="button" aria-haspopup="dialog" disabled>Edit</button>
+                      <button id="sstv-tx-toggle" class="small-button" type="button" disabled>Start</button>
+                    </div>
+                  </div>
+                  <div id="sstv-tx-error" class="sstv-tx-error" role="status"></div>
+                </div>
+                <div class="sstv-frame sstv-rx-preview">
+                  <canvas id="sstv-image" class="sstv-picture" width="320" height="256" aria-label="Empfangenes SSTV-Bild" data-en-aria-label="Received SSTV image"></canvas>
+                  <div class="sstv-waterfall">
+                    <canvas id="sstv-waterfall" width="342" height="48" tabindex="0" aria-keyshortcuts="ArrowUp ArrowDown"
+                      aria-label="RX2-Audio-Wasserfall, Feinabstimmung mit Mausrad oder Pfeiltasten" data-en-aria-label="RX2 audio waterfall, fine tune with mouse wheel or arrow keys"
+                      title="RX2 ±10 Hz per Mausrad · Sync 1200 Hz · Bild 1500–2300 Hz" data-en-title="RX2 ±10 Hz with mouse wheel · Sync 1200 Hz · Image 1500–2300 Hz"></canvas>
+                    <div class="sstv-picture-band" aria-hidden="true"></div>
+                    <div class="sstv-sync-reference" aria-hidden="true"></div>
+                    <div id="sstv-sync-marker" aria-hidden="true" hidden></div>
+                  </div>
+                </div>
+              </div>
             </section>
           </div>
         </section>
@@ -155,6 +208,60 @@
     <footer class="page-footer"><span id="status" role="status" aria-live="polite">Verbindung wird hergestellt …</span><span id="offset-status">RX1 ausgewählt</span></footer>
   </div>
 
+  <dialog id="sstv-tx-editor" class="sstv-editor" aria-labelledby="sstv-editor-title">
+    <div class="dialog-heading">
+      <h2 id="sstv-editor-title" data-en="Edit TX image">TX-Bild bearbeiten</h2>
+      <button class="dialog-close" type="button" data-close="sstv-tx-editor" aria-label="Schließen" data-en-aria-label="Close">×</button>
+    </div>
+    <div class="dialog-scroll sstv-editor-layout">
+      <div>
+        <div class="sstv-editor-stage">
+          <canvas id="sstv-editor-preview" width="320" height="256" aria-label="Vorschau des TX-Bilds" data-en-aria-label="TX image preview"></canvas>
+          <button class="sstv-editor-handle" type="button" aria-label="Eigenes Rufzeichen verschieben" data-en-aria-label="Move own callsign" hidden></button>
+          <button class="sstv-editor-handle" type="button" aria-label="Rufzeichen der Gegenstation verschieben" data-en-aria-label="Move other station's callsign" hidden></button>
+          <button class="sstv-editor-handle" type="button" aria-label="QTH-Locator verschieben" data-en-aria-label="Move QTH locator" hidden></button>
+          <button class="sstv-editor-handle" type="button" aria-label="Freitext verschieben" data-en-aria-label="Move free text" hidden></button>
+        </div>
+        <p class="sstv-editor-help" data-en="Drag the text on the image or move it with the arrow keys.">Ziehe die Texte im Bild oder verschiebe sie mit den Pfeiltasten.</p>
+      </div>
+      <div class="sstv-editor-fields">
+        <div class="sstv-editor-station">
+          <label><span data-en="My callsign">Mein Rufzeichen</span><input type="text" maxlength="24" spellcheck="false" data-sstv-text></label>
+          <label><span data-en="Other station's callsign">Rufzeichen der Gegenstation</span><input type="text" maxlength="24" spellcheck="false" data-sstv-text></label>
+          <label><span>QTH-Locator</span><input type="text" maxlength="16" spellcheck="false" data-sstv-text></label>
+        </div>
+        <fieldset class="sstv-editor-texts">
+          <legend data-en="Free text">Freitext</legend>
+          <label><span>1</span><input type="text" maxlength="100" aria-label="Freitext 1" data-en-aria-label="Free text 1" data-sstv-text></label>
+          <label><span>2</span><input type="text" maxlength="100" aria-label="Freitext 2" data-en-aria-label="Free text 2" data-sstv-text></label>
+          <label><span>3</span><input type="text" maxlength="100" aria-label="Freitext 3" data-en-aria-label="Free text 3" data-sstv-text></label>
+          <label><span>4</span><input type="text" maxlength="100" aria-label="Freitext 4" data-en-aria-label="Free text 4" data-sstv-text></label>
+          <label><span>5</span><input type="text" maxlength="100" aria-label="Freitext 5" data-en-aria-label="Free text 5" data-sstv-text></label>
+        </fieldset>
+        <fieldset class="sstv-editor-format">
+          <legend data-en="Formatting">Formatierung</legend>
+          <label><span data-en="Text layer">Text im Bild</span>
+            <select id="sstv-editor-layer">
+              <option value="0" data-en="My callsign">Mein Rufzeichen</option>
+              <option value="1" data-en="Other station">Gegenstation</option>
+              <option value="2">QTH-Locator</option>
+              <option value="3" data-en="Free text">Freitext</option>
+            </select>
+          </label>
+          <label><span data-en="Font">Schrift</span>
+            <select id="sstv-editor-font">
+              <option value="sans-serif" data-en="Sans serif">Serifenlos</option>
+              <option value="serif" data-en="Serif">Serifen</option>
+              <option value="monospace">Monospace</option>
+            </select>
+          </label>
+          <label><span data-en="Size (px)">Größe (px)</span><input id="sstv-editor-size" type="number" min="10" max="48" step="1"></label>
+          <label class="sstv-editor-bold"><input id="sstv-editor-bold" type="checkbox"><span data-en="Bold">Fett</span></label>
+        </fieldset>
+      </div>
+    </div>
+    <div class="dialog-footer"><button class="primary-button" type="button" data-close="sstv-tx-editor" data-en="Done">Fertig</button></div>
+  </dialog>
   <dialog id="setup-dialog" class="setup-dialog" aria-labelledby="setup-title">
     <div class="dialog-heading"><h2 id="setup-title">Setup</h2><button class="dialog-close" type="button" data-close="setup-dialog" aria-label="Setup schließen">×</button></div>
     <div class="dialog-scroll">

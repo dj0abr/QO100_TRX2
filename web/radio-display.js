@@ -151,7 +151,7 @@ export function peakLabels(peaks, {width, height, scale = 1, measure}) {
   }
   return labels;
 }
-const PLOT_COLORS = {
+export const PLOT_COLORS = {
   blue: {line: '#55d9ee', stops: [[5,15,26],[7,32,52],[15,84,116],[41,159,177],[171,197,145],[249,209,115]]},
   red: {line: '#ff6870', stops: [[20,5,8],[50,7,15],[115,15,28],[185,40,40],[230,120,90],[255,235,220]]},
   green: {line: '#62ef91', stops: [[5,20,12],[7,45,24],[14,100,45],[35,170,80],[150,215,130],[230,255,200]]},

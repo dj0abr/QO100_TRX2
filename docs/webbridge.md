@@ -53,8 +53,8 @@ Startwerte: FT8 **10489540000 Hz**, PSK **10489748821 Hz** (USB-Träger).
 Nur der geänderte Monitoringkanal setzt Filter, Epoche und Samplezähler zurück;
 RX1, RX2 und der andere Monitor laufen weiter. Normales `tune` erlaubt nur RX1/RX2.
 
-Die Zoom-Kachel bietet oben sieben Radiobuttons: **RX1-/RX2-Zoom**, **FT8-Monitor**,
-**PSK-Monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin** und **RX5-Diagnose**.
+Die Zoom-Kachel bietet oben acht Radiobuttons: **RX1-/RX2-Zoom**, **FT8-Monitor**,
+**PSK-Monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin**, **RX5-Diagnose** und **SSTV**.
 Genau eine Ansicht nutzt den gesamten Inhalt der Kachel, einschließlich des sonst
 für Zoom-Spektrum, Frequenzachse und Wasserfall verwendeten Platzes.
 Alle Textströme werden immer empfangen, mit getrennten Puffern und Lesepositionen.
@@ -101,6 +101,41 @@ Ein fehlender Decoder unterbricht weder QSO noch den anderen Decoder. Das Starts
 startet einen während des Betriebs beendeten Decoder nach spätestens etwa zwei Sekunden
 neu. Ein Ende von Backend oder Webadapter beendet weiterhin den Verbund.
 [FT8: Uhrzeit und Tests](ft8-decoder.md), [PSK-Bake](beacon-decoder.md).
+
+### SSTV-Empfang über RX2
+
+**SSTV** zeigt das empfangene Bild mit dem kleinen RX2-Audio-Wasserfall direkt darunter. Die Ansicht
+meldet RX2-Bedarf auch bei ausgeschaltetem Browser-Audio. Ein eigener RX-Thread
+der Webbridge dekodiert Martin M1 und Scottie 1 und liefert die Bildzeilen während
+des Empfangs. Die Ansicht markiert den 1200-Hz-Sync und den Bildbereich von
+1500 bis 2300 Hz. Der AFC-Versatz zeigt, wie weit der empfangene Sync über oder unter 1200 Hz
+liegt. Das **Mausrad über dem Audio-Wasserfall** stimmt RX2 in 10-Hz-Schritten ab.
+Bei fokussiertem Wasserfall geht das auch mit den Pfeiltasten nach oben und unten.
+Das laufende Bild bleibt bei kleinen Korrekturen erhalten. Bei
+kurzem Sync-Verlust nutzt der Decoder zunächst den bisherigen Zeilentakt.
+Bei längeren Aussetzern bleiben Zeilen frei und der Empfang setzt nach
+erneuter Synchronisation an der berechneten Bildposition fort.
+
+Die Moduswahl oberhalb der Bildflächen bietet **Auto**, **Martin M1** und
+**Scottie 1**. Bei Einstieg ohne VIS erscheint der empfangbare Rest
+als Teilbild. Zuschauer können das Live-Bild und den Wasserfall mitverfolgen.
+
+### SSTV-Senden über TX2
+
+Das TX-Bild wird per Drag-and-drop oder Dateiauswahl links abgelegt. Die
+Vorschau zeigt die 320 × 256 Pixel, die der Encoder beim Senden erhält.
+Bei **Auto** sendet TX2 in **Martin M1**. **Scottie 1** lässt sich im Modusfeld
+auswählen. **Edit** öffnet den Bildeditor für beide Rufzeichen, den QTH-Locator
+und fünf Freitexte. Die Auswahl **1–5** bestimmt den Freitext in der Vorschau.
+Den Sendepegel einstellen und **Start** drücken. Der Pegel lässt sich während
+der Sendung ändern. **Stop** bricht den Auftrag ab und leert den TX2-Audiopuffer.
+Während der Sendung bleibt RX2 verfügbar.
+Die TX-Frequenz wird wie gewohnt über TX2 eingestellt. Ein Wechsel der
+TX2-Frequenz beendet eine laufende SSTV-Sendung.
+
+Ein aktiver externer Stream zu `toQO100` belegt TX2. Während SSTV sendet,
+reserviert die Webbridge TX2 exklusiv. Wird der Audioadapter dauerhaft mit
+`--always-active` betrieben, meldet er den TX2-Audioweg durchgehend als belegt.
 
 ### RX5: Multimedia-Bake
 
@@ -455,6 +490,32 @@ Wertebereiche und Settings-Schlüssel entsprechen der [UDP-Referenz](udp-protoco
 `compression_db`/`limiting_db`. Noch nicht geladene Unterobjekte sind leer. Fehlerdetails bei
 Settings stehen im Snapshot (`error`/`hardware_error`). ACK-Status 0 bestätigt die Ausführung;
 Status 2 bei Settings bedeutet Revisionskonflikt: aktuellen Snapshot übernehmen und neu versuchen.
+
+**SSTV-RX.** `sstv_subscribe` mit booleschem `enabled` gilt pro Browser.
+`sstv_mode` mit `mode` (`auto`, `M1`, `S1`) gilt für den gemeinsamen
+Decoder und erfordert Bedienerrechte. `sstv_begin` enthält `session`,
+`image`, `mode` und `partial`. `sstv_end` enthält `session`, `image` und
+`complete`. `sstv_reset` mit `session` signalisiert eine Unterbrechung.
+
+Die SSTV-Binärnachrichten nutzen den QTR2-Header (Stream 2) ausschließlich
+im WebSocket. Typ 21 liefert 960 RGB-Bytes je Zeile. Die Bild-ID steht bei
+Offset 12, der Zeilenindex bei 24, der vorzeichenbehaftete AFC-Versatz in Hz
+bei 44, das Sync-Flag bei 48 und die Breite bei 52. Typ 22 liefert 342
+FFT-Bins ab DC für den Audio-Wasserfall. Die Abtastrate steht bei Offset 40,
+die Binzahl bei 52 und die FFT-Größe bei 56. Jeder Bin ist ein Byte mit dem
+Pegel von −100 bis 0 dBFS, kodiert als 0 bis 100.
+
+**SSTV-TX.** Der Bediener startet den Bild-Upload mit `sstv_tx_start`,
+`id`, `frequency_hz` und `level` (1–100). Nach der Bestätigung folgen
+240 QTR2-Binärnachrichten vom Typ 23 mit Stream 7 und jeweils 1024
+RGB-Bytes. Bei Offset 12 steht die bestätigte Request-ID, bei 24 der
+fortlaufende Byte-Offset und bei 60 die Backend-Session. Sobald das ganze
+Bild angekommen ist, beginnt die TX2-Vorbereitung. `sstv_tx_stop` bricht
+Upload oder Sendung ab. `sstv_tx_level` mit `level` (0–100) ändert den
+Pegel der laufenden Sendung. Bei `sstv_mode=auto` sendet TX2 in Martin M1
+und RX2 erkennt den Modus automatisch. `state.sstv_tx.phase` meldet `idle`, `upload`,
+`preparing` oder `sending`. Das Ergebnis steht bei Abschluss unter
+`state.sstv_tx.result`.
 
 **Binär RX:** FFT Typ 2 der Streams **0/1/2** (Fullband/RX1-Zoom/RX2-Zoom) und Audio Typ 5 der Streams **1/2/4**, unverändert an alle Browser. Die Zooms verwenden jeweils 2400 Bins über 60 kHz aus der gemeinsamen 25-Hz-FFT, zentriert auf ihrer eigenen RX-Frequenz. Das WebGUI zeigt den ausgewählten RX als ±30-kHz-Ausschnitt. **RX2-Audio (Stream 2)** geht zusätzlich an den lokalen Digital-Audioadapter. **RX3/RX4-Audio (Stream 5/6)** geht ausschließlich an die jeweiligen lokalen Decoder. Fragment-, Session- und
 Epochenregeln aus der UDP-Referenz gelten auch hier. **Binär TX:** ausschließlich Typ 8,
