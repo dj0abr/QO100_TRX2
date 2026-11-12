@@ -239,7 +239,7 @@ def main():
                     assert mark[12:] == mark[:-12] and max(mark) >= 11800, 'Missing Mark data/stop bits'
                 rx_before = received_text(viewer)
                 assert request(owner, 'rtty_tx_write', tx_id=tx_id + 1, text='X')['code'] == 'not_ready'
-                assert request(owner, 'rtty_tx_write', tx_id=tx_id, text='Z' * 513)['code'] == 'tx_queue_full'
+                assert request(owner, 'rtty_tx_write', tx_id=tx_id, text='Z' * 513, finish=True)['code'] == 'tx_queue_full'
                 for key, encoded in [('c', 'C'), ('q', 'Q'), (' ', ' '), ('ä', 'AE'), ('1', '1')]:
                     ack = request(owner, 'rtty_tx_write', tx_id=tx_id, text=key)
                     assert ack['status'] == 0 and ack['text'] == encoded
@@ -257,6 +257,18 @@ def main():
                 count = len(tx_packets())
                 time.sleep(.25)
                 assert len(tx_packets()) == count, 'Queued text kept transmitting after PTT release'
+
+                opened = request(owner, 'rtty_tx_open', frequency_hz=frequency, level=50)
+                assert opened['status'] == 0
+                tx_id = opened['id']
+                sending = owner.state(lambda s: s['rtty_tx']['phase'] == 'sending' and s['rtty_tx'].get('tx_id') == tx_id)
+                assert request(owner, 'rtty_tx_write', tx_id=tx_id, text='CQ CQ CQ')['status'] == 0
+                assert request(owner, 'rtty_tx_write', tx_id=tx_id, text=' 73', finish=True)['status'] == 0
+                assert request(owner, 'rtty_tx_write', tx_id=tx_id, text='Z')['code'] == 'not_ready'
+                # The queued message lasts longer than the live lease. Finish drains it without a keepalive.
+                wait(lambda: received_text(viewer).endswith('CQ CQ CQ 73'))
+                owner.state(lambda s: s['rtty_tx'].get('result') == 'complete' and
+                            s['rtty_tx'].get('tx_id') == tx_id and s['tx2']['epoch'] > sending['tx2']['epoch'])
 
                 opened = request(owner, 'rtty_tx_open', frequency_hz=frequency, level=50)
                 assert opened['status'] == 0

@@ -162,7 +162,10 @@ Zeilenumbruch. Ein Backslash direkt am Zeilenende wird beim Einfügen
 als Teil des Zeilenumbruchs behandelt. **SEND** reiht die gewählte Vorlage bei
 laufender RTTY-Sendung in den mit **Start** geöffneten Sendestrom ein.
 Bei freiem TX2 startet **SEND** eine eigene Sendung, die nach dem Text endet.
-**Stop** kann auch diese Sendung abbrechen.
+**Stop** kann auch diese Sendung abbrechen. `§` beendet die Sendung, sobald
+der bereits gepufferte Text und der Text vor `§` übertragen sind. Alles hinter
+`§` entfällt. Das Zeichen funktioniert in Vorlagen und bei der laufenden
+Texteingabe.
 
 ### RX5: Multimedia-Bake
 
@@ -568,7 +571,8 @@ während der Sendung verfügbar.
 Für laufende Eingabe startet `rtty_tx_open` mit `id`, `frequency_hz` und
 `level` den Sendestrom. Eine leere Warteschlange erzeugt LTRS-Diddles.
 Die Start-ID erscheint für beide Sendearten als `tx_id` in `state.rtty_tx`. `rtty_tx_write` nimmt `tx_id` und `text` entgegen. Das ACK
-enthält den normalisierten Text. Die Warteschlange fasst 512 ITA2-Zeichenrahmen
+enthält den normalisierten Text. Mit `finish: true` endet die Sendung nach
+dem Abspielen des angenommenen Textes. Die Warteschlange fasst 512 ITA2-Zeichenrahmen
 einschließlich Umschaltzeichen. Passt der Text nicht vollständig hinein,
 meldet der Adapter `tx_queue_full`. `rtty_tx_keepalive` verlängert mit
 `tx_id` die Sendefreigabe um eine Sekunde. `rtty_tx_stop` mit `tx_id` beendet

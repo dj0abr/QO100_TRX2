@@ -75,7 +75,7 @@ std::vector<std::uint8_t> encode_text(std::string_view text, bool& shifted) {
 struct Encoder::Impl {
     std::deque<std::uint8_t> codes;
     const double amplitude;
-    const bool continuous;
+    bool continuous;
     bool shifted = false, started = false, idle_frame = false;
     unsigned position = 0;
     double phase = 0;
@@ -118,7 +118,7 @@ struct Encoder::Impl {
             bool mark = true;
             if (leader) {
                 --leader;
-            } else if (!codes.empty() || continuous) {
+            } else if (!codes.empty() || continuous || position != 0) {
                 // Once a diddle starts, finish that frame before taking queued text.
                 if (position == 0) {
                     idle_frame = codes.empty();
@@ -157,6 +157,7 @@ Encoder::~Encoder() = default;
 std::optional<std::string> Encoder::enqueue(std::string_view text, std::size_t frame_limit) {
     return impl_->enqueue(text, frame_limit);
 }
+void Encoder::finish() { impl_->continuous = false; }
 std::size_t Encoder::read(std::int16_t* pcm, std::size_t capacity) {
     return impl_->read(pcm, capacity);
 }

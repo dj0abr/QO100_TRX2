@@ -145,7 +145,7 @@ class Bridge {
     void sstv_tx_chunk(const Bytes& bytes);
     void begin_rtty_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level, const std::string& message);
     void open_rtty_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level);
-    void write_rtty_tx(uint64_t client, const Json& id, uint32_t tx_id, const std::string& message);
+    void write_rtty_tx(uint64_t client, const Json& id, uint32_t tx_id, const std::string& message, bool finish);
     bool rtty_tx_matches(uint32_t id) const;
     void keep_rtty_tx(uint32_t id);
     void start_tx2(Tx2Mode mode, Tx2Source source, uint64_t frequency, unsigned level,

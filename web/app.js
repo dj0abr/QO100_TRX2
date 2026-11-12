@@ -487,9 +487,14 @@ function beginRttyTx(text) {
     renderRttyTxControls();
   });
 }
-function writeRttyText(text) {
+function rttyEndMarker(text) {
+  const index = text.indexOf('§');
+  return index === -1 ? {text, finish: false} : {text: text.slice(0, index), finish: true};
+}
+function writeRttyText(input) {
   const tx = rttyTx;
-  if (!tx?.live || tx.stopping) return;
+  if (!tx?.live || tx.stopping || tx.finishing) return;
+  const {text, finish} = rttyEndMarker(input);
   if (text.length > rttyInputLimit) {
     rtty.error.textContent = t('RTTY-Text ist zu lang für die Sendewarteschlange.', 'RTTY text exceeds the send queue.');
     return;
@@ -499,12 +504,24 @@ function writeRttyText(text) {
     rtty.error.textContent = t('RTTY wegen Verbindungsrückstau beendet.', 'RTTY stopped due to connection backlog.');
     return;
   }
-  checked('rtty_tx_write', {tx_id: tx.id, text}).then(answer => {
+  if (finish) {
+    tx.finishing = true;
+    rtty.endTx();
+    renderRttyTxControls();
+  }
+  checked('rtty_tx_write', {tx_id: tx.id, text, finish}).then(answer => {
     if (rttyTx !== tx || tx.stopping) return;
+    if (finish) tx.live = false;
     rtty.appendTx(answer.text);
     rtty.error.textContent = '';
   }).catch(error => {
-    if (rttyTx === tx && !tx.stopping) rtty.error.textContent = error.message;
+    if (rttyTx !== tx || tx.stopping) return;
+    if (finish) {
+      tx.finishing = false;
+      rtty.tx.readOnly = false;
+      renderRttyTxControls();
+    }
+    rtty.error.textContent = error.message;
   });
 }
 function renderRttyTxControls() {
@@ -515,8 +532,9 @@ function renderRttyTxControls() {
   button.disabled = active ? !!rttyTx?.stopping || !operator || !isOpen() : !canStart;
   button.title = active ? t('RTTY-Sendung abbrechen', 'Stop RTTY transmission') :
     t('RTTY über TX2 senden', 'Transmit RTTY over TX2');
-  const canQueue = rttyTx?.live && !rttyTx.stopping && canControl();
-  $('rtty-preset-send').disabled = !(canQueue || canStart) || !rttyPresets.text.trim();
+  const {text, finish} = rttyEndMarker(rttyPresets.text);
+  const canQueue = rttyTx?.live && !rttyTx.stopping && !rttyTx.finishing && canControl();
+  $('rtty-preset-send').disabled = !(canQueue && (finish || text.trim()) || canStart && text.trim());
 }
 function updateRttyTx() {
   const tx = state.rtty_tx;
@@ -988,13 +1006,12 @@ $('rtty-tx-toggle').onclick = () => {
   else beginRttyTx();
 };
 $('rtty-preset-send').onclick = () => {
-  const text = rttyPresets.text;
-  if (!text.trim()) return;
   if (rttyTx?.live) {
-    writeRttyText(text);
-    if (rttyTx?.live && !rttyTx.stopping) rtty.tx.focus({preventScroll: true});
+    writeRttyText(rttyPresets.text);
+    if (!rtty.tx.readOnly) rtty.tx.focus({preventScroll: true});
   } else {
-    beginRttyTx(text);
+    const {text} = rttyEndMarker(rttyPresets.text);
+    if (text.trim()) beginRttyTx(text);
   }
 };
 const rttyLevel = $('rtty-tx-level');

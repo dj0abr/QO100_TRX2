@@ -448,7 +448,7 @@ def main():
             assert execute('return document.querySelectorAll("#rtty-preset-editor textarea").length===5')
             changed('#rtty-own-call','dl0abc')
             changed('#rtty-other-call','dk1xyz')
-            changed('#rtty-preset-text-2','$ DE&%')
+            changed('#rtty-preset-text-2','$ DE&%§X')
             click('#rtty-preset-editor .primary-button')
             changed('#rtty-preset-slot',2)
             wait(lambda:execute('return !document.getElementById("rtty-preset-send").disabled'))

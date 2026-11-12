@@ -510,7 +510,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             return;
         }
         if(type=="rtty_tx_write") {
-            write_rtty_tx(client,id,integer(j,"tx_id"),j.at("text").get<std::string>());
+            write_rtty_tx(client,id,integer(j,"tx_id"),j.at("text").get<std::string>(),j.value("finish",false));
             return;
         }
         if(type=="rtty_tx_start") {

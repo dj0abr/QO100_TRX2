@@ -30,6 +30,9 @@ public:
     // A full queue returns nullopt. The limit counts pending ITA2 frames.
     std::optional<std::string> enqueue(std::string_view text, std::size_t frame_limit);
 
+    // Finish the current frame and queued text, then end the stream.
+    void finish();
+
     // Write up to capacity samples. A short read marks the end of the message.
     std::size_t read(std::int16_t* pcm, std::size_t capacity);
 

@@ -133,8 +133,14 @@ void test_live_encoder() {
     read(4 * frame);
     require(encoder.enqueue(u8" ä", 5) == " AE", "Live encoder failed to normalize input");
     require(encoder.enqueue("\n", 5) == "\n", "Live encoder rejected newline");
-    read(6 * frame);
-    require(text == "123 AE\r\n", "Live encoder produced incorrect text across diddles");
+    encoder.finish();
+    Pcm tail(8 * frame);
+    const auto samples = encoder.read(tail.data(), tail.size());
+    require(samples > 0 && samples < tail.size(), "Finished live encoder did not reach EOF");
+    tail.resize(samples);
+    feed(decoder, tail);
+    require(text == "123 AE\r\n", "Finish did not transmit all queued characters");
+    require(encoder.read(tail.data(), tail.size()) == 0, "Finished live encoder resumed sending");
 }
 
 struct Signal {

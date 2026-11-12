@@ -91,7 +91,7 @@ void Bridge::keep_rtty_tx(uint32_t id) {
     if (until && now < *until) until = now + rtty_ptt_lease;
 }
 
-void Bridge::write_rtty_tx(uint64_t client, const Json& id, uint32_t tx_id, const std::string& message) {
+void Bridge::write_rtty_tx(uint64_t client, const Json& id, uint32_t tx_id, const std::string& message, bool finish) {
     if (!rtty_tx_matches(tx_id) || !tx2_job_->rtty->ptt_until ||
         Clock::now() >= *tx2_job_->rtty->ptt_until) {
         error(client, id, "not_ready", "RTTY PTT is not active");
@@ -106,6 +106,10 @@ void Bridge::write_rtty_tx(uint64_t client, const Json& id, uint32_t tx_id, cons
     if (!normalized) {
         error(client, id, "tx_queue_full", "RTTY send queue is full");
         return;
+    }
+    if (finish) {
+        encoder.finish();
+        tx2_job_->rtty->ptt_until.reset();
     }
     text(client, {{"type", "ack"}, {"command", "rtty_tx_write"}, {"id", id},
                   {"status", 0}, {"text", *normalized}});
