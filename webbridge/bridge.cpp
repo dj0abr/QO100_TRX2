@@ -34,7 +34,7 @@ std::shared_ptr<const Bytes> encoded(const Json& j) {
     const auto s=j.dump();return std::make_shared<const Bytes>(s.begin(),s.end());
 }
 }
-Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp_(io),digital_(io),mm_audio_(io),timer_(io),sstv_tx_timer_(io) {
+Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp_(io),digital_(io),mm_audio_(io),timer_(io),tx2_timer_(io) {
     udp_.open(net::ip::udp::v4());
     udp_.set_option(net::socket_base::receive_buffer_size(4*1024*1024));
     udp_.bind({net::ip::make_address_v4("127.0.0.1"),0});
@@ -82,7 +82,8 @@ Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp
         digital_.connect({net::ip::make_address_v4("127.0.0.1"),config_.digital_audio_port});
     }
     state_={{"type","state"},{"software_version",QO100_SOFTWARE_VERSION},{"session",0},{"ready",false},{"settings",Json::object()},
-        {"revision","0"},{"flags",0},{"sstv_mode","auto"},{"sstv_tx",{{"phase","idle"}}},{"rx",Json::object()},{"tx",Json::object()},
+        {"revision","0"},{"flags",0},{"sstv_mode","auto"},{"sstv_tx",{{"phase","idle"}}},
+        {"rtty_reverse",false},{"rtty_tx",{{"phase","idle"}}},{"rx",Json::object()},{"tx",Json::object()},
         {"filter",Json::object()},{"compressor",Json::object()},{"nr",Json::object()},{"loop",Json::object()},{"tx2",Json::object()}};
 }
 void Bridge::start() {receive();if(digital_.is_open()) receive_digital();for(size_t i=0;i<decoders_.size();++i) if(decoders_[i]) receive_decoder(i);tick();}
@@ -101,13 +102,13 @@ void Bridge::receive_digital() {
                     // Adapter restart: establish a new epoch before accepting index zero.
                     if(digital_nonce_!=get(p,16,8)) {
                         digital_nonce_=get(p,16,8);digital_usage_known_=false;digital_seen_=Clock::now();next_activity_={};
-                        if (!sstv_holds_tx2()) reset_tx2_audio(state_["tx2"]["frequency_hz"].get<uint64_t>());
+                        if (!tx2_holds_audio()) reset_tx2_audio(state_["tx2"]["frequency_hz"].get<uint64_t>());
                     }
                 } else if(p[5]==20 && n==64 && get(p,16,8)==digital_nonce_ && digital_nonce_ &&
                     get(p,60,4)==session_ && !get(p,12,4) && !get(p,24,8) && !get(p,32,8) &&
                     !get(p,40,8) && get(p,48,4)<=3 && !get(p,52,8)) {
                     digital_usage_known_=true;digital_usage_=unsigned(get(p,48,4));digital_seen_=Clock::now();next_activity_={};
-                } else if(p[5]==8 && n==544 && !sstv_holds_tx2() && !(state_["flags"].get<unsigned>()&6) && state_["loop"].value("mode",0)==0 &&
+                } else if(p[5]==8 && n==544 && !tx2_holds_audio() && !(state_["flags"].get<unsigned>()&6) && state_["loop"].value("mode",0)==0 &&
                     get(p,60,4)==session_ && get(p,12,4)==state_["tx2"]["epoch"].get<uint32_t>() &&
                     get(p,32,8)==state_["tx2"]["frequency_hz"].get<uint64_t>() && !get(p,16,8) && !get(p,44,8) &&
                     get(p,40,4)==12000 && get(p,52,2)==240 && get(p,54,2)==2 && get(p,56,4)==240 &&
@@ -125,8 +126,8 @@ void Bridge::update_digital_activity() {
     const bool live=digital_nonce_ && (!digital_usage_known_ || now-digital_seen_<std::chrono::seconds(2));
     // Older adapters have no usage report and retain their always-active path.
     unsigned flags=live?(digital_usage_known_?digital_usage_:3u):0;
-    if(sstv_active_) flags|=1;
-    if(sstv_holds_tx2()) flags|=3;
+    if(sstv_active_ || rtty_active_) flags|=1;
+    if(tx2_holds_audio()) flags|=3;
     for(const auto& item:clients_)if(!item.second.rx2_audio.has_value() || *item.second.rx2_audio)flags|=1;
     if(flags!=last_activity_ || now>=next_activity_) {
         auto p=header(20,qo100::tx2_stream,++activity_sequence_,session_);put(p,48,flags,4);
@@ -139,6 +140,46 @@ void Bridge::send_decoder(size_t index,Bytes p) {
     // UDP delivery never waits for a decoder; RX1/HTTP/WS continue if it is absent.
     decoders_[index]->socket.async_send(net::buffer(*data),[data](auto,size_t){});
 }
+void Bridge::receive_rx2(const Bytes& packet) {
+    namespace audio = qo100::audio;
+    const auto& rx = state_["rx"];
+    if (!rx.contains("2") || (state_["flags"].get<unsigned>() & 6)) return;
+    const auto epoch = std::uint32_t(get(packet, 12, 4));
+    if (epoch != rx.at("2").at("epoch").get<uint32_t>()) return;
+    const auto index = get(packet, 24, 8);
+    if (index % audio::block_size || index > UINT64_MAX - audio::block_size) return;
+    audio::RxBlock block{epoch, index, get(packet, 32, 8), {}};
+    for (std::size_t i = 0; i < block.pcm.size(); ++i) {
+        const auto raw = get(packet, 64 + 2 * i, 2);
+        block.pcm[i] = static_cast<std::int16_t>(int(raw) - (raw >= 32768 ? 65536 : 0));
+    }
+    if (sstv_active_ && sstv_receiver_.push(block)) last_sstv_audio_ = Clock::now();
+    if (rtty_active_ && block.frequency_hz == rx.at("2").at("frequency_hz").get<uint64_t>()) {
+        rtty_receiver_.push(std::move(block));
+        last_rtty_audio_ = Clock::now();
+    }
+}
+
+void Bridge::send_rx2(std::shared_ptr<const Bytes> bytes, bool binary, bool Client::*subscribed) {
+    const auto copy = clients_;
+    for (const auto& [id, client] : copy) {
+        if (client.*subscribed) client.peer->send(bytes, binary);
+    }
+}
+
+void Bridge::send_rx2_spectrum(uint8_t type, const qo100::audio::Spectrum& spectrum, bool Client::*subscribed) {
+    auto packet = header(type, 2, 0, session_);
+    put(packet, 40, qo100::audio::sample_rate, 4);
+    put(packet, 52, spectrum.levels.size(), 2);
+    put(packet, 56, qo100::audio::spectrum_fft_size, 4);
+    packet.insert(packet.end(), spectrum.levels.begin(), spectrum.levels.end());
+    send_rx2(std::make_shared<const Bytes>(std::move(packet)), true, subscribed);
+}
+
+void Bridge::send_rx2(const Json& message, bool Client::*subscribed) {
+    send_rx2(encoded(message), false, subscribed);
+}
+
 void Bridge::receive_decoder(size_t index) {
     auto& link=*decoders_[index];
     link.socket.async_receive(net::buffer(link.buffer),[this,index](auto ec,size_t n) {
@@ -200,6 +241,7 @@ void Bridge::leave(uint64_t id) {
     const bool owned=id && id==owner_;clients_.erase(id);
     update_mm_subscription();
     update_sstv_subscription();
+    update_rtty_subscription();
     if(owned) revoke("disconnected");else roles();
 }
 void Bridge::update_mm_subscription() {
@@ -207,7 +249,7 @@ void Bridge::update_mm_subscription() {
         [](const auto& item){return item.second.mm_diagnostics;}));
 }
 void Bridge::revoke(const std::string& reason) {
-    end_sstv_tx("disconnected");
+    end_tx2("disconnected");
     const auto old=owner_;owner_=0;
     for(auto it=pending_.begin();it!=pending_.end();) {
         if(it->second.client==old && old) it=pending_.erase(it);else ++it;
@@ -243,8 +285,8 @@ void Bridge::safety() {
     if(session_) {auto p=header(13);put(p,54,1,2);control(std::move(p),14,0,nullptr,"",true);}
 }
 void Bridge::reset_backend() {
-    end_sstv_tx("backend_reset", false);
-    sstv_tx_releasing_ = false;
+    end_tx2("backend_reset", false);
+    tx2_releasing_epoch_.reset();
     last_tx2_state_ = {};
     digital_tx_audio_at_ = {};
     for(const auto& q:pending_) if(q.second.client) error(q.second.client,q.second.id,"backend_reset","Backend session lost");
@@ -254,6 +296,7 @@ void Bridge::reset_backend() {
     for(const auto& key:{"rx","tx","tx2","filter","compressor","nr","loop"}) state_[key]=Json::object();
     next_settings_={};next_activity_={};last_activity_=UINT32_MAX;dirty_=true;
     reset_sstv();
+    reset_rtty();
 }
 void Bridge::bootstrap() {
     initialized_=true;
@@ -324,7 +367,7 @@ void Bridge::packet(Bytes p) {
             get(p,40,4)!=12000 || get(p,52,2)!=240 || get(p,54,2)!=2 || get(p,56,4)!=240)) return;
         if(type==5 && stream==2) {
             send_digital(p);
-            if(sstv_active_) receive_sstv(p);
+            if(sstv_active_ || rtty_active_) receive_rx2(p);
         }
         if(type==5 && stream==qo100::rx5_stream) {
             if(mm_audio_.is_open()) {
@@ -376,10 +419,14 @@ void Bridge::packet(Bytes p) {
     if(barrier_ && off_ack_ && normal_ack_ && initialized_) {barrier_=false;dirty_=true;}
     if(type==7 && stream==qo100::tx2_stream) {
         last_tx2_state_ = Clock::now();
-        sstv_tx_releasing_ = false;
+        if(tx2_releasing_epoch_) {
+            if(get(p,24,8)!=*tx2_releasing_epoch_) tx2_releasing_epoch_.reset();
+            else if(get(p,54,2) && !pending_.count(tx2_key))
+                reset_tx2_audio(get(p,32,8)); // A rejected retune may supersede the FIFO reset.
+        }
         auto status=p;
         put(status,16,digital_nonce_,8); // Acknowledge the adapter's fresh-epoch handshake.
-        if(sstv_holds_tx2() || !ready() || (state_["flags"].get<unsigned>()&6) || state_["loop"].value("mode",0)!=0) put(status,48,0,4);
+        if(tx2_holds_audio() || !ready() || (state_["flags"].get<unsigned>()&6) || state_["loop"].value("mode",0)!=0) put(status,48,0,4);
         send_digital(std::move(status));
     }
     if(type==4 || type==7 || type==14) {
@@ -426,10 +473,22 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             if(!j.at("enabled").is_boolean()) throw std::runtime_error("Expected SSTV enabled boolean");
             subscribe_sstv(client,j["enabled"].get<bool>());return;
         }
+        if(type=="rtty_subscribe") {
+            if(!j.at("enabled").is_boolean()) throw std::runtime_error("Expected RTTY enabled boolean");
+            subscribe_rtty(client,j["enabled"].get<bool>());return;
+        }
         if(client!=owner_) {error(client,id,"read_only","Only the operator can send commands");return;}
         if(type=="activity") {clients_.at(client).activity=Clock::now();return;}
         if(type=="ptt_keepalive") {if(ptt_requested_) ptt_until_=Clock::now()+std::chrono::milliseconds(750);return;}
-        if(type=="sstv_tx_stop") {end_sstv_tx("stopped");return;}
+        if(type=="rtty_tx_keepalive") {keep_rtty_tx(integer(j,"tx_id"));return;}
+        if(type=="sstv_tx_stop" || type=="rtty_tx_stop") {
+            const auto mode=type=="sstv_tx_stop"?Tx2Mode::sstv:Tx2Mode::rtty;
+            const bool matches=mode!=Tx2Mode::rtty || !j.contains("tx_id") || rtty_tx_matches(integer(j,"tx_id"));
+            if(matches && tx2_active(mode)) end_tx2("stopped");
+            if(mode==Tx2Mode::rtty && !id.is_null())
+                text(client,{{"type","ack"},{"command",type},{"id",id},{"status",0}});
+            return;
+        }
         if(!ready()) {error(client,id,"not_ready","Waiting for backend and confirmed safe state");return;}
         if(type=="sstv_tx_start") {
             begin_sstv_tx(client, integer(j,"id"), integer(j,"frequency_hz",6000000000ULL), integer(j,"level",100));
@@ -437,10 +496,35 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
         }
         if(type=="sstv_tx_level") {
             const auto level=integer(j,"level",100);
-            if(sstv_tx_) sstv_tx_->level=level;
+            if(sstv_upload_) sstv_upload_->level=level;
+            if(tx2_job_ && tx2_job_->mode==Tx2Mode::sstv) tx2_job_->level=level;
             return;
         }
         if(type=="sstv_mode") {set_sstv_mode(client,j,id);return;}
+        if(type=="rtty_reverse") {
+            if(!j.at("enabled").is_boolean()) throw std::runtime_error("Expected RTTY reverse boolean");
+            set_rtty_reverse(client,id,j["enabled"].get<bool>());return;
+        }
+        if(type=="rtty_tx_open") {
+            open_rtty_tx(client,integer(j,"id"),integer(j,"frequency_hz",6000000000ULL),integer(j,"level",100));
+            return;
+        }
+        if(type=="rtty_tx_write") {
+            write_rtty_tx(client,id,integer(j,"tx_id"),j.at("text").get<std::string>());
+            return;
+        }
+        if(type=="rtty_tx_start") {
+            begin_rtty_tx(client,integer(j,"id"),integer(j,"frequency_hz",6000000000ULL),integer(j,"level",100),
+                j.at("text").get<std::string>());
+            return;
+        }
+        if(type=="rtty_tx_level") {
+            const auto level=integer(j,"level",100);
+            if(tx2_active(Tx2Mode::rtty) && (!j.contains("tx_id") || rtty_tx_matches(integer(j,"tx_id"))))
+                tx2_job_->level=level;
+            if(!id.is_null()) text(client,{{"type","ack"},{"command",type},{"id",id},{"status",0}});
+            return;
+        }
         const bool query=j.value("query",false);Bytes p;uint8_t reply=0;
         if(type=="tune") {
             const auto stream=integer(j,"stream",2);if(!stream) throw std::runtime_error("RX stream must be 1 or 2");
@@ -451,7 +535,8 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             if(channel==2) {
                 if(j.value("ptt",false)) throw std::runtime_error("TX2 uses external audio, no browser PTT");
                 const auto hz=integer(j,"frequency_hz",6000000000ULL);
-                if(sstv_tx_ && hz!=sstv_tx_->frequency) end_sstv_tx("retuned");
+                if((sstv_upload_ && hz!=sstv_upload_->frequency) || (tx2_job_ && hz!=tx2_job_->frequency))
+                    end_tx2("retuned");
                 p=header(6,qo100::tx2_stream);put(p,32,hz,8);
                 control(std::move(p),7,client,id,type);return;
             }
@@ -510,7 +595,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             if(!query && reply!=14) put(p,40,12000,4);
         }
         // Changing a test loop invalidates any outstanding transmit permission.
-        if(type=="loop" && !query) {end_sstv_tx("unavailable");tx_off();}
+        if(type=="loop" && !query) {end_tx2("unavailable");tx_off();}
         control(std::move(p),reply,client,id,type);
     } catch(const std::exception& e) {error(client,id,"invalid",e.what());}
 }
@@ -553,6 +638,7 @@ void Bridge::tick() {
     }
     if(dirty_) {state_["ready"]=ready();broadcast(state_);dirty_=false;}
     publish_sstv(now);
+    publish_rtty(now);
     timer_.expires_after(std::chrono::milliseconds(100));timer_.async_wait([this](auto ec){if(!ec) tick();});
 }
 void Bridge::stop() {

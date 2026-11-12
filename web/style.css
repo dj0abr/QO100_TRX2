@@ -639,6 +639,45 @@ html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text
 @media (max-width: 800px) { .mm-values { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 
+.rtty-panel { position: absolute; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 6px; padding: 8px 10px; background: var(--monitor-bg); font-size: 11px; }
+.rtty-toolbar, .rtty-toolbar label { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.rtty-toolbar input[type="checkbox"] { margin: 0; accent-color: var(--rx2); }
+#rtty-tx-level { --range-color: var(--tx); width: 90px; margin: 0; }
+.rtty-fields { display: grid; grid-template-rows: auto minmax(0, 1fr) auto minmax(26px, .42fr) auto; gap: 4px; min-height: 0; }
+.rtty-fields textarea { width: 100%; min-height: 0; resize: none; padding: 3px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--monitor-bg); color: var(--text); font: 13px/1.35 var(--mono); }
+.rtty-fields textarea:focus-visible { outline: 2px solid var(--rx2); outline-offset: -2px; }
+#rtty-tx-text:not([readonly]) { border-color: var(--ptt-border); }
+#rtty-error { margin: 0; color: var(--error); }
+#rtty-error:empty { display: none; }
+.rtty-bottom { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 8px; }
+.rtty-preset-controls, .rtty-send-controls { display: flex; align-items: center; gap: 5px; }
+.rtty-preset-controls { flex-wrap: wrap; }
+#rtty-tx-toggle { min-width: 44px; }
+#rtty-tx-toggle[data-active="true"] { background: var(--ptt-bg); border-color: var(--ptt-border); color: var(--danger-text); }
+.rtty-preset-controls .small-button { padding: 4px 7px; }
+.rtty-preset-controls select { border: 1px solid var(--button-border); border-radius: 4px; background: var(--button-bg); color: var(--text); font: inherit; padding: 4px 2px; }
+.rtty-preset-editor { width: min(540px, calc(100% - 24px)); max-height: calc(100dvh - 24px); }
+.rtty-preset-editor[open] { display: flex; flex-direction: column; }
+.rtty-preset-callsigns { margin-top: 8px; }
+#rtty-preset-help { margin: 12px 0 8px; color: var(--text-secondary); font-size: 12px; }
+.rtty-preset-texts { display: grid; gap: 7px; }
+.rtty-preset-texts label { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 6px; align-items: start; font-size: 12px; }
+.rtty-preset-texts label span { padding-top: 5px; }
+.rtty-preset-texts textarea { width: 100%; resize: vertical; border: 1px solid var(--input-border); border-radius: 4px; padding: 5px 7px; background: var(--input-bg); color: var(--text); font: 12px/1.4 var(--mono); }
+.rtty-waterfall { position: relative; container-type: inline-size; height: 40px; overflow: hidden; background: #080f16; border-radius: 4px; }
+.rtty-waterfall canvas { display: block; width: 100%; height: 100%; }
+.rtty-waterfall canvas:focus-visible { outline: 2px solid var(--rx2); outline-offset: -2px; }
+.rtty-waterfall[data-tunable="true"] canvas { cursor: ns-resize; }
+.rtty-tone { position: absolute; inset: 0; pointer-events: none; color: #8ee9ff; }
+.rtty-tone::before { content: ""; position: absolute; inset-block: 0; left: var(--tone-position); border-inline-start: 1px dashed; }
+.rtty-tone[data-kind="Mark"] { color: #ffe08e; }
+.rtty-tone span { position: absolute; top: 1px; left: calc(var(--tone-position) + 3px); padding: 0 3px; background: #080f16db; white-space: nowrap; font: 9px/1.4 var(--mono); }
+.rtty-tone:nth-of-type(1) span { left: auto; right: calc(100% - var(--tone-position) + 3px); }
+@container (max-width: 180px) {
+  .rtty-tone span { left: auto; right: 1px; padding: 0 2px; font-size: 8px; }
+  .rtty-tone:nth-of-type(1) span { left: 1px; right: auto; }
+}
+
 .sstv-panel { position: absolute; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 6px; padding: 8px 10px; background: var(--monitor-bg); font-size: 11px; }
 .sstv-toolbar, .sstv-toolbar label, .sstv-reception { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 .sstv-toolbar select, .sstv-tx-actions select { background: var(--button-bg); border: 1px solid var(--button-border); border-radius: 4px; color: var(--text); font: inherit; padding: 3px 5px; }

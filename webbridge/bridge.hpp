@@ -2,6 +2,8 @@
 #include "wire.hpp"
 #include "mm_monitor.hpp"
 #include "qo100/channels.hpp"
+#include "rtty_rx.hpp"
+#include "rtty/rtty.hpp"
 #include "sstv/receiver.hpp"
 #include "sstv/sender.hpp"
 #include <boost/asio.hpp>
@@ -11,6 +13,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <variant>
 
 namespace bridge {
 namespace net=boost::asio;
@@ -32,7 +35,7 @@ struct Peer {
     virtual void close(const std::string& reason)=0;
 };
 class Bridge {
-    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;bool mm_diagnostics=false;std::optional<bool> rx2_audio{};bool sstv_rx=false;};
+    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;bool mm_diagnostics=false;std::optional<bool> rx2_audio{};bool sstv_rx=false, rtty_rx=false;};
     struct Pending {
         Bytes packet;uint8_t reply;uint64_t client=0;Json id;std::string command;
         Clock::time_point sent{},started=Clock::now();bool safety=false;
@@ -47,6 +50,9 @@ class Bridge {
     std::optional<qo100::sstv::Frame> sstv_frame_;
     std::uint32_t sstv_image_id_ = 0;
     Clock::time_point last_sstv_audio_{};
+    RttyReceiver rtty_receiver_;
+    bool rtty_active_ = false, rtty_reverse_ = false;
+    Clock::time_point last_rtty_audio_{};
     std::array<uint8_t,1201> digital_buffer_{};
     struct DecoderLink {
         net::ip::udp::socket socket;
@@ -54,23 +60,45 @@ class Bridge {
         explicit DecoderLink(net::io_context& io):socket(io) {}
     };
     std::array<std::unique_ptr<DecoderLink>,2> decoders_;
-    struct SstvTx {
-        enum class Phase { upload, preparing, sending, draining };
-        Phase phase = Phase::upload;
-        uint32_t upload_id = 0, epoch = 0;
-        uint64_t frequency = 0, sample_index = 0;
-        unsigned level = 0;
-        qo100::sstv::Mode mode = qo100::sstv::Mode::martin_m1;
+    enum class Tx2Mode { sstv, rtty };
+    static constexpr auto tx2_key = (uint64_t(6) << 32) | qo100::tx2_stream;
+    struct SstvUpload {
+        uint32_t id;
+        uint64_t frequency;
+        unsigned level;
+        qo100::sstv::Mode mode;
         std::unique_ptr<qo100::sstv::Image> image;
-        std::unique_ptr<qo100::sstv::Sender> sender;
         size_t uploaded = 0;
-        bool epoch_requested = false;
-        Clock::time_point deadline{}, next_audio{};
+        Clock::time_point deadline;
     };
-    std::optional<SstvTx> sstv_tx_;
-    bool sstv_tx_releasing_ = false;
+    using Tx2Source = std::variant<std::unique_ptr<qo100::sstv::Sender>,
+                                   std::unique_ptr<qo100::rtty::Encoder>>;
+    struct RttyTx {
+        uint32_t id;
+        std::optional<Clock::time_point> ptt_until{};
+    };
+    struct Tx2Job {
+        enum class Phase { preparing, sending, draining };
+        Tx2Mode mode;
+        Tx2Source source;
+        uint64_t frequency;
+        unsigned level;
+        Clock::time_point deadline;
+        std::optional<RttyTx> rtty{};
+        Phase phase = Phase::preparing;
+        uint32_t epoch = 0;
+        uint64_t sample_index = 0;
+        bool epoch_requested = false;
+        Clock::time_point next_audio{};
+        unsigned tail = 0;
+        std::optional<double> output_gain{};
+    };
+    std::optional<SstvUpload> sstv_upload_;
+    std::optional<Tx2Job> tx2_job_;
+    std::optional<uint32_t> tx2_releasing_epoch_;
+    uint64_t tx2_schedule_ = 0;
     Clock::time_point last_tx2_state_{};
-    net::steady_timer timer_, sstv_tx_timer_;
+    net::steady_timer timer_, tx2_timer_;
     std::array<uint8_t,65536> receive_buffer_{};
     std::map<uint64_t,Client> clients_;
     std::map<uint64_t,uint32_t> counters_;
@@ -95,21 +123,40 @@ class Bridge {
     void subscribe_sstv(uint64_t client, bool enabled);
     void update_sstv_subscription();
     void reset_sstv();
-    void receive_sstv(const Bytes& packet);
+    void receive_rx2(const Bytes& packet);
     void publish_sstv(Clock::time_point now);
-    void send_sstv(std::shared_ptr<const Bytes> bytes, bool binary);
+    void send_rx2(std::shared_ptr<const Bytes> bytes, bool binary, bool Client::*subscribed);
+    void send_rx2(const Json& message, bool Client::*subscribed);
+    void send_rx2_spectrum(uint8_t type, const qo100::audio::Spectrum& spectrum, bool Client::*subscribed);
     void set_sstv_mode(uint64_t client, const Json& request, const Json& id);
     Json sstv_begin() const;
+    void subscribe_rtty(uint64_t client, bool enabled);
+    void update_rtty_subscription();
+    void reset_rtty();
+    void set_rtty_reverse(uint64_t client, const Json& id, bool enabled);
+    void publish_rtty(Clock::time_point now);
+
     bool digital_tx_busy() const;
-    bool sstv_holds_tx2() const;
+    bool tx2_holds_audio() const;
+    bool tx2_active(Tx2Mode mode) const;
+    bool can_start_tx2(uint64_t client, uint32_t id, uint64_t frequency, unsigned level);
+    bool tx2_ready(uint64_t frequency, Clock::time_point now) const;
     void begin_sstv_tx(uint64_t client, uint32_t upload_id, uint64_t frequency, unsigned level);
     void sstv_tx_chunk(const Bytes& bytes);
-    void schedule_sstv_tx(Clock::time_point when);
-    void step_sstv_tx();
-    void end_sstv_tx(const char* result, bool flush = true);
+    void begin_rtty_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level, const std::string& message);
+    void open_rtty_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level);
+    void write_rtty_tx(uint64_t client, const Json& id, uint32_t tx_id, const std::string& message);
+    bool rtty_tx_matches(uint32_t id) const;
+    void keep_rtty_tx(uint32_t id);
+    void start_tx2(Tx2Mode mode, Tx2Source source, uint64_t frequency, unsigned level,
+                   std::optional<RttyTx> rtty = {});
+    void schedule_tx2(Clock::time_point when);
+    void step_tx2();
+    void end_tx2(const char* result, bool flush = true);
     void reset_tx2_audio(uint64_t frequency);
-    void send_sstv_tx_audio(SstvTx& job, const qo100::sstv::Sender::Pcm& pcm);
-    void sstv_tx_state(const char* phase, const char* result = "");
+    std::optional<qo100::audio::TxBlock> take_tx2_block(Tx2Job& job);
+    void send_tx2_audio(Tx2Job& job, const qo100::audio::Pcm& pcm);
+    void tx2_state(Tx2Mode mode, const char* phase, const char* result = "", std::optional<uint32_t> id = {});
 
     void control(Bytes p,uint8_t reply,uint64_t client=0,Json id=nullptr,std::string command="",bool safety=false);
     void discover();void safety();void tx_off();void roles();void broadcast(const Json& j);

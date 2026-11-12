@@ -97,7 +97,7 @@ public:
         // and spectra. Keep SSTV image lines. Never erase the buffer held by the active async_write.
         if(!queue_.empty()) {
             for(auto it=std::next(queue_.begin());it!=queue_.end();) {
-                if(it->binary && it->bytes->size()>=6 && ((*it->bytes)[5]==2 || (*it->bytes)[5]==5 || (*it->bytes)[5]==sstv_spectrum_type)
+                if(it->binary && it->bytes->size()>=6 && ((*it->bytes)[5]==2 || (*it->bytes)[5]==5 || (*it->bytes)[5]==sstv_spectrum_type || (*it->bytes)[5]==rtty_spectrum_type)
                     && now-it->time>std::chrono::milliseconds(200)) {
                     queued_-=it->bytes->size();it=queue_.erase(it);
                 } else ++it;

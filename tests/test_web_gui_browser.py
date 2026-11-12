@@ -120,6 +120,10 @@ def main():
             execute('document.querySelector(arguments[0]).dispatchEvent(new WheelEvent("wheel",{deltaY:-100,shiftKey:arguments[1],ctrlKey:arguments[2],bubbles:true,cancelable:true}))',selector,shift,ctrl)
         def key(action, value=' '):
             call('POST',f'/session/{session}/actions',{'actions':[{'type':'key','id':'keyboard','actions':[{'type':action,'value':value}]}]})
+        def ptt_hold(actions):
+            r=execute('const r=document.getElementById("ptt").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}')
+            call('POST',f'/session/{session}/actions',{'actions':[{'type':'pointer','id':'mouse','parameters':{'pointerType':'mouse'},'actions':[
+                {'type':'pointerMove',**r,'duration':0},{'type':'pointerDown','button':0},*actions]}]})
         def expect_ptt(enabled):
             observer.messages.clear()
             state=snapshot(lambda s:s.get('tx',{}).get('ptt') is enabled)
@@ -211,7 +215,7 @@ def main():
             original_zoom_height=execute('return document.getElementById("zoom").getBoundingClientRect().height')
             original_display_height=execute('return document.getElementById("zoom-display").getBoundingClientRect().height')
             history=mark_history();toggle_decoder();expect_history(history)
-            assert execute('return !document.getElementById("decoder-toggle") && document.querySelectorAll("#zoom-sources input[type=radio]").length===7')
+            assert execute('return !document.getElementById("decoder-toggle") && document.querySelectorAll("#zoom-sources input[type=radio]").length===9')
             assert execute('''const body=document.getElementById('zoom-output').getBoundingClientRect(),
                 monitor=document.getElementById('decoder-panel').getBoundingClientRect();
                 return Math.abs(body.height-monitor.height)<1 && Math.abs(body.width-monitor.width)<1 && body.height>150
@@ -416,6 +420,77 @@ def main():
             toggle_decoder()
             save_screenshot(capture.with_name(capture.stem+'-rx2-zoom.png'))
             toggle_decoder()
+            click('#decoder-sourcertty')
+            wait(lambda:execute("""const c=document.getElementById('rtty-waterfall');
+                return c.getContext('2d').getImageData(c.width/2,0,1,1).data[3]===255;"""))
+            assert execute("""const rx=document.getElementById('rtty-rx-text').getBoundingClientRect(),
+                tx=document.getElementById('rtty-tx-text').getBoundingClientRect(),
+                waterfall=document.getElementById('rtty-waterfall').getBoundingClientRect();
+                return tx.height<rx.height && waterfall.top>=tx.bottom;""")
+            assert execute("return [...document.querySelectorAll('.rtty-tone')].map(t=>t.textContent)") == ['Space 830 Hz','Mark 1000 Hz']
+            execute("""const c=document.getElementById('rtty-waterfall'), ctx=c.getContext('2d');
+                ctx.fillStyle='#ff00ff';ctx.fillRect(400,4,2,10);""")
+            observer.messages.clear()
+            wheel('#rtty-waterfall', shift=True)
+            after=expect_frequency(2,rx2+10)
+            assert after['tx2']['frequency_hz']==tx2 and after['rx']['1']['frequency_hz']==rx
+            wait(lambda:execute("""const c=document.getElementById('rtty-waterfall'),
+                col=c.getContext('2d').getImageData(390,0,1,c.height).data;
+                return col.some((value,i)=>i%4===0 && value===255 && col[i+1]===0 && col[i+2]===255);"""))
+            observer.messages.clear()
+            execute("""const c=document.getElementById('rtty-waterfall');c.focus();
+                c.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));""")
+            after=expect_frequency(2,rx2);assert after['tx2']['frequency_hz']==tx2
+            assert execute("""const c=document.querySelector('.rtty-bottom').getBoundingClientRect(),
+                w=document.querySelector('.rtty-waterfall').getBoundingClientRect();
+                return w.left>=c.left+c.width/2 && Math.abs(w.width-(c.width-8)/2)<1;""")
+            click('#rtty-preset-edit')
+            assert execute('return document.querySelectorAll("#rtty-preset-editor textarea").length===5')
+            changed('#rtty-own-call','dl0abc')
+            changed('#rtty-other-call','dk1xyz')
+            changed('#rtty-preset-text-2','$ DE&%')
+            click('#rtty-preset-editor .primary-button')
+            changed('#rtty-preset-slot',2)
+            wait(lambda:execute('return !document.getElementById("rtty-preset-send").disabled'))
+            observer.messages.clear()
+            click('#rtty-preset-send')
+            sending=snapshot(lambda s:s['rtty_tx']['phase']=='sending')
+            wait(lambda:execute('return document.getElementById("rtty-tx-text").value')=='DK1XYZ DE\nDL0ABC')
+            click('#decoder-source3')
+            snapshot(lambda s:s['rtty_tx'].get('result')=='complete' and s['rtty_tx']['tx_id']==sending['rtty_tx']['tx_id'])
+            click('#decoder-sourcertty')
+            wait(lambda:execute('return document.getElementById("rtty-tx-toggle").textContent==="Start" && !document.getElementById("rtty-tx-toggle").disabled'))
+            observer.messages.clear()
+            click('#rtty-tx-toggle')
+            live=snapshot(lambda s:s['rtty_tx']['phase']=='sending')
+            assert not live['tx']['ptt']
+            tx_id=live['rtty_tx']['tx_id']
+            tx_epoch=live['tx2']['epoch']
+            assert execute('return document.activeElement.id==="rtty-tx-text" && document.getElementById("rtty-tx-toggle").textContent==="Stop"')
+            click('#frequency1')
+            click('#decoder-source4')
+            click('#audio')
+            wait(lambda:execute('return !document.getElementById("ptt").disabled'))
+            start=len(proxy.log)
+            ptt_hold([])
+            def both_sending(s):
+                return s['tx']['ptt'] and s['rtty_tx']['phase']=='sending' and s['rtty_tx']['tx_id']==tx_id and s['tx2']['epoch']==tx_epoch
+            snapshot(both_sending)
+            time.sleep(1.2)
+            observer.messages.clear()
+            snapshot(both_sending)
+            assert {p[11] for p in proxy.log[start:] if p[5]==8 and any(p[64:])} >= {3,7}
+            execute('document.getElementById("decoder-sourcertty").click()')
+            assert execute('return document.getElementById("zoom-display").dataset.receiver==="1" && document.getElementById("rtty-tx-toggle").textContent==="Stop"')
+            observer.messages.clear()
+            snapshot(both_sending)
+            execute('document.getElementById("rtty-tx-toggle").click()')
+            snapshot(lambda s:s['tx']['ptt'] and s['rtty_tx'].get('result')=='stopped' and s['rtty_tx']['tx_id']==tx_id and s['tx2']['epoch']!=tx_epoch)
+            call('DELETE',f'/session/{session}/actions')
+            expect_ptt(False)
+            click('#audio')
+            click('#frequency2')
+            click('#decoder-sourcezoom')
             click('#copy-rx-tx');snapshot(lambda s:s.get('tx2',{}).get('frequency_hz')==rx2-8089500000)
             click('#frequencytx');changed('#frequency-input',(rx2-8089500000+123)/1e6)
             execute('document.getElementById("frequency-form").requestSubmit()')
@@ -596,10 +671,6 @@ def main():
             click('#audio');wait(lambda:execute('return !document.getElementById("ptt").disabled'))
             audio_on=execute('return getComputedStyle(document.getElementById("audio")).backgroundColor')
             assert audio_on=='rgb(33, 92, 67)',audio_on
-            def ptt_hold(actions):
-                r=execute('const r=document.getElementById("ptt").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}')
-                call('POST',f'/session/{session}/actions',{'actions':[{'type':'pointer','id':'mouse','parameters':{'pointerType':'mouse'},'actions':[
-                    {'type':'pointerMove',**r,'duration':0},{'type':'pointerDown','button':0},*actions]}]})
             start=len(proxy.log)
             ptt_hold([{'type':'pause','duration':1100},{'type':'pointerUp','button':0}])
             snapshot(lambda s:not s.get('tx',{}).get('ptt',True))

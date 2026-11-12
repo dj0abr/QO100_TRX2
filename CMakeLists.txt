@@ -77,6 +77,7 @@ target_compile_options(qo100_digital_audio PRIVATE -Wall -Wextra -Wpedantic)
 
 include(CTest)
 add_subdirectory(decoder/sstv)
+add_subdirectory(decoder/rtty)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_subdirectory(external/mmdecoder)
 configure_file(decoder/mm-launcher.sh.in ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/qo100_mm_decoder @ONLY)
@@ -186,6 +187,11 @@ if(BUILD_TESTING)
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
             ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
         set_tests_properties(sstv_tx_websocket PROPERTIES TIMEOUT 25)
+        add_test(NAME rtty_websocket COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rtty_bridge.py
+            $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(rtty_websocket PROPERTIES TIMEOUT 25)
         add_test(NAME rx2_zoom_websocket COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rx2_zoom.py
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>

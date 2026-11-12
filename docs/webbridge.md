@@ -53,8 +53,8 @@ Startwerte: FT8 **10489540000 Hz**, PSK **10489748821 Hz** (USB-Träger).
 Nur der geänderte Monitoringkanal setzt Filter, Epoche und Samplezähler zurück;
 RX1, RX2 und der andere Monitor laufen weiter. Normales `tune` erlaubt nur RX1/RX2.
 
-Die Zoom-Kachel bietet oben acht Radiobuttons: **RX1-/RX2-Zoom**, **FT8-Monitor**,
-**PSK-Monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin**, **RX5-Diagnose** und **SSTV**.
+Die Zoom-Kachel bietet oben neun Radiobuttons: **RX1-/RX2-Zoom**, **FT8-Monitor**,
+**PSK-Monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin**, **RX5-Diagnose**, **SSTV** und **RTTY**.
 Genau eine Ansicht nutzt den gesamten Inhalt der Kachel, einschließlich des sonst
 für Zoom-Spektrum, Frequenzachse und Wasserfall verwendeten Platzes.
 Alle Textströme werden immer empfangen, mit getrennten Puffern und Lesepositionen.
@@ -136,6 +136,33 @@ TX2-Frequenz beendet eine laufende SSTV-Sendung.
 Ein aktiver externer Stream zu `toQO100` belegt TX2. Während SSTV sendet,
 reserviert die Webbridge TX2 exklusiv. Wird der Audioadapter dauerhaft mit
 `--always-active` betrieben, meldet er den TX2-Audioweg durchgehend als belegt.
+
+### RTTY über RX2 und TX2
+
+Die RTTY-Ansicht zeigt den auf RX2 empfangenen Text. **Start** startet
+die Sendung über TX2 und setzt den Fokus in das TX-Feld. Nach einem kurzen Mark-Vorlauf
+sendet TX2 bei leerer Warteschlange fortlaufend das ITA2-Umschaltzeichen LTRS
+(RTTY-Diddles). So sind in den Tipp-Pausen Mark und Space im Wasserfall
+sichtbar. LTRS schaltet den Empfänger auf Buchstaben um.
+Beim Tippen werden die Zeichen sofort in die Sendewarteschlange übernommen.
+Das TX-Feld zeigt den bestätigten Text nach ITA2-Normalisierung.
+**Stop** beendet die Sendung und verwirft noch gepufferte Zeichen.
+Ein Wechsel zu RX1 oder zu einer anderen Monitoransicht lässt die
+RTTY-Sendung weiterlaufen. Auf RX1 steuert **PTT** das SSB-Senden über TX1.
+
+Der kleine Wasserfall rechts unter dem TX-Feld zeigt einen 800-Hz-Ausschnitt aus den
+RX2-Zoomdaten mit Linien für Mark und Space. **Reverse** tauscht die Zuordnung.
+Das Mausrad über dem Wasserfall oder die Pfeiltasten bei fokussiertem Wasserfall
+stimmen RX2 allein in 10-Hz-Schritten ab.
+
+Links vom Wasserfall öffnet **EDIT** den Dialog für beide Rufzeichen und fünf
+Textvorlagen. Der Browser speichert die Eingaben und die gewählte Nummer.
+`%` setzt das eigene Rufzeichen ein, `$` das der Gegenstation und `&` einen
+Zeilenumbruch. Ein Backslash direkt am Zeilenende wird beim Einfügen
+als Teil des Zeilenumbruchs behandelt. **SEND** reiht die gewählte Vorlage bei
+laufender RTTY-Sendung in den mit **Start** geöffneten Sendestrom ein.
+Bei freiem TX2 startet **SEND** eine eigene Sendung, die nach dem Text endet.
+**Stop** kann auch diese Sendung abbrechen.
 
 ### RX5: Multimedia-Bake
 
@@ -516,6 +543,36 @@ Pegel der laufenden Sendung. Bei `sstv_mode=auto` sendet TX2 in Martin M1
 und RX2 erkennt den Modus automatisch. `state.sstv_tx.phase` meldet `idle`, `upload`,
 `preparing` oder `sending`. Das Ergebnis steht bei Abschluss unter
 `state.sstv_tx.result`.
+
+**RTTY-RX.** `rtty_subscribe` mit booleschem `enabled` gilt pro Browser und
+aktiviert RX2 unabhängig von der Audiowiedergabe. Abonnenten erhalten
+`rtty_text` mit `session` und dem neuen Text in `text`. CR und LF werden
+wie empfangen übermittelt. `rtty_reset` mit `session` meldet eine Unterbrechung,
+etwa nach einer Audiolücke oder einem Frequenzwechsel. Der RX2-Audio-Wasserfall
+verwendet Typ 24 mit demselben Format wie Typ 22. Der Bediener kann die RX-Tonlage
+mit `rtty_reverse` und booleschem `enabled` umkehren. Die Einstellung steht in
+`state.rtty_reverse`.
+
+**RTTY-TX.** `rtty_tx_start` übergibt `id`, `frequency_hz`, `level` (1–100)
+und `text` in einer JSON-Nachricht. Das ACK enthält den ITA2-normalisierten
+Text mit höchstens 512 Zeichen. TX verwendet 45,45 Baud mit 170 Hz Shift und 1,5 Stopbits.
+Mark liegt bei 1000 Hz und Space bei 830 Hz. `rtty_tx_stop` bricht die Sendung
+ab. `rtty_tx_level` mit `level` (0–100) ändert den laufenden Pegel. Stop und
+Pegeländerung werden bei mitgesendeter `id` bestätigt.
+`state.rtty_tx.phase` meldet `idle`, `preparing` oder `sending`.
+`state.rtty_tx.result` enthält das Ergebnis, etwa `complete`, `stopped`
+oder `retuned`. SSTV, RTTY und der externe Audioadapter belegen TX2 exklusiv.
+Bei belegtem TX2 wird ein neuer Start mit `tx2_busy` beantwortet. RX2 bleibt
+während der Sendung verfügbar.
+
+Für laufende Eingabe startet `rtty_tx_open` mit `id`, `frequency_hz` und
+`level` den Sendestrom. Eine leere Warteschlange erzeugt LTRS-Diddles.
+Die Start-ID erscheint für beide Sendearten als `tx_id` in `state.rtty_tx`. `rtty_tx_write` nimmt `tx_id` und `text` entgegen. Das ACK
+enthält den normalisierten Text. Die Warteschlange fasst 512 ITA2-Zeichenrahmen
+einschließlich Umschaltzeichen. Passt der Text nicht vollständig hinein,
+meldet der Adapter `tx_queue_full`. `rtty_tx_keepalive` verlängert mit
+`tx_id` die Sendefreigabe um eine Sekunde. `rtty_tx_stop` mit `tx_id` beendet
+die zugehörige Sendung und leert den Puffer.
 
 **Binär RX:** FFT Typ 2 der Streams **0/1/2** (Fullband/RX1-Zoom/RX2-Zoom) und Audio Typ 5 der Streams **1/2/4**, unverändert an alle Browser. Die Zooms verwenden jeweils 2400 Bins über 60 kHz aus der gemeinsamen 25-Hz-FFT, zentriert auf ihrer eigenen RX-Frequenz. Das WebGUI zeigt den ausgewählten RX als ±30-kHz-Ausschnitt. **RX2-Audio (Stream 2)** geht zusätzlich an den lokalen Digital-Audioadapter. **RX3/RX4-Audio (Stream 5/6)** geht ausschließlich an die jeweiligen lokalen Decoder. Fragment-, Session- und
 Epochenregeln aus der UDP-Referenz gelten auch hier. **Binär TX:** ausschließlich Typ 8,

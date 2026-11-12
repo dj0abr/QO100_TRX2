@@ -1,27 +1,18 @@
 #pragma once
 
 #include "sstv.hpp"
+#include "../audio_spectrum.hpp"
 
 #include <variant>
 #include <vector>
 
 namespace qo100::sstv {
 
-inline constexpr std::size_t pcm_block_size = 240;
-inline constexpr std::size_t spectrum_fft_size = 1024;
-inline constexpr std::size_t spectrum_bins = 1 + 4000 * spectrum_fft_size / sample_rate;
-
-struct AudioBlock {
-    std::uint32_t epoch;
-    std::uint64_t index;
-    std::uint64_t frequency_hz;
-    std::array<std::int16_t, pcm_block_size> pcm;
-};
-
-struct Spectrum {
-    // 0 through 100 represents -100 through 0 dBFS. Bins start at DC.
-    std::array<std::uint8_t, spectrum_bins> levels;
-};
+inline constexpr auto pcm_block_size = audio::block_size;
+inline constexpr auto spectrum_fft_size = audio::spectrum_fft_size;
+inline constexpr auto spectrum_bins = audio::spectrum_bins;
+using AudioBlock = audio::RxBlock;
+using Spectrum = audio::Spectrum;
 
 class Receiver {
 public:

@@ -1,17 +1,15 @@
 #pragma once
 
 #include "sstv.hpp"
+#include "../audio.hpp"
 
 namespace qo100::sstv {
 
 class Sender {
 public:
-    static constexpr std::size_t block_size = 240;
-    using Pcm = std::array<std::int16_t, block_size>;
-    struct Block {
-        Pcm pcm{};
-        bool last = false;
-    };
+    static constexpr auto block_size = audio::block_size;
+    using Pcm = audio::Pcm;
+    using Block = audio::TxBlock;
 
     Sender(Mode mode, const Image& image);
     ~Sender();

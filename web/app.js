@@ -5,6 +5,7 @@ import {PttControl} from './ptt-control.js';
 import {MmDiagnostics} from './mm-diagnostics.js';
 import {SstvView} from './sstv.js';
 import {SstvTxView} from './sstv-tx.js';
+import {RttyPresets, RttyView} from './rtty.js';
 import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
 
 const $ = id => document.getElementById(id);
@@ -21,6 +22,7 @@ const views = [new RadioDisplay($('fullband')), new RadioDisplay($('zoom-display
 const frames = new FrameAssembler(frame => {
   const view = views[frame.stream === 0 ? 0 : 1];
   view.accept(frame);
+  if (rtty.visible) rtty.waterfall.accept(frame);
   if (cursor?.view === view) queueCursorUpdate();
 });
 const radio = new RadioAudio(transmitSamples, mediaChanged);
@@ -28,6 +30,10 @@ const mmDiagnostics = new MmDiagnostics($('mm-diagnostics'));
 const sstv = new SstvView($('sstv-panel'));
 const sstvTx = new SstvTxView($('sstv-panel'), $('sstv-tx-editor'), renderSstvTxControls);
 let sstvUpload = null, sstvStopRequested = false;
+const rtty = new RttyView($('rtty-panel'), writeRttyText);
+const rttyPresets = new RttyPresets($('rtty-preset-editor'), $('rtty-preset-slot'), readPreference('rttyPresets'));
+const rttyInputLimit = 1024;
+let rttyTx = null;
 const ptt = new PttControl({start: startPtt, stop: stopPtt, isActive: () => pttHeld,
   mode: readPreference('pttMode'), spaceEnabled: readPreference('pttSpace') === 'true',
   timeout: () => notify('PTT nach 5 Minuten automatisch ausgeschaltet.', false, 8000)});
@@ -83,12 +89,12 @@ function waitState(predicate, timeout = 2500) {
 function connect() {
   if (socket && socket.readyState < WebSocket.CLOSING) return;
   operator = false; state = {}; wanted.clear(); guiLoaded = false; session = 0; clearTimers();
-  frames.reset(); views.forEach(view => view.clear()); radio.reset(); sstv.reset();
+  frames.reset(); views.forEach(view => view.clear()); radio.reset(); sstv.reset(); rtty.resetRx(); rtty.waterfall.clear();
   cursor = null; queueCursorUpdate();
   const url = new URL('/ws', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = socket = new WebSocket(url); ws.binaryType = 'arraybuffer';
   notify('Verbindung wird hergestellt …', false, 0); controls();
-  ws.onopen = () => { if (ws === socket) { rx2AudioSubscription = null; notify('Adapter verbunden. Warte auf Backend …', false, 0); send({type:'mm_diagnostics',enabled:!$('mm-diagnostics').hidden}); send({type:'sstv_subscribe',enabled:sstv.visible}); controls(); } };
+  ws.onopen = () => { if (ws === socket) { rx2AudioSubscription = null; notify('Adapter verbunden. Warte auf Backend …', false, 0); send({type:'mm_diagnostics',enabled:!$('mm-diagnostics').hidden}); send({type:'sstv_subscribe',enabled:sstv.visible}); send({type:'rtty_subscribe',enabled:rtty.visible}); controls(); } };
   ws.onmessage = event => {
     if (ws !== socket) return;
     if (typeof event.data !== 'string') {
@@ -103,19 +109,20 @@ function connect() {
       const wasOperator = operator; operator = message.role === 'operator';
       $('role').textContent = operator ? t('Bediener', 'Operator') : t('Zuschauer', 'Viewer');
       $('role').title = `${message.clients} Verbindung(en) · ${message.idle_seconds ? `Inaktivitätslimit ${message.idle_seconds} s` : t('Keine Abmeldung bei Inaktivität', 'No inactivity logout')}`;
-      if (wasOperator && !operator) { stopPtt(); radio.stopMic(); clearTimers(); }
+      if (wasOperator && !operator) { stopPtt(); resetRttyTx(); radio.stopMic(); clearTimers(); }
       controls();
     } else if (message.type === 'state') update(message);
     else if (message.type === 'decoder_text' && [3, 4].includes(message.stream) && typeof message.text === 'string') appendDecoderText(message.stream, message.text);
     else if (message.type === 'decoder_text' && message.stream === 5 && typeof message.text === 'string' && ['dx-cluster', 'cw-skimmer', 'bulletin'].includes(message.channel)) appendDecoderText(`5-${message.channel}`, message.text, true);
     else if (message.type === 'mm_diagnostics' && message.stream === 5) mmDiagnostics.update(message);
     else if (['sstv_begin', 'sstv_end', 'sstv_reset'].includes(message.type)) sstv.message(message, session);
+    else if (message.type === 'rtty_text' || message.type === 'rtty_reset') rtty.receive(message, session);
     else if (message.type === 'ack' || message.type === 'error') {
       const item = pending.get(message.id);
       if (item) {
         pending.delete(message.id); clearTimeout(item.timeout);
         if (message.type === 'ack') item.resolve(message);
-        else item.reject(fail(({read_only: 'Nur der Bediener darf diese Einstellung ändern.', not_ready: 'Backend noch nicht bereit.', busy: 'Einstellungen werden gerade verarbeitet.', tx2_busy: t('TX2 ist belegt.', 'TX2 is busy.'), backend_reset: 'Backend wurde neu gestartet.', timeout: 'Backend antwortet nicht.'})[message.code] || message.message, message.code));
+        else item.reject(fail(({read_only: 'Nur der Bediener darf diese Einstellung ändern.', not_ready: 'Backend noch nicht bereit.', busy: 'Einstellungen werden gerade verarbeitet.', tx2_busy: t('TX2 ist belegt.', 'TX2 is busy.'), tx_queue_full: t('RTTY-Sendepuffer voll. Warte kurz und versuche es erneut.', 'RTTY send queue full. Wait a moment and try again.'), backend_reset: 'Backend wurde neu gestartet.', timeout: 'Backend antwortet nicht.'})[message.code] || message.message, message.code));
       } else if (message.type === 'error' && message.code !== 'superseded' && message.code !== 'not_ready') notify(message.message, true);
     } else if (message.type === 'closed') {
       notify(message.reason === 'idle' ? 'Wegen Inaktivität abgemeldet. Mit „Verbinden“ erneut anmelden.' : 'Verbindung wegen fehlendem Heartbeat beendet. Bitte erneut verbinden.', true, Infinity);
@@ -124,7 +131,7 @@ function connect() {
   ws.onerror = () => { if (ws === socket) notify('WebSocket-Verbindung fehlgeschlagen.', true); };
   ws.onclose = event => {
     if (ws !== socket) return;
-    stopPtt(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset(); mmDiagnostics.reset(); sstv.reset(true);
+    stopPtt(); resetRttyTx(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset(); mmDiagnostics.reset(); sstv.reset(true); rtty.waterfall.clear();
     sstvUpload = null; sstvStopRequested = false;
     for (const item of pending.values()) { clearTimeout(item.timeout); item.reject(fail('Verbindung getrennt.', 'closed')); }
     pending.clear(); frames.reset(); views.forEach(view => view.clear());
@@ -164,7 +171,7 @@ function fineTune(channel, delta) {
   if (!canControl()) return;
   try { setFrequency(channel, frequency(channel) + delta); } catch (error) { report(error); }
 }
-function canTuneSstv() {
+function canFineTuneRx2() {
   return canControl() && Number.isSafeInteger(frequency(2));
 }
 function selectReceiver(channel) {
@@ -201,6 +208,7 @@ function renderFrequencies() {
     $(id).classList.toggle('pending', wanted.has(channel === 'tx' && selected === 2 ? 'tx2' : String(channel)));
   }
   $('sstv-frequency').textContent = `RX2 · ${frequencyText(frequency(2))}`;
+  $('rtty-frequency').textContent = `RX2 ${frequencyText(frequency(2))} · TX2 ${frequencyText(wanted.get('tx2')?.hz ?? state.tx2?.frequency_hz)}`;
   const tx = frequency('tx'), rx = frequency(selected);
   $('tx-downlink').textContent = frequencyText(Number.isSafeInteger(tx) ? tx + DOWNLINK_UPLINK_HZ : undefined);
   const offset = tx - (rx - DOWNLINK_UPLINK_HZ);
@@ -228,6 +236,7 @@ function renderWaterfallSettings() {
     rangePaint(input);
   }
   views.forEach(view => view.setOffsets(waterfallOffsets.floor, waterfallOffsets.ceiling));
+  rtty.waterfall.offsets = waterfallOffsets;
   renderNoiseLevels();
 }
 function renderNoiseLevels() {
@@ -251,6 +260,7 @@ function setDisplayColor(value) {
   const color = views[0].setColor(value);
   views[1].setColor(color);
   sstv.color = color;
+  rtty.waterfall.setColor(color);
   $('display-color').value = color; writePreference('displayColor', color);
 }
 function setFullbandAxis(mode) {
@@ -297,17 +307,20 @@ function applyFilter(values) {
 }
 function update(next) {
   if (next.session !== session) {
-    stopPtt(); session = next.session; wanted.clear(); guiLoaded = false;
-    loopGeneration = null; cutoff = 0n; clearTimers(); frames.reset(); views.forEach(view => view.clear()); radio.reset(); sstv.reset();
+    stopPtt(); resetRttyTx(); session = next.session; wanted.clear(); guiLoaded = false;
+    loopGeneration = null; cutoff = 0n; clearTimers(); frames.reset(); views.forEach(view => view.clear()); radio.reset(); sstv.reset(); rtty.resetRx(); rtty.waterfall.clear();
   }
   if (next.loop?.generation !== undefined && next.loop.generation !== loopGeneration) {
     if (loopGeneration !== null) cutoff = BigInt(next.loop.timestamp_ns || '0');
-    loopGeneration = next.loop.generation; frames.reset(); views.forEach(view => view.clear()); radio.reset();
+    loopGeneration = next.loop.generation; frames.reset(); views.forEach(view => view.clear()); rtty.waterfall.clear(); radio.reset();
   }
   if ((next.flags & 6) && !(state.flags & 6)) radio.reset();
   updateSstvTx(next.sstv_tx);
   state = next;
   $('sstv-mode').value = next.sstv_mode ?? 'auto';
+  $('rtty-reverse').checked = !!next.rtty_reverse;
+  rtty.waterfall.update(next.rx?.['2']?.frequency_hz, !!next.rtty_reverse);
+  updateRttyTx();
   for (const [key, value] of wanted) {
     const actual = key === 'tx2' ? next.tx2?.frequency_hz : key === 'tx' ? next.tx?.frequency_hz : next.rx?.[key]?.frequency_hz;
     if (actual === value.hz) wanted.delete(key);
@@ -315,7 +328,7 @@ function update(next) {
   if (!guiLoaded && next.settings?.gui_audio_gain !== undefined) {
     guiLoaded = true; $('volume').value = next.settings.gui_audio_gain; volumeChanged(false);
   }
-  if (!canControl() || (next.flags & 6) || !radio.microphone || !radio.running || (pttAcked && !next.tx?.ptt)) stopPtt();
+  if (pttHeld && (!canControl() || (next.flags & 6) || !radio.microphone || !radio.running || (pttAcked && !next.tx?.ptt))) stopPtt();
   const identity = `${session}:${next.tx?.epoch}`;
   if (identity !== txIdentity) { txIdentity = identity; txIndex = 0; }
   syncCapture(); renderFrequencies();
@@ -347,8 +360,12 @@ function controls() {
   syncRx2Subscription();
   const writable = canControl();
   for (const element of document.querySelectorAll('[data-control]')) element.disabled = !writable;
-  $('sstv-waterfall').parentElement.dataset.tunable = String(canTuneSstv());
+  for (const canvas of [$('sstv-waterfall'), $('rtty-waterfall')])
+    canvas.parentElement.dataset.tunable = String(canFineTuneRx2());
   renderSstvTxControls();
+  $('rtty-reverse').disabled = !writable;
+  $('rtty-tx-level').disabled = !writable;
+  renderRttyTxControls();
   $('ptt').disabled = selected === 2 || !writable || !!(state.flags & 6) || !radio.microphone || !radio.running;
   $('ptt-label').textContent = selected === 2 ? 'TX2' : 'PTT';
   $('audio').disabled = !!radio.starting;
@@ -364,10 +381,14 @@ function controls() {
   $('hardware-dot').className = `live-dot${state.flags & 4 ? ' error' : hardwareOnline ? '' : ' offline'}`;
   const transmitting = !!state.tx?.ptt;
   const sstvSending = state.sstv_tx?.phase === 'sending';
+  const rttySending = state.rtty_tx?.phase === 'sending';
   $('tx-status').textContent = transmitting ? (state.loop?.mode === 1 ? t('Audio-Test', 'Audio test') : t('Senden', 'Transmitting')) : state.loop?.mode ? t(`Empfang · ${state.loop.mode === 1 ? 'Audio' : 'HF'}-Loop`, `Receiving · ${state.loop.mode === 1 ? 'Audio' : 'RF'} loop`) : t('Empfang', 'Receiving');
   if (selected === 2) $('tx-status').textContent = sstvSending ? t('SSTV · Senden', 'SSTV · Transmitting') : 'RX2 / TX2 · Digital';
-  $('tx-dot').className = `live-dot${transmitting || selected === 2 && sstvSending ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
-  $('ptt').classList.toggle('sending', transmitting); $('ptt').setAttribute('aria-pressed', String(transmitting));
+  if (rttySending) $('tx-status').textContent = transmitting ?
+    t('SSB + RTTY · Senden', 'SSB + RTTY · Transmitting') : t('RTTY · Senden', 'RTTY · Transmitting');
+  $('tx-dot').className = `live-dot${transmitting || rttySending || selected === 2 && sstvSending ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
+  $('ptt').classList.toggle('sending', transmitting);
+  $('ptt').setAttribute('aria-pressed', String(transmitting));
   applyMonitorGain();
   renderPttHint();
   $('audio-details').textContent = radio.starting ? t('Audio wird gestartet …', 'Starting audio …') : radio.micBusy ? t('Mikrofon wird geöffnet …', 'Opening microphone …') : radio.running ? t(`Audio aktiv · Gerät ${radio.context.sampleRate / 1000} kHz · Funk 12 kHz · Mikrofon ${radio.microphone ? 'aktiv' : 'aus'}`, `Audio active · Device ${radio.context.sampleRate / 1000} kHz · Radio 12 kHz · Microphone ${radio.microphone ? 'active' : 'off'}`) : t('Audio ausgeschaltet', 'Audio off');
@@ -377,7 +398,7 @@ function controls() {
   renderDevices();
   if (performance.now() >= noticeUntil) {
     const error = !!(state.flags & 4);
-    const message = !isOpen() ? 'Getrennt. Zum Anmelden „Verbinden“ wählen.' : !state.ready ? 'Warte auf Backend und bestätigte Abschaltung …' : error ? `Hardware offline: ${state.settings?.hardware_error || state.settings?.error || 'Verbindung prüfen'}` : !operator ? 'Zuschauer · Empfang aktiv. Für Steuerrecht bei freiem Platz neu verbinden.' : sstvSending ? t('SSTV sendet über TX2.', 'SSTV is transmitting over TX2.') : selected === 2 ? (radio.running ? t('Bedienbereit · RX2-Audiokontrolle aktiv. TX2 erhält externes Audio.', 'Ready · RX2 audio monitoring active. TX2 receives external audio.') : t('Bedienbereit · Audio starten, um RX2 zu hören. TX2 erhält externes Audio.', 'Ready · Start audio to listen to RX2. TX2 receives external audio.')) : radio.running && radio.microphone ? 'Bedienbereit · Audio und Mikrofon aktiv.' : 'Bedienbereit · Audio starten und Mikrofon freigeben, um PTT zu verwenden.';
+    const message = !isOpen() ? 'Getrennt. Zum Anmelden „Verbinden“ wählen.' : !state.ready ? 'Warte auf Backend und bestätigte Abschaltung …' : error ? `Hardware offline: ${state.settings?.hardware_error || state.settings?.error || 'Verbindung prüfen'}` : !operator ? 'Zuschauer · Empfang aktiv. Für Steuerrecht bei freiem Platz neu verbinden.' : rtty.visible ? (rttySending ? t('RTTY sendet über TX2.', 'RTTY is transmitting over TX2.') : t('RTTY-Empfang über RX2.', 'RTTY reception on RX2.')) : sstvSending ? t('SSTV sendet über TX2.', 'SSTV is transmitting over TX2.') : selected === 2 ? (radio.running ? t('Bedienbereit · RX2-Audiokontrolle aktiv. TX2 erhält externes Audio.', 'Ready · RX2 audio monitoring active. TX2 receives external audio.') : t('Bedienbereit · Audio starten, um RX2 zu hören. TX2 erhält externes Audio.', 'Ready · Start audio to listen to RX2. TX2 receives external audio.')) : radio.running && radio.microphone ? 'Bedienbereit · Audio und Mikrofon aktiv.' : 'Bedienbereit · Audio starten und Mikrofon freigeben, um PTT zu verwenden.';
     notify(message, error, 0);
   }
 }
@@ -419,6 +440,94 @@ function startPtt() {
   }).catch(error => { if (intent === pttIntent) { stopPtt(); report(error); } });
   return true;
 }
+function rttyTxActive() {
+  return rttyTx !== null || (state.rtty_tx?.phase ?? 'idle') !== 'idle';
+}
+function canStartRtty() {
+  return !rttyTxActive() && canControl() && Number.isSafeInteger(state.tx2?.frequency_hz) &&
+    !(state.flags & 6) && !state.loop?.mode && !wanted.has('tx2') && state.rtty_tx?.phase === 'idle' &&
+    !sstvTxActive();
+}
+function resetRttyTx() {
+  if (!rttyTx) return;
+  rttyTx = null;
+  rtty.endTx();
+}
+function stopRttyTx() {
+  if (!operator || !rttyTxActive() || rttyTx?.stopping) return;
+  const id = rttyTx?.id ?? state.rtty_tx?.tx_id;
+  if (!send({type: 'rtty_tx_stop', tx_id: id})) return;
+  rttyTx ??= {id, accepted: true, live: false};
+  rttyTx.stopping = true;
+  rtty.endTx();
+  renderRttyTxControls();
+}
+function beginRttyTx(text) {
+  if (!canStartRtty()) return;
+  const live = text === undefined;
+  if (!live && text.length > rttyInputLimit) {
+    rtty.error.textContent = t('RTTY-Text ist zu lang.', 'RTTY text is too long.');
+    return;
+  }
+  const values = {frequency_hz: state.tx2.frequency_hz, level: Number($('rtty-tx-level').value)};
+  const opening = live ? command('rtty_tx_open', values) : command('rtty_tx_start', {...values, text});
+  const tx = rttyTx = {id: opening.id, accepted: false, live};
+  rtty.beginTx(live);
+  controls();
+  opening.then(answer => {
+    if (rttyTx !== tx) return;
+    if (answer.status !== 0) throw fail(t('RTTY-Sendung wurde abgewiesen.', 'RTTY transmission was rejected.'));
+    tx.accepted = true;
+    if (!live && !tx.stopping) rtty.appendTx(answer.text);
+  }).catch(error => {
+    if (rttyTx !== tx) return;
+    if (operator) send({type: 'rtty_tx_stop', tx_id: tx.id});
+    resetRttyTx();
+    rtty.error.textContent = error.message;
+    renderRttyTxControls();
+  });
+}
+function writeRttyText(text) {
+  const tx = rttyTx;
+  if (!tx?.live || tx.stopping) return;
+  if (text.length > rttyInputLimit) {
+    rtty.error.textContent = t('RTTY-Text ist zu lang für die Sendewarteschlange.', 'RTTY text exceeds the send queue.');
+    return;
+  }
+  if (socket.bufferedAmount > 16384) {
+    stopRttyTx();
+    rtty.error.textContent = t('RTTY wegen Verbindungsrückstau beendet.', 'RTTY stopped due to connection backlog.');
+    return;
+  }
+  checked('rtty_tx_write', {tx_id: tx.id, text}).then(answer => {
+    if (rttyTx !== tx || tx.stopping) return;
+    rtty.appendTx(answer.text);
+    rtty.error.textContent = '';
+  }).catch(error => {
+    if (rttyTx === tx && !tx.stopping) rtty.error.textContent = error.message;
+  });
+}
+function renderRttyTxControls() {
+  const button = $('rtty-tx-toggle');
+  const active = rttyTxActive(), canStart = canStartRtty();
+  button.textContent = active ? 'Stop' : 'Start';
+  button.dataset.active = String(active);
+  button.disabled = active ? !!rttyTx?.stopping || !operator || !isOpen() : !canStart;
+  button.title = active ? t('RTTY-Sendung abbrechen', 'Stop RTTY transmission') :
+    t('RTTY über TX2 senden', 'Transmit RTTY over TX2');
+  const canQueue = rttyTx?.live && !rttyTx.stopping && canControl();
+  $('rtty-preset-send').disabled = !(canQueue || canStart) || !rttyPresets.text.trim();
+}
+function updateRttyTx() {
+  const tx = state.rtty_tx;
+  if (!rttyTx?.accepted || tx?.tx_id !== rttyTx.id || tx?.phase !== 'idle') return;
+  resetRttyTx();
+  if (tx.result && !['stopped', 'complete'].includes(tx.result)) {
+    const message = t(`RTTY beendet (${tx.result}).`, `RTTY ended (${tx.result}).`);
+    if (rtty.visible) rtty.error.textContent = message;
+    else notify(message, true);
+  }
+}
 function renderPttHint() {
   if (selected === 2) {
     $('ptt-hint').textContent = t('Externes Audio', 'External audio');
@@ -431,7 +540,7 @@ function renderPttHint() {
   $('ptt').title = `${ptt.mode === 'toggle' ? t('Klicken schaltet PTT um · maximal 5 Minuten', 'Click to toggle PTT · 5 minutes maximum') : t('Drücken und halten zum Senden', 'Press and hold to transmit')}${ptt.spaceEnabled ? t(' · Leertaste = PTT', ' · Space = PTT') : ''}`;
 }
 function mediaChanged() {
-  if (!radio.microphone || !radio.running) stopPtt();
+  if (pttHeld && (!radio.microphone || !radio.running)) stopPtt();
   controls();
 }
 function transmitSamples(pcm) {
@@ -663,7 +772,7 @@ $('tx-listen-mute').addEventListener('keydown', e => {
   if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') e.stopPropagation();
 });
 const decoderSources = [3, 4, '5-dx-cluster', '5-cw-skimmer', '5-bulletin'];
-const zoomSources = ['zoom', ...decoderSources, '5-diagnostics', 'sstv'];
+const zoomSources = ['zoom', ...decoderSources, '5-diagnostics', 'sstv', 'rtty'];
 let decoderSource = decoderSources.find(source => String(source) === readPreference('decoderSource')) ?? 3;
 const decoderScroll = Object.fromEntries(decoderSources.map(source => [source, {top: 0, follow: source !== '5-bulletin'}]));
 const decoderPending = Object.fromEntries(decoderSources.map(source => [source, null]));
@@ -683,7 +792,8 @@ function selectDecoder(source) {
   rememberDecoderScroll();
   const monitoring = source !== 'zoom';
   const diagnostics = source === '5-diagnostics';
-  const textView = decoderSources.includes(source), sstvView = source === 'sstv';
+  const textView = decoderSources.includes(source), sstvView = source === 'sstv', rttyView = source === 'rtty';
+  rtty.show(rttyView);
   if (textView) decoderSource = source;
   for (const channel of decoderSources) {
     decoderOutput(channel).hidden = channel !== decoderSource;
@@ -692,12 +802,15 @@ function selectDecoder(source) {
   $('decoder-sourcezoom').checked = !monitoring;
   $('decoder-source5-diagnostics').checked = diagnostics;
   $('decoder-sourcesstv').checked = sstvView;
+  $('decoder-sourcertty').checked = rttyView;
   $('decoder-panel').hidden = !textView;
-  $('decoder-clear').hidden = !textView;
+  $('decoder-clear').hidden = !textView && !rttyView;
   sstv.show(sstvView);
   mmDiagnostics.show(diagnostics);
   send({type:'mm_diagnostics',enabled:diagnostics});
   send({type:'sstv_subscribe',enabled:sstvView});
+  send({type:'rtty_subscribe',enabled:rttyView});
+  controls();
   $('zoom-plots').setAttribute('aria-hidden', String(monitoring));
   $('zoom-plots').inert = monitoring;
   $('zoom-output').dataset.view = String(source);
@@ -732,26 +845,28 @@ function flushDecoderText() {
   }
   if (visible) restoreDecoderScroll();
 }
-$('decoder-clear').onclick = () => { decoderPending[decoderSource] = null; decoderOutput(decoderSource).textContent = ''; decoderScroll[decoderSource] = {top: 0, follow: decoderSource !== '5-bulletin'}; };
+$('decoder-clear').onclick = () => { if (rtty.visible) { rtty.clearRx(); return; } decoderPending[decoderSource] = null; decoderOutput(decoderSource).textContent = ''; decoderScroll[decoderSource] = {top: 0, follow: decoderSource !== '5-bulletin'}; };
 for (const source of zoomSources) $(`decoder-source${source}`).onchange = () => selectDecoder(source);
 // Keep local decoder controls and log scrolling independent of global Space PTT.
-for (const id of ['zoom-sources', 'decoder-clear', 'decoder-panel', 'mm-diagnostics', 'sstv-panel']) $(id).addEventListener('keydown', event => {
+for (const id of ['zoom-sources', 'decoder-clear', 'decoder-panel', 'mm-diagnostics', 'sstv-panel', 'rtty-panel']) $(id).addEventListener('keydown', event => {
   if (event.code === 'Space' || event.key === ' ') event.stopPropagation();
 });
-const sstvTuneStep = 10;
-$('sstv-waterfall').addEventListener('wheel', event => {
-  if (!canTuneSstv() || event.ctrlKey || event.metaKey) return;
-  const delta = wheelTurns(event) * sstvTuneStep;
-  if (!delta) return;
-  event.preventDefault();
-  fineTune(2, delta);
-}, {passive: false});
-$('sstv-waterfall').addEventListener('keydown', event => {
-  if (!canTuneSstv() || event.altKey || event.ctrlKey || event.metaKey) return;
-  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-  event.preventDefault();
-  fineTune(2, event.key === 'ArrowUp' ? sstvTuneStep : -sstvTuneStep);
-});
+const rx2TuneStep = 10;
+for (const canvas of [$('sstv-waterfall'), $('rtty-waterfall')]) {
+  canvas.addEventListener('wheel', event => {
+    if (!canFineTuneRx2() || event.ctrlKey || event.metaKey) return;
+    const delta = wheelTurns(event) * rx2TuneStep;
+    if (!delta) return;
+    event.preventDefault();
+    fineTune(2, delta);
+  }, {passive: false});
+  canvas.addEventListener('keydown', event => {
+    if (!canFineTuneRx2() || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    fineTune(2, event.key === 'ArrowUp' ? rx2TuneStep : -rx2TuneStep);
+  });
+}
 const sstvTxLevel = $('sstv-tx-level');
 function renderSstvTxLevel() {
   rangePaint(sstvTxLevel);
@@ -857,6 +972,43 @@ $('sstv-mode').onchange = () => checked('sstv_mode', {mode: $('sstv-mode').value
   $('sstv-mode').value = state.sstv_mode ?? 'auto';
   report(error);
 });
+$('rtty-reverse').onchange = () => checked('rtty_reverse', {enabled: $('rtty-reverse').checked}).catch(error => {
+  $('rtty-reverse').checked = !!state.rtty_reverse;
+  report(error);
+});
+$('rtty-preset-edit').onclick = () => rttyPresets.dialog.showModal();
+function saveRttyPresets() {
+  writePreference('rttyPresets', rttyPresets.serialize());
+  renderRttyTxControls();
+}
+rttyPresets.dialog.addEventListener('close', saveRttyPresets);
+rttyPresets.select.addEventListener('change', saveRttyPresets);
+$('rtty-tx-toggle').onclick = () => {
+  if (rttyTxActive()) stopRttyTx();
+  else beginRttyTx();
+};
+$('rtty-preset-send').onclick = () => {
+  const text = rttyPresets.text;
+  if (!text.trim()) return;
+  if (rttyTx?.live) {
+    writeRttyText(text);
+    if (rttyTx?.live && !rttyTx.stopping) rtty.tx.focus({preventScroll: true});
+  } else {
+    beginRttyTx(text);
+  }
+};
+const rttyLevel = $('rtty-tx-level');
+rttyLevel.value = readPreference('rttyTxLevel') ?? rttyLevel.defaultValue;
+function renderRttyLevel() {
+  rangePaint(rttyLevel);
+  $('rtty-tx-level-value').textContent = `${rttyLevel.value} %`;
+}
+rttyLevel.oninput = () => {
+  renderRttyLevel();
+  writePreference('rttyTxLevel', rttyLevel.value);
+  if (rttyTx && !rttyTx.stopping) send({type: 'rtty_tx_level', tx_id: rttyTx.id, level: Number(rttyLevel.value)});
+};
+renderRttyLevel();
 const savedZoomView = zoomSources.find(source => String(source) === readPreference('zoomView'));
 selectDecoder(savedZoomView ?? (readPreference('decoderVisible') === 'true' ? decoderSource : 'zoom'));
 $('loop').onchange = () => { stopPtt(); checked('loop', {mode: Number($('loop').value)}).catch(report); };
@@ -897,7 +1049,8 @@ window.addEventListener('keydown', event => {
   if (!space && !enter) return;
   if (event.target === $('ptt')) event.preventDefault();
   if (space && !ptt.spaceEnabled || event.altKey || event.ctrlKey || event.metaKey || document.querySelector('dialog[open]') || event.target?.isContentEditable || event.target?.closest?.('input,textarea,select,#sstv-tx-edit')) return;
-  event.preventDefault(); if (!event.repeat) ptt.press(space ? 'Space' : 'Enter');
+  event.preventDefault();
+  if (!event.repeat) ptt.press(space ? 'Space' : 'Enter');
 });
 window.addEventListener('keyup', event => {
   const source = event.code === 'Space' || event.key === ' ' ? 'Space' : event.key === 'Enter' ? 'Enter' : null;
@@ -911,7 +1064,11 @@ for (const event of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'touchsta
   lastActivity = performance.now(); send({type: 'activity'});
 }, {passive: true});
 setInterval(() => send({type: 'heartbeat'}), 1000);
-setInterval(() => { if (!ptt.checkTimeout() && pttHeld && operator) send({type: 'ptt_keepalive'}); renderPttHint(); renderNoiseLevels(); }, 250);
+setInterval(() => {
+  if (!ptt.checkTimeout() && operator && pttHeld) send({type: 'ptt_keepalive'});
+  if (operator && rttyTx?.live && !rttyTx.stopping) send({type: 'rtty_tx_keepalive', tx_id: rttyTx.id});
+  renderPttHint(); renderNoiseLevels();
+}, 250);
 $('theme').checked = window.QO100Theme.value === 'light';
 $('theme').onchange = () => window.QO100Theme.set($('theme').checked ? 'light' : 'dark');
 $('language').value = languagePreference();

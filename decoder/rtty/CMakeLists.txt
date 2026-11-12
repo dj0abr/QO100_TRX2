@@ -1,0 +1,11 @@
+add_library(qo100_rtty STATIC encoder.cpp decoder.cpp)
+target_include_directories(qo100_rtty PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_compile_features(qo100_rtty PUBLIC cxx_std_17)
+target_compile_options(qo100_rtty PRIVATE -Wall -Wextra -Wpedantic)
+
+if(BUILD_TESTING)
+    add_executable(test_rtty ../../tests/test_rtty.cpp)
+    target_link_libraries(test_rtty PRIVATE qo100_rtty)
+    target_compile_options(test_rtty PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME rtty_codec COMMAND test_rtty)
+endif()
