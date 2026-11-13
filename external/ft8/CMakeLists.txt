@@ -22,9 +22,18 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/generated/ft8_decode.f90 "${DECODER_SOURCE}")
 
 add_library(ft8_core STATIC ${WSJTX_SOURCES}
-  ${CMAKE_CURRENT_BINARY_DIR}/generated/ft8_decode.f90 src/ft8_bridge.f90)
+  vendor/wsjtx/lib/ft4_decode.f90
+  vendor/wsjtx/lib/ft4/ft4_baseline.f90
+  vendor/wsjtx/lib/ft4/ft4_downsample.f90
+  vendor/wsjtx/lib/ft4/gen_ft4wave.f90
+  vendor/wsjtx/lib/ft4/genft4.f90
+  vendor/wsjtx/lib/ft4/get_ft4_bitmetrics.f90
+  vendor/wsjtx/lib/ft4/getcandidates4.f90
+  vendor/wsjtx/lib/ft4/subtractft4.f90
+  vendor/wsjtx/lib/ft4/sync4d.f90
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/ft8_decode.f90 src/ft8_bridge.f90 src/ft8_tx.f90)
 set_target_properties(ft8_core PROPERTIES Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/modules)
-target_include_directories(ft8_core PRIVATE vendor/wsjtx/lib vendor/wsjtx/lib/ft8
+target_include_directories(ft8_core PRIVATE vendor/wsjtx/lib vendor/wsjtx/lib/ft8 vendor/wsjtx/lib/ft4
   ${FFTW_FORTRAN_INCLUDE_DIR} ${Boost_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR}/modules)
 target_compile_options(ft8_core PRIVATE
   $<$<COMPILE_LANGUAGE:Fortran>:-fallow-argument-mismatch;-ffree-line-length-none;-fno-second-underscore>)

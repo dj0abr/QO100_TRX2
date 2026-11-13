@@ -2,9 +2,10 @@
 module ft8_bridge
   use iso_c_binding
   use ft8_decode, only: ft8_decoder
+  use ft4_decode, only: ft4_decoder
   implicit none
   private
-  public :: ft8_decode_slot
+  public :: ft8_decode_slot, ft4_decode_slot
 
   abstract interface
     subroutine result_callback(message, length, snr, dt, freq, sync, quality, ap, context) bind(C)
@@ -20,11 +21,12 @@ module ft8_bridge
 contains
   ! WSJT-X has process-global saved state. The CLI invokes this once per
   ! process; parallel callers must use separate processes.
-  subroutine ft8_decode_slot(samples, low, high, depth, callback, context) bind(C)
+  subroutine ft8_decode_slot(samples, low, high, depth, callback, context, early) bind(C)
     integer(c_int16_t), intent(in) :: samples(180000)
     integer(c_int), value :: low, high, depth
     type(c_funptr), value :: callback
     type(c_ptr), value :: context
+    integer(c_int), value :: early
     type(ft8_decoder) :: decoder
     integer(c_int16_t) :: partial(180000)
     integer :: phase, nzhsym, nfa, nfb, npatience, nthreads
@@ -42,7 +44,7 @@ contains
     mycall = ''
     hiscall = ''
     hisgrid = ''
-    do phase = 1, 3
+    do phase = 1, 3 - 2*early
       ! Reproduce WSJT-X's receive stages at 11.808, 13.536, and 14.4 s.
       if (phase == 1) nzhsym = 41
       if (phase == 2) nzhsym = 47
@@ -62,8 +64,43 @@ contains
     nullify(sink)
   end subroutine
 
+  subroutine ft4_decode_slot(samples, low, high, depth, callback, context) bind(C)
+    integer(c_int16_t), intent(in) :: samples(72576)
+    integer(c_int), value :: low, high, depth
+    type(c_funptr), value :: callback
+    type(c_ptr), value :: context
+    type(ft4_decoder) :: decoder
+    integer :: npatience, nthreads
+    character(len=12) :: mycall, hiscall
+    common /patience/ npatience, nthreads
+
+    call c_f_procpointer(callback, sink)
+    sink_context = context
+    npatience = 0
+    nthreads = 1
+    mycall = ''
+    hiscall = ''
+    call decoder%decode(receive4,samples,0,1500,low,high,depth,.false.,0,mycall,hiscall)
+    nullify(sink)
+  end subroutine
+
+  subroutine receive4(this, sync, snr, dt, freq, decoded, nap, qual)
+    class(ft4_decoder), intent(inout) :: this
+    real, intent(in) :: sync, dt, freq, qual
+    integer, intent(in) :: snr, nap
+    character(len=37), intent(in) :: decoded
+    call forward(sync, snr, dt, freq, decoded, nap, qual)
+  end subroutine
+
   subroutine receive(this, sync, snr, dt, freq, decoded, nap, qual)
     class(ft8_decoder), intent(inout) :: this
+    real, intent(in) :: sync, dt, freq, qual
+    integer, intent(in) :: snr, nap
+    character(len=37), intent(in) :: decoded
+    call forward(sync, snr, dt, freq, decoded, nap, qual)
+  end subroutine
+
+  subroutine forward(sync, snr, dt, freq, decoded, nap, qual)
     real, intent(in) :: sync, dt, freq, qual
     integer, intent(in) :: snr, nap
     character(len=37), intent(in) :: decoded

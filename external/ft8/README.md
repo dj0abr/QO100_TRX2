@@ -1,6 +1,6 @@
-# Eigenständiger FT8-Decoder für SDR-Projekte
+# Eigenständiger FT4/FT8-Decoder für SDR-Projekte
 
-Dieses Projekt extrahiert den normalen FT8-Decoder aus
+Dieses Projekt extrahiert die FT4- und FT8-Decoder aus
 [WSJT-X](https://github.com/WSJTX/wsjtx/tree/967c85a6119110788b0df3782cf796485b2cee14).
 Das Programm `ft8-decoder` verarbeitet einen Audioblock und schreibt die
 Ergebnisse auf stdout. Es benötigt weder die WSJT-X-Anwendung noch Qt,
@@ -62,13 +62,15 @@ Linux x86_64, Ubuntu 24.04, GCC/GFortran 13.3, FFTW 3.3.10 und Boost 1.83.
 
 ## Eingang und zeitliche Ausrichtung
 
-Pro Aufruf wird **ein FT8-Slot** verarbeitet:
+Pro Aufruf wird ein Slot der gewählten Betriebsart verarbeitet. Standard ist **FT8**.
 
 - Mono-Audio mit exakt **12.000 Samples/s**.
 - Normalerweise 180.000 Samples, also 15 Sekunden. 13 bis 15 Sekunden werden
   akzeptiert; fehlende Samples am Ende ergänzt das Programm mit Nullen.
 - Der erste Sample gehört zum Beginn eines UTC-Slots bei Sekunde 00, 15, 30
   oder 45. Der normale FT8-Sendebeginn liegt rund 0,5 Sekunden danach.
+- `--mode FT4` verarbeitet 72.576 bis 90.000 Samples eines 7,5-Sekunden-Slots.
+  Eine Zeitmarke wie `--utc 000007.5` kennzeichnet einen FT4-Slot auf einer halben Sekunde.
 - Formate: `wav` (Standard; unkomprimiertes RIFF/WAVE mit PCM16), `s16le`
   (vorzeichenbehaftete 16-Bit-Werte, Little Endian) und `f32le`
   (IEEE-754-Floats, Little Endian, endlich und auf [-1,1] normiert).
@@ -166,9 +168,7 @@ aktuellen Uhrzeit abhängt.
 
 AP-Decodierung mit eigenem Rufzeichen, QSO-Verlauf oder früheren Slots ist
 in dieser Schnittstelle deaktiviert. Hash-Rufzeichen ohne auflösbaren
-Rufzeichenkontext können deshalb als `<...>` erscheinen. Dies ist der normale
-FT8-Pfad aus `lib/ft8_decode.f90`, nicht die separate alternative
-`ft8var`-Implementierung und nicht FT4, WSPR oder andere Betriebsarten.
+Rufzeichenkontext können deshalb als `<...>` erscheinen. Die beiden Decoder stammen aus `lib/ft8_decode.f90` und `lib/ft4_decode.f90`.
 
 Der interne Fortran-Code verwendet globale Zustände und ist nicht threadsicher.
 Der öffentliche Integrationsweg ist das ausführbare Programm: Ein Prozess
@@ -237,7 +237,7 @@ Die Integrationsprüfungen testen die Originalaufnahme, deterministisch
 erzeugte Signale mit bekanntem Inhalt, SNR, Frequenz und positivem/negativem
 Zeitversatz, gleichzeitige Signale, alle drei Decoderstufen, WAV mit
 Metadaten, s16le/f32le über stdin, Stille, Suchbereiche und fehlerhafte Eingaben.
-Die Testerzeugung verwendet den FT8-Encoder ausschließlich für Testsignale.
+Der Testgenerator und der TX2-Sendepfad verwenden denselben FT8-Encoder und Wellenformgenerator.
 
 ## Lizenz
 

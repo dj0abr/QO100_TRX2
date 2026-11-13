@@ -29,7 +29,6 @@ export class SstvView {
   show(visible) {
     if (this.visible === visible) return;
     this.element.hidden = !visible;
-    this.reset();
   }
 
   reset(newConnection = false) {
@@ -44,7 +43,7 @@ export class SstvView {
   }
 
   message(message, session) {
-    if (!this.visible || message.session !== session) return;
+    if (message.session !== session) return;
     if (message.type === 'sstv_reset') {
       this.reset();
     } else if (message.type === 'sstv_begin' && Object.hasOwn(modes, message.mode)) {
@@ -69,7 +68,7 @@ export class SstvView {
     if (data.byteLength < HEADER) return false;
     const view = new DataView(data), type = view.getUint8(5);
     if (type !== LINE && type !== SPECTRUM) return false;
-    if (!this.visible || view.getUint32(0) !== 0x51545232 || view.getUint8(4) !== 1 ||
+    if (view.getUint32(0) !== 0x51545232 || view.getUint8(4) !== 1 ||
         view.getUint16(6) !== HEADER || view.getUint32(8) !== 2 || view.getUint32(60) !== session) return true;
     if (type === LINE) {
       const width = view.getUint16(52), row = view.getUint32(28);

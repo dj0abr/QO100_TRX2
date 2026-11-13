@@ -10,12 +10,12 @@ target_link_libraries(qo100_beacon_dsp PUBLIC PkgConfig::BEACON_FFTW)
 target_compile_options(qo100_beacon_dsp PRIVATE -Wall -Wextra -Wpedantic)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../external/ft8 ${CMAKE_CURRENT_BINARY_DIR}/ft8)
 add_library(qo100_ft8_stream STATIC utc_slots.cpp FT8DecoderProcess.cpp)
-target_include_directories(qo100_ft8_stream PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ../include
+target_include_directories(qo100_ft8_stream PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ../include ../external/ft8/src
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../webbridge)
 target_compile_options(qo100_ft8_stream PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(qo100_ft8_stream PUBLIC Threads::Threads)
 add_executable(qo100_ft8_decoder main.cpp)
-target_link_libraries(qo100_ft8_decoder PRIVATE qo100_ft8_stream qo100_decoder_budget)
+target_link_libraries(qo100_ft8_decoder PRIVATE qo100_ft8_stream qo100_decoder_budget nlohmann_json::nlohmann_json)
 target_compile_options(qo100_ft8_decoder PRIVATE -Wall -Wextra -Wpedantic)
 add_dependencies(qo100_ft8_decoder ft8-decoder)
 # Keep the core beside its UDP service, also for the standalone webbridge build.
@@ -71,5 +71,11 @@ if(BUILD_TESTING)
             $<TARGET_FILE:qo100_ft8_decoder> $<TARGET_FILE:ft8-test-signal>
             ${CMAKE_CURRENT_SOURCE_DIR}/../config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/../web)
         set_tests_properties(ft8_udp_receiver PROPERTIES TIMEOUT 45)
+        add_test(NAME ft8_rx2_tx2_websocket COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_ft8_rx2.py
+            $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
+            $<TARGET_FILE:qo100_ft8_decoder> $<TARGET_FILE:ft8-test-signal> $<TARGET_FILE:ft8-decoder>
+            ${CMAKE_CURRENT_SOURCE_DIR}/../config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/../web)
+        set_tests_properties(ft8_rx2_tx2_websocket PROPERTIES TIMEOUT 90)
     endif()
 endif()

@@ -83,6 +83,7 @@ Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp
     }
     state_={{"type","state"},{"software_version",QO100_SOFTWARE_VERSION},{"session",0},{"ready",false},{"settings",Json::object()},
         {"revision","0"},{"flags",0},{"sstv_mode","auto"},{"sstv_tx",{{"phase","idle"}}},
+        {"ft_mode","FT8"},{"ft8_enabled",bool(decoders_[Config::rx2_ft8])},{"ft8_tx",{{"phase","idle"}}},
         {"rtty_reverse",false},{"rtty_tx",{{"phase","idle"}}},{"rx",Json::object()},{"tx",Json::object()},
         {"filter",Json::object()},{"compressor",Json::object()},{"nr",Json::object()},{"loop",Json::object()},{"tx2",Json::object()}};
 }
@@ -126,7 +127,7 @@ void Bridge::update_digital_activity() {
     const bool live=digital_nonce_ && (!digital_usage_known_ || now-digital_seen_<std::chrono::seconds(2));
     // Older adapters have no usage report and retain their always-active path.
     unsigned flags=live?(digital_usage_known_?digital_usage_:3u):0;
-    if(sstv_active_ || rtty_active_) flags|=1;
+    if(sstv_active_ || rtty_active_ || ft8_active_) flags|=1;
     if(tx2_holds_audio()) flags|=3;
     for(const auto& item:clients_)if(!item.second.rx2_audio.has_value() || *item.second.rx2_audio)flags|=1;
     if(flags!=last_activity_ || now>=next_activity_) {
@@ -186,7 +187,9 @@ void Bridge::receive_decoder(size_t index) {
         if(!ec && n && n<=4096 && session_ && initialized_ && !stopping_) {
             try {
                 // JSON encoding validates UTF-8. Decoder input is always text data, never a GUI command.
-                broadcast({{"type","decoder_text"},{"stream",index+3},{"text",std::string(decoders_[index]->buffer.data(),n)}});
+                const std::string text(decoders_[index]->buffer.data(),n);
+                if(index==Config::rx2_ft8) publish_ft8(text);
+                else broadcast({{"type","decoder_text"},{"stream",index+3},{"text",text}});
             } catch(const std::exception& e) {std::cerr<<"Ignored decoder text: "<<e.what()<<'\n';}
         }
         if(!stopping_ && ec!=net::error::operation_aborted) receive_decoder(index);
@@ -242,6 +245,7 @@ void Bridge::leave(uint64_t id) {
     update_mm_subscription();
     update_sstv_subscription();
     update_rtty_subscription();
+    update_ft8_subscription();
     if(owned) revoke("disconnected");else roles();
 }
 void Bridge::update_mm_subscription() {
@@ -368,6 +372,16 @@ void Bridge::packet(Bytes p) {
         if(type==5 && stream==2) {
             send_digital(p);
             if(sstv_active_ || rtty_active_) receive_rx2(p);
+            if(ft8_active_ && !(state_["flags"].get<unsigned>()&6) && !state_["loop"].value("mode",0)) {
+                const auto& receivers=state_["rx"];
+                if(receivers.contains("2") && receivers["2"]["epoch"]==get(p,12,4) &&
+                    receivers["2"]["frequency_hz"]==get(p,32,8)) {
+                    auto audio=p;
+                    put(audio,44,ft_mode_revision_,4);
+                    put(audio,48,static_cast<unsigned>(ft_mode_),4);
+                    send_decoder(Config::rx2_ft8,std::move(audio));
+                }
+            }
         }
         if(type==5 && stream==qo100::rx5_stream) {
             if(mm_audio_.is_open()) {
@@ -477,7 +491,24 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             if(!j.at("enabled").is_boolean()) throw std::runtime_error("Expected RTTY enabled boolean");
             subscribe_rtty(client,j["enabled"].get<bool>());return;
         }
+        if(type=="ft8_subscribe") {
+            clients_.at(client).ft8_rx=j.at("enabled").get<bool>();
+            update_ft8_subscription();return;
+        }
         if(client!=owner_) {error(client,id,"read_only","Only the operator can send commands");return;}
+        if(type=="ft_mode") {
+            set_ft_mode(client,id,j.at("mode").get<std::string>());return;
+        }
+        if(type=="ft8_tx_start") {
+            begin_ft8_tx(client,integer(j,"id"),integer(j,"frequency_hz",6000000000ULL),integer(j,"level",100),
+                j.at("message").get<std::string>(),integer(j,"audio_hz",3950),integer(j,"parity",1),
+                j.value("mode",ft_mode_name(ft_mode_)));
+            return;
+        }
+        if(type=="ft8_tx_stop") {
+            if(tx2_active(Tx2Mode::ft8)) end_tx2("stopped");
+            return;
+        }
         if(type=="activity") {clients_.at(client).activity=Clock::now();return;}
         if(type=="ptt_keepalive") {if(ptt_requested_) ptt_until_=Clock::now()+std::chrono::milliseconds(750);return;}
         if(type=="rtty_tx_keepalive") {keep_rtty_tx(integer(j,"tx_id"));return;}
@@ -528,7 +559,11 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
         const bool query=j.value("query",false);Bytes p;uint8_t reply=0;
         if(type=="tune") {
             const auto stream=integer(j,"stream",2);if(!stream) throw std::runtime_error("RX stream must be 1 or 2");
-            p=header(3,stream);put(p,32,integer(j,"frequency_hz",UINT64_MAX),8);reply=4;
+            const auto hz=integer(j,"frequency_hz",UINT64_MAX);
+            if(stream==2 && tx2_active(Tx2Mode::ft8) &&
+                state_["rx"].value("2",Json::object()).value("frequency_hz",uint64_t(0))!=hz)
+                end_tx2("retuned");
+            p=header(3,stream);put(p,32,hz,8);reply=4;
         } else if(type=="tx") {
             const auto channel=j.contains("channel")?integer(j,"channel",2):1;
             if(channel==0) throw std::runtime_error("TX channel must be 1 or 2");
@@ -613,6 +648,7 @@ void Bridge::tick() {
         }
     }
     if(ptt_requested_ && now>ptt_until_) tx_off();
+    if(tx2_active(Tx2Mode::ft8) && !tx2_ready(tx2_job_->frequency,now)) end_tx2("unavailable");
     update_digital_activity();
     if(initialized_ && now>=next_rx_) {
         for(unsigned stream:{1u,2u}) {

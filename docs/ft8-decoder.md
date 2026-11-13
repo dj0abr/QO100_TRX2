@@ -1,4 +1,69 @@
-# FT8 über RX3
+# FT4 und FT8
+
+## FT4/8 über RX2/TX2
+
+Über der Zoom-Kachel **DigiModes → FT4/8** öffnen und unter **Betriebsart**
+FT4 oder FT8 auswählen. Die Auswahl gilt für RX2 und TX2. Ein Klick auf die
+Frequenzanzeige stimmt RX2 auf 10 489 540 000 Hz und TX2 auf 2 400 040 000 Hz ab.
+Der Wasserfall zeigt das Empfangsfenster von 0 bis 4 kHz relativ zum USB-Träger.
+Die UTC-Uhr und der Balken zeigen den Fortschritt im aktuellen Slot.
+FT4 verwendet 7,5-Sekunden-Slots,
+FT8 verwendet 15-Sekunden-Slots. FT4 startet die Dekodierung mit den ersten
+72.576 Samples (6,048 Sekunden) jedes Slots. An RX2 startet der erste FT8-Durchlauf
+nach 141.696 Samples (11,808 Sekunden). Nach dem vollständigen Slot ergänzt ein
+zweiter Decoderaufruf weitere Treffer. Die Decodes folgen der eingestellten RX2-Frequenz. Solange FT4/8 als DigiMode
+aktiv ist, sammelt der Decoder UTC-synchrones Audio. Kurze Audiolücken bis 100 ms werden durch Nullen
+ersetzt, insgesamt höchstens 200 ms pro Slot. Damit bleibt die Position der
+FT8-Symbole im Slot erhalten. RX3 läuft parallel als Festfrequenzmonitor.
+
+Zum Senden RX2 und TX2 abstimmen. Das Feld **Audio (Hz)** gibt den Abstand des
+untersten Sendetons vom eingestellten USB-Träger an. Eine Nachricht,
+Audiofrequenz, Pegel und Slotfolge auswählen und **Einmal senden** drücken.
+Die Webbridge zeigt den geplanten UTC-Slot an und reserviert TX2 bis zum Ende
+der Sendung. **Abbrechen** stoppt die Planung oder die laufende Sendung. Bei
+belegtem TX2 erscheint eine Fehlermeldung. Freitext ist auf 13 Zeichen
+einschließlich Leerzeichen begrenzt. Ein Beispiel ist `TEST DJ0ABR`. Längere
+Nachrichten müssen einem Standardformat entsprechen.
+
+Für ein Standard-QSO eigenes Rufzeichen und QTH-Locator eingeben. Mit
+**Auto-QSO** startet ein Klick auf eine aktuelle CQ-Zeile die Antwort
+mit Locator in der passenden UTC-Slotfolge. Ein Klick auf eine Zeile aus
+einem fremden QSO ruft die sendende Station mit dem eigenen Locator. Bei
+`C8K DK2DB 73` ist das DK2DB. Auf einen Rapport der gewählten
+Gegenstation folgt `R±nn`, auf `RRR` oder `RR73` folgt `73`.
+
+Nach einem eigenen CQ-Ruf startet ein Klick auf eine adressierte Antwort mit
+Locator oder Rapport ebenfalls die Automatik. Auf den Locator folgt der
+Rapport, auf `R±nn` folgt `RR73`. Das abschließende `73` der Gegenstation
+beendet das QSO. Die eingestellte TX-Audiofrequenz gilt für das ganze QSO.
+
+**Abbrechen** stoppt das Auto-QSO auch während der Wartezeit. Ohne passende
+Antwort innerhalb von vier Slots endet die Automatik. Einen wiederholten
+Rapport beantwortet sie höchstens dreimal pro Schritt. Ein Frequenzwechsel,
+Verbindungsverlust oder der Wechsel zu SSTV oder RTTY beendet die Automatik.
+Beim Wechsel zu Zoom, Monitor oder Multimedia-Bake läuft der gewählte DigiMode
+im Hintergrund weiter. **Anzeigen** öffnet seine Kachel wieder. **Aus** beendet
+den DigiMode einschließlich einer laufenden oder geplanten Sendung.
+
+Ohne Häkchen an **Auto-QSO** bleibt die Antwort ein Entwurf. **CQ
+vorbereiten** erstellt den eigenen CQ-Ruf für den manuellen Betrieb.
+**Einmal senden** plant eine einzelne Aussendung. Ist die Vorbereitungsfrist
+für den nächsten Slot verstrichen, nimmt TX2 den nächsten Slot derselben Folge.
+
+`start_all.sh` startet den RX2-Dienst separat mit `--rx 2`. Die beiden
+`rx2_decoder_*`-Ports in `config/webbridge.conf` sind standardmäßig 40918 und
+40919. Bei eigener Konfiguration beide Ports übernehmen. Zwei Nullwerte
+deaktivieren die Funktion.
+
+Für den Sendestart ist die UTC-Systemuhr des Rechners maßgeblich. Die Webbridge
+beginnt mit der PCM-Übergabe bei Slotbeginn plus 500 ms abzüglich
+`ft8_tx_lead_ms`. Die voreingestellten 80 ms sind ein Schätzwert für DSP und
+Pluto-Puffer. Für den Abgleich am Gerät den tatsächlichen HF-Start messen und
+bei einem zu späten Signal den Vorlauf um die gemessene Abweichung erhöhen.
+Der Integrationstest prüft den UTC-Start der PCM-Übergabe und die Dekodierbarkeit
+des erzeugten Signals mit dem synthetischen Backend.
+
+## FT8 über RX3
 
 Der eigenständige Empfänger **`qo100_ft8_decoder`** ersetzt den Test-Dummy.
 Er verwendet den Decoder aus kwWebRXpp mit dessen vendorten WSJT-X-Quellen.
@@ -20,7 +85,7 @@ Es darf jeweils nur ein Decoder denselben UDP-Port belegen.
 
 Unter **Setup → Monitoring-Empfänger** den USB-Träger als **RX3 · FT8 (Hz)**
 eingeben und **Änderungen speichern**. Startwert: **10489540000 Hz**.
-Oben in der Zoom-Kachel **FT8-Monitor** auswählen; der Text nutzt die gesamte Kachel.
+Oben in der Zoom-Kachel **Monitor → FT8** auswählen. Der Text nutzt die gesamte Kachel.
 RX4 dekodiert gleichzeitig die PSK-Bake; beide Textpuffer laufen unabhängig weiter. Empfangene Zeilen enthalten:
 
 ```text

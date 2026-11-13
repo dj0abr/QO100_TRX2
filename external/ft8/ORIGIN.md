@@ -20,3 +20,10 @@ SHA-256 der kopierten Integrationsvorlagen vor Anpassung:
   "ft8/CMakeLists.txt": "85b684568c20c2faa0d69b4b69de0040d8687fd7c20afe060532c3a7fc643623"
 }
 ```
+
+## FT4
+
+Das vollständige Upstream-Verzeichnis `lib/ft4`, `lib/ft4_decode.f90` und
+die FT4-Beispielaufnahme stammen direkt aus demselben WSJT-X-Commit.
+Die Prüfsummen stehen zusammen mit den FT8-Quellen in
+`vendor/wsjtx/UPSTREAM.json`.

@@ -45,13 +45,13 @@ struct Child {
         }
     }
 };
-std::string utcLabel(std::int64_t seconds) {
-    const std::time_t value = seconds;
+std::string utcLabel(std::int64_t milliseconds) {
+    const std::time_t value = milliseconds / 1000;
     std::tm utc{};
     if (!gmtime_r(&value, &utc)) throw std::runtime_error("invalid UTC slot");
     char label[16];
     std::strftime(label, sizeof(label), "%H%M%S", &utc);
-    return label;
+    return std::string(label) + (milliseconds % 1000 ? ".5" : "");
 }
 void drain(FD& fd, std::string& output) {
     char buffer[8192];
@@ -70,9 +70,9 @@ void drain(FD& fd, std::string& output) {
 }
 
 FT8DecoderProcess::FT8DecoderProcess(std::string executable,
-        std::chrono::milliseconds timeout, ResultSink resultSink)
+        std::chrono::milliseconds timeout, ResultSink resultSink, bool structured)
     : executable_(executable.empty() ? executablePath() : std::move(executable)),
-      timeout_(timeout), resultSink_(std::move(resultSink)), thread_(&FT8DecoderProcess::worker, this) {}
+      timeout_(timeout), resultSink_(std::move(resultSink)), structured_(structured), thread_(&FT8DecoderProcess::worker, this) {}
 
 FT8DecoderProcess::~FT8DecoderProcess() { stop(); }
 
@@ -89,7 +89,7 @@ bool FT8DecoderProcess::enqueue(FT8Slot&& slot) {
     std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
     if (!lock || stopping_) {
         std::fprintf(stderr, "[FT8] Decoder busy; dropping UTC slot %s\n",
-                     utcLabel(slot.utcSeconds).c_str());
+                     utcLabel(slot.utcMilliseconds).c_str());
         return false;
     }
     // Monitoring is best-effort: never decode a growing backlog of stale slots.
@@ -122,33 +122,38 @@ void FT8DecoderProcess::worker() {
             slot = std::move(queue_.front()); queue_.pop_front();
         }
         try {
-            std::istringstream lines(decode(slot, executable_, timeout_, stopping_));
+            std::istringstream lines(decode(slot, executable_, timeout_, stopping_, structured_));
             FT8DecodedSlot result;
-            result.utcSeconds = slot.utcSeconds;
+            result.utcMilliseconds = slot.utcMilliseconds;
             result.dialHz = slot.dialHz;
             result.generation = slot.generation;
+            result.session = slot.session;
+            result.epoch = slot.epoch;
+            result.modeRevision = slot.modeRevision;
+            result.mode = slot.mode;
             std::string line;
             while (std::getline(lines, line)) {
                 if (line.empty()) continue;
-                std::fprintf(stdout, "[FT8 %.6f MHz] %s\n", slot.dialHz / 1e6, line.c_str());
+                std::fprintf(stdout, "[%s %.6f MHz] %s\n", ft_mode_name(slot.mode), slot.dialHz / 1e6, line.c_str());
                 result.lines.push_back(std::move(line));
             }
             std::fflush(stdout);
             if (resultSink_ && !stopping_) resultSink_(std::move(result));
         } catch (const std::exception& e) {
             if (!stopping_) std::fprintf(stderr, "[FT8 %s %.6f MHz] %s\n",
-                utcLabel(slot.utcSeconds).c_str(), slot.dialHz / 1e6, e.what());
+                utcLabel(slot.utcMilliseconds).c_str(), slot.dialHz / 1e6, e.what());
         }
     }
 }
 
 std::string FT8DecoderProcess::decode(const FT8Slot& slot,
         const std::string& executable, std::chrono::milliseconds timeout,
-        const std::atomic<bool>& cancel) {
+        const std::atomic<bool>& cancel, bool structured) {
     static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559,
                   "IEEE-754 float32 required");
-    if (slot.audio.size() != 180000 || slot.utcSeconds % 15 != 0)
-        throw std::runtime_error("expected a complete UTC-aligned 180000-sample slot");
+    const bool early = slot.mode == FtMode::ft8 && slot.audio.size() == ft8_early_samples;
+    if ((!early && slot.audio.size() != ft_decode_samples(slot.mode)) || slot.utcMilliseconds % ft_slot_ms(slot.mode) != 0)
+        throw std::runtime_error("expected a complete UTC-aligned FT decode window");
     double peak = 0;
     for (float sample : slot.audio) {
         if (!std::isfinite(sample)) throw std::runtime_error("non-finite FT8 audio");
@@ -176,12 +181,22 @@ std::string FT8DecoderProcess::decode(const FT8Slot& slot,
         posix_spawn_file_actions_addclose(&actions, fd->value);
     posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
     posix_spawnattr_setpgroup(&attributes, 0);
-    std::string label = utcLabel(slot.utcSeconds);
-    std::array<char*, 12> args{{const_cast<char*>(executable.c_str()),
+    std::string label = utcLabel(slot.utcMilliseconds);
+    std::vector<char*> args{const_cast<char*>(executable.c_str()),
         const_cast<char*>("--format"), const_cast<char*>("f32le"),
-        const_cast<char*>("--output"), const_cast<char*>("text"),
+        const_cast<char*>("--output"), const_cast<char*>(structured ? "jsonl" : "text"),
         const_cast<char*>("--utc"), label.data(), const_cast<char*>("--depth"),
-        const_cast<char*>("1"), const_cast<char*>("-"), nullptr}};
+        const_cast<char*>("1")};
+    if (early) {
+        args.back() = const_cast<char*>("2"); // WSJT-X skips the early pass at depth 1.
+        args.push_back(const_cast<char*>("--early-ft8"));
+    }
+    if (slot.mode == FtMode::ft4) {
+        args.push_back(const_cast<char*>("--mode"));
+        args.push_back(const_cast<char*>("FT4"));
+    }
+    args.push_back(const_cast<char*>("-"));
+    args.push_back(nullptr);
     Child child;
     const int error = posix_spawn(&child.pid, executable.c_str(), &actions,
                                   &attributes, args.data(), environ);

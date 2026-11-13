@@ -221,6 +221,7 @@ Der Bandplan zeigt die Bereiche für die verschiedenen Betriebsarten. Mit **↻*
 
 - **RX1:** normaler QO-100-Sprechfunk mit einstellbarem Audiofilter und Rauschreduktion.
 - **RX2/TX2:** unabhängiges Digitalpaar für FLdigi/WSJT-X mit virtuellen Audiogeräten und zusätzlicher RX2-Audiokontrolle im Browser. [Einrichtung und Pegel](docs/digital-audio.md).
+- **FT4/8 RX2/TX2:** FT4- und FT8-Transceiver unter **DigiModes → FT4/8** mit RX2-Wasserfall, manuellen Einzelsendungen und automatischer QSO-Abfolge. [Bedienung und Konfiguration](docs/ft8-decoder.md).
 - **RX3:** FT8-Monitor.
 - **RX4:** PSK-Bakenmonitor.
 - **RX5:** Multimedia-Bakenmonitor mit automatischer Frequenznachführung (AFC), DX-Cluster, CW-Skimmer und Bulletins. Vorgabe: **10489993000 Hz**. [Details](docs/mm-beacon.md).
@@ -234,7 +235,7 @@ Der Bandplan zeigt die Bereiche für die verschiedenen Betriebsarten. Mit **↻*
 
 Die Namen gelten aus Sicht des Digitalprogramms: `fromQO100` liefert das Empfangsaudio von RX2, `toQO100` führt das Sendeaudio zu TX2. WSJT-X zeigt zusätzlich interne Anschlüsse wie `fromQO100_internal.monitor` und `toQO100.monitor` an. Für den Betrieb über RX2/TX2 die oben aufgeführten Geräte verwenden. Nach dem Update den Stack neu starten und die bisherige Geräteauswahl im Digitalprogramm ersetzen.
 
-Die drei Monitoringfrequenzen unter **Setup → Monitoring-Empfänger** als ganze Hz einstellen und speichern. Oben in der Zoom-Kachel wählen sieben Radiobuttons **RX1-/RX2-Zoom**, **FT8-Monitor**, **PSK-Monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin** oder **RX5-Diagnose**. Die ausgewählte Ansicht nutzt den gesamten Bereich unter den Radiobuttons. Die Zoom-Auswahl folgt dem angeklickten Empfänger RX1/RX2; eine geöffnete Monitoransicht bleibt dabei bestehen. Alle Quellen werden im Hintergrund weiter empfangen und getrennt gepuffert. Ansicht und Lesepositionen bleiben in diesem Browser gespeichert. `./start_all.sh` startet alle drei Decoder. Die MM-Texte und Bulletin-Versionen bleiben in `data/mm-beacon/` über Neustarts erhalten; im Browser erscheinen die letzten 200 DX-/CW-Meldungen und das letzte vollständige Bulletin.
+Die drei Monitoringfrequenzen unter **Setup → Monitoring-Empfänger** als ganze Hz einstellen und speichern. Oben in der Zoom-Kachel stehen **RX1-/RX2-Zoom** sowie die Menüs **Monitor**, **Multimedia-Bake** und **DigiModes** zur Wahl. Die ausgewählte Ansicht nutzt den Bereich unter den Bedienelementen. Die Zoom-Auswahl folgt dem angeklickten Empfänger RX1/RX2. Eine geöffnete Monitoransicht bleibt dabei bestehen. Alle Quellen werden im Hintergrund weiter empfangen und getrennt gepuffert. Ansicht und Lesepositionen bleiben in diesem Browser gespeichert. `./start_all.sh` startet die Decoder für RX2 bis RX5. Die MM-Texte und Bulletin-Versionen bleiben in `data/mm-beacon/` über Neustarts erhalten; im Browser erscheinen die letzten 200 DX-/CW-Meldungen und das letzte vollständige Bulletin.
 
 ![Decodierte FT8-Nachrichten](docs/decoderoutput.png)
 

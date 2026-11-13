@@ -116,7 +116,37 @@
           <footer class="display-footer"><span id="wide-help" class="desktop-note">Links: RX1 + TX · Rechts: nur RX1 · Shift + Rad: TX</span><span id="touch-help" class="mobile-note">Tippen: RX1 + TX</span><span>600 kHz</span></footer>
         </section>
         <section id="zoom-display" class="display zoom-tile" aria-labelledby="zoom-title">
-          <header class="display-heading zoom-heading"><h2 id="zoom-title" class="visually-hidden">RX1-ZOOM</h2><div id="zoom-sources" class="decoder-sources" role="radiogroup" aria-label="Zoom- oder Monitoransicht" data-en-aria-label="Zoom or monitor view"><label><input id="decoder-sourcezoom" type="radio" name="zoom-source" value="zoom" checked><span id="zoom-choice-label">RX1-Zoom</span></label><label><input id="decoder-source3" type="radio" name="zoom-source" value="3"><span data-en="FT8 monitor">FT8-Monitor</span></label><label><input id="decoder-source4" type="radio" name="zoom-source" value="4"><span data-en="PSK monitor">PSK-Monitor</span></label><label><input id="decoder-source5-dx-cluster" type="radio" name="zoom-source" value="5-dx-cluster">DX-Cluster</label><label><input id="decoder-source5-cw-skimmer" type="radio" name="zoom-source" value="5-cw-skimmer">CW-Skimmer</label><label><input id="decoder-source5-bulletin" type="radio" name="zoom-source" value="5-bulletin">QO100-Bulletin</label><label><input id="decoder-source5-diagnostics" type="radio" name="zoom-source" value="5-diagnostics"><span data-en="RX5 diagnostics">RX5-Diagnose</span></label><label><input id="decoder-sourcesstv" type="radio" name="zoom-source" value="sstv">SSTV</label><label><input id="decoder-sourcertty" type="radio" name="zoom-source" value="rtty">RTTY</label></div><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den ausgewählten Text in diesem Browser löschen" data-en-title="Clear only the selected text in this browser" hidden>Text löschen</button></header>
+          <header class="display-heading zoom-heading"><h2 id="zoom-title" class="visually-hidden">RX1-ZOOM</h2><div id="zoom-sources" class="decoder-sources" role="group" aria-label="Ansicht" data-en-aria-label="View">
+              <button id="decoder-sourcezoom" type="button" aria-pressed="true"><span id="zoom-choice-label">RX1-Zoom</span></button>
+              <label class="decoder-group" for="decoder-monitor">
+                <span>Monitor</span>
+                <select id="decoder-monitor">
+                  <option value="" hidden disabled>—</option>
+                  <option value="3">FT8</option>
+                  <option value="4" data-en="PSK beacon">PSK-Bake</option>
+                </select>
+              </label>
+              <label class="decoder-group" for="decoder-multimedia">
+                <span data-en="Multimedia beacon">Multimedia-Bake</span>
+                <select id="decoder-multimedia">
+                  <option value="" hidden disabled>—</option>
+                  <option value="5-dx-cluster">DX-Cluster</option>
+                  <option value="5-cw-skimmer">CW-Skimmer</option>
+                  <option value="5-bulletin">QO100-Bulletin</option>
+                  <option value="5-diagnostics" data-en="RX5 diagnostics">RX5-Diagnose</option>
+                </select>
+              </label>
+              <label class="decoder-group" for="decoder-digital">
+                <span>DigiModes</span>
+                <select id="decoder-digital">
+                  <option value="" data-en="Off">Aus</option>
+                  <option value="sstv">SSTV</option>
+                  <option value="rtty">RTTY</option>
+                  <option value="ft8">FT4/8</option>
+                </select>
+              </label>
+              <button id="decoder-show-digital" type="button" data-en="Show digital mode" hidden>Anzeigen</button>
+            </div><button id="decoder-clear" type="button" data-en="Clear text" title="Nur den ausgewählten Text in diesem Browser löschen" data-en-title="Clear only the selected text in this browser" hidden>Text löschen</button></header>
           <div id="zoom-output" class="zoom-output" data-view="zoom">
             <div id="zoom-plots" class="zoom-plots" aria-hidden="false">
               <div class="plot-body"><canvas id="zoom-spectrum" class="spectrum" data-spectrum data-tune aria-label="RX1-Zoom-Spektrum, zum Abstimmen anklicken"></canvas><span class="display-empty">Warte auf RX1-Zoom …</span></div>
@@ -135,6 +165,71 @@
               <div class="mm-status"><strong id="mm-lock" role="status">Warte auf RX5-Daten</strong><span id="mm-warning"></span></div>
               <dl class="mm-values"><div><dt>Pilot</dt><dd id="mm-pilot">—</dd></div><div><dt>AFC</dt><dd id="mm-afc">—</dd></div><div><dt data-en="PLL residual">PLL-Rest</dt><dd id="mm-pll">—</dd></div><div><dt data-en="Audio level">Audiopegel</dt><dd id="mm-level">—</dd></div><div><dt>RX5</dt><dd id="mm-frequency">—</dd></div><div><dt data-en="AFC state">AFC-Zustand</dt><dd id="mm-afc-state">—</dd></div></dl>
               <div class="mm-charts"><div class="mm-chart"><canvas id="mm-spectrum" aria-label="RX5-Audiospektrum von 0 bis 4000 Hz" data-en-aria-label="RX5 audio spectrum from 0 to 4000 Hz"></canvas></div><div class="mm-chart"><canvas id="mm-constellation" aria-label="RX5 8APSK-Konstellation" data-en-aria-label="RX5 8APSK constellation"></canvas></div></div>
+            </section>
+            <section id="ft8-panel" class="ft8-panel" aria-label="FT4/8 RX2/TX2" hidden>
+              <header class="ft-mode-toolbar">
+                <div class="ft-slot-header">
+                  <button id="ft8-frequency" class="ft-frequency" type="button" disabled
+                    title="RX2/TX2 auf die FT8-Standardfrequenz abstimmen"
+                    data-en-title="Tune RX2/TX2 to the standard FT8 frequency">RX2 · TX2</button>
+                  <div class="ft-slot-meter">
+                    <time id="ft-utc-clock">--:--:-- UTC</time>
+                    <progress id="ft-slot-progress" value="0" max="15" aria-label="Fortschritt im UTC-Slot"
+                      data-en-aria-label="UTC slot progress"></progress>
+                  </div>
+                </div>
+                <label><span data-en="Mode">Betriebsart</span>
+                  <select id="ft-mode" disabled><option value="FT4">FT4</option><option value="FT8" selected>FT8</option></select>
+                </label>
+              </header>
+              <div class="ft-receive">
+                <div id="ft8-log" class="decoder-text" role="log" aria-live="polite" aria-label="FT4/8 RX2" tabindex="0"></div>
+                <div class="ft-waterfall">
+                  <canvas id="ft-waterfall" width="400" height="150" role="img"
+                    aria-label="RX2-Wasserfall von 0 bis 4 kHz" data-en-aria-label="RX2 waterfall from 0 to 4 kHz"></canvas>
+                  <div class="ft-waterfall-axis" aria-hidden="true"><span>0</span><span>1</span><span>2</span><span>3</span><span>4 kHz</span></div>
+                </div>
+              </div>
+              <div class="ft-controls">
+                <div class="ft-qso">
+                  <label><span data-en="My callsign">Eigenes Rufzeichen</span>
+                    <input id="ft-own-call" maxlength="6" spellcheck="false" autocomplete="off">
+                  </label>
+                  <label><span>QTH-Locator</span><input id="ft-own-grid" maxlength="6" spellcheck="false" autocomplete="off"></label>
+                  <button id="ft-cq" type="button" class="small-button" data-en="Prepare CQ" disabled>CQ vorbereiten</button>
+                  <label class="ft-auto"><input id="ft-auto" type="checkbox" checked>
+                    <span data-en="Auto QSO">Auto-QSO</span>
+                  </label>
+                </div>
+                <form id="ft8-tx-form">
+                  <label class="ft8-message"><span data-en="TX message">TX-Nachricht</span>
+                    <input id="ft8-message" type="text" maxlength="37" aria-describedby="ft8-status" autocomplete="off" spellcheck="false" required>
+                  </label>
+                  <div class="ft-tx-settings">
+                    <label><span data-en="Audio (Hz)">Audio (Hz)</span>
+                      <input id="ft8-audio-hz" type="number" min="100" max="3950" value="1500" required>
+                    </label>
+                    <label><span data-en="TX level (%)">TX-Pegel (%)</span>
+                      <input id="ft8-level" type="number" min="1" max="100" value="25" required>
+                    </label>
+                    <label><span data-en="UTC slot">UTC-Slot</span>
+                      <select id="ft8-parity"><option value="0">:00 / :30</option><option value="1">:15 / :45</option></select>
+                    </label>
+                  </div>
+                  <div class="ft-tx-actions">
+                    <button id="ft8-send" class="small-button" type="submit" data-en="Send once" disabled>Einmal senden</button>
+                    <button id="ft8-stop" class="small-button" type="button" data-en="Cancel" disabled>Abbrechen</button>
+                  </div>
+                </form>
+                <div class="ft-status-bar">
+                  <div id="ft-contact" class="ft-contact" hidden>
+                    <output id="ft-qso-status" aria-live="polite"></output>
+                    <button id="ft-apply-reply" type="button" class="small-button" data-en="Use suggested reply" hidden>Vorschlag übernehmen</button>
+                    <button id="ft-end-qso" type="button" class="small-button" data-en="End QSO">QSO beenden</button>
+                  </div>
+                  <p id="ft8-status" role="status"></p>
+                </div>
+              </div>
             </section>
             <section id="rtty-panel" class="rtty-panel" aria-label="RTTY" hidden>
               <header class="rtty-toolbar">

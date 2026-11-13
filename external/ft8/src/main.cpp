@@ -1,5 +1,6 @@
 // Standalone CLI, 2026. SPDX-License-Identifier: GPL-3.0-only
 #include "ft8_bridge.h"
+#include "ft_mode.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -26,21 +27,25 @@ struct InputError : std::runtime_error { using std::runtime_error::runtime_error
 struct Options {
     std::string input, format = "wav", output = "jsonl", utc;
     int low = 200, high = 4000, depth = 3;
+    FtMode mode = FtMode::ft8;
+    bool early = false;
 };
 
 void help() {
     std::cout <<
-        "ft8-decoder 1.0.0 - standalone WSJT-X FT8 decoder\n"
+        "ft8-decoder 1.0.0 - standalone WSJT-X FT4/FT8 decoder\n"
         "Usage: ft8-decoder [options] FILE\n"
         "       ft8-decoder --format s16le - < slot.raw\n\n"
-        "Input: mono audio, 12000 Hz, 13..15 s; one UTC-aligned slot per call.\n"
+        "Input: mono audio, 12000 Hz; one UTC-aligned slot per call.\n"
         "Use '-' for standard input (read until EOF). No IQ input or resampling.\n\n"
         "  --format wav|s16le|f32le   Input format (default: wav, PCM16)\n"
         "  --output jsonl|text       Output format (default: jsonl)\n"
         "  --min-freq HZ            Lowest tone-zero frequency (default: 200)\n"
         "  --max-freq HZ            Highest tone-zero frequency (default: 4000)\n"
         "  --depth 1|2|3            WSJT-X decoding depth (default: 3)\n"
-        "  --utc HHMMSS             Optional UTC slot label (00/15/30/45 s)\n"
+        "  --early-ft8              Decode only the first 141696 samples (FT8, depth 2 or 3)\n"
+        "  --mode FT4|FT8           Decode mode (default: FT8)\n"
+        "  --utc HHMMSS[.5]         Optional UTC slot label\n"
         "  --help                   Show help\n"
         "  --version                Show version and upstream commit\n\n"
         "JSONL: decode objects followed by one complete object, also for silence.\n"
@@ -63,6 +68,7 @@ Options parse(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (!positional && arg == "--") { positional = true; continue; }
+        if (!positional && arg == "--early-ft8") { o.early = true; continue; }
         if (!positional && arg == "--help") { help(); std::exit(0); }
         if (!positional && arg == "--version") {
             std::cout << "ft8-decoder 1.0.0; WSJT-X 967c85a6119110788b0df3782cf796485b2cee14; GPL-3.0\n";
@@ -70,13 +76,18 @@ Options parse(int argc, char** argv) {
         }
         if (!positional && arg.rfind("--", 0) == 0) {
             if (arg != "--format" && arg != "--output" && arg != "--utc" &&
-                arg != "--min-freq" && arg != "--max-freq" && arg != "--depth")
+                arg != "--min-freq" && arg != "--max-freq" && arg != "--depth" && arg != "--mode")
                 throw InputError("Unknown option: " + arg);
             if (++i == argc) throw InputError("Missing value for " + arg);
             const std::string value = argv[i];
             if (arg == "--format") o.format = value;
             else if (arg == "--output") o.output = value;
             else if (arg == "--utc") o.utc = value;
+            else if (arg == "--mode") {
+                if (value == "FT4") o.mode = FtMode::ft4;
+                else if (value != "FT8") throw InputError("--mode must be FT4 or FT8");
+                else o.mode = FtMode::ft8;
+            }
             else if (arg == "--min-freq") o.low = integer(value, arg);
             else if (arg == "--max-freq") o.high = integer(value, arg);
             else if (arg == "--depth") o.depth = integer(value, arg);
@@ -97,13 +108,17 @@ Options parse(int argc, char** argv) {
     if (o.low < 100 || o.high > 4900 || o.high - o.low < 200)
         throw InputError("Frequency range must be inside 100..4900 Hz and at least 200 Hz wide");
     if (o.depth < 1 || o.depth > 3) throw InputError("--depth must be 1, 2 or 3");
+    if (o.early && (o.mode != FtMode::ft8 || o.depth < 2))
+        throw InputError("--early-ft8 requires FT8 and depth 2 or 3");
     if (!o.utc.empty()) {
-        if (o.utc.size() != 6 || o.utc.find_first_not_of("0123456789") != std::string::npos ||
-            integer(o.utc.substr(0, 2), "--utc") > 23 ||
-            integer(o.utc.substr(2, 2), "--utc") > 59 ||
-            integer(o.utc.substr(4, 2), "--utc") > 59 ||
-            integer(o.utc.substr(4, 2), "--utc") % 15 != 0)
-            throw InputError("--utc requires HHMMSS at a 15-second UTC slot boundary");
+        const bool half = o.utc.size() == 8 && o.utc.substr(6) == ".5";
+        if ((o.utc.size() != 6 && !half) || o.utc.substr(0, 6).find_first_not_of("0123456789") != std::string::npos)
+            throw InputError("--utc requires HHMMSS or HHMMSS.5");
+        const int sec = integer(o.utc.substr(4, 2), "--utc");
+        if (integer(o.utc.substr(0, 2), "--utc") > 23 ||
+            integer(o.utc.substr(2, 2), "--utc") > 59 || sec > 59 ||
+            (sec * 1000 + (half ? 500 : 0)) % ft_slot_ms(o.mode))
+            throw InputError("--utc must fall on a slot boundary for the selected mode");
     }
     return o;
 }
@@ -133,7 +148,9 @@ struct Audio {
     std::array<std::int16_t, sample_count> samples{};
     std::size_t count = 0;
 };
-Audio audio(const Bytes& b, const std::string& format) {
+Audio audio(const Bytes& b, const Options& options) {
+    const auto& format = options.format;
+    const auto mode = options.mode;
     std::size_t start = 0, size = b.size();
     const std::size_t stride = format == "f32le" ? 4 : 2;
     if (format == "wav") {
@@ -175,8 +192,14 @@ Audio audio(const Bytes& b, const std::string& format) {
     }
     if (size % stride) throw InputError("Input ends in a partial audio sample");
     const auto n = size / stride;
-    if (n < min_samples || n > sample_count)
+    if (mode == FtMode::ft4) {
+        if (n < ft_decode_samples(mode) || n > ft_slot_samples(mode))
+            throw InputError("Expected 72576..90000 mono samples at 12000 Hz for FT4");
+    } else if (options.early) {
+        if (n != ft8_early_samples) throw InputError("--early-ft8 requires 141696 samples");
+    } else if (n < min_samples || n > sample_count) {
         throw InputError("Expected 156000..180000 mono samples (13..15 seconds at 12000 Hz)");
+    }
     Audio result;
     result.count = n;
     for (std::size_t i = 0; i < n; ++i) {
@@ -265,11 +288,16 @@ int main(int argc, char** argv) {
             if (!input) throw InputError("Cannot open input: " + options.input);
             bytes = read_bytes(input);
         }
-        const auto samples = audio(bytes, options.format);
+        const auto samples = audio(bytes, options);
         Results results;
         // Silence has no finite spectral baseline in upstream. Skip it safely.
-        if (std::any_of(samples.samples.begin(), samples.samples.end(), [](auto x) { return x != 0; }))
-            ft8_decode_slot(samples.samples.data(), options.low, options.high, options.depth, receive, &results);
+        const auto decode_end = samples.samples.begin() + ft_decode_samples(options.mode);
+        if (std::any_of(samples.samples.begin(), decode_end, [](auto x) { return x != 0; })) {
+            if (options.mode == FtMode::ft4)
+                ft4_decode_slot(samples.samples.data(), options.low, options.high, options.depth, receive, &results);
+            else
+                ft8_decode_slot(samples.samples.data(), options.low, options.high, options.depth, receive, &results, options.early);
+        }
         if (results.failed) throw std::runtime_error("Could not collect decoder results");
         print(options, samples, results);
         std::cout.flush();

@@ -48,7 +48,24 @@
     "lib/ft8/ldpc_174_91_c_generator.f90": "b061e4428fd89c9d2df3ea7026f03430141c6df36baaf341dc7b84b9f5573bfd",
     "lib/ft8/ldpc_174_91_c_parity.f90": "5bf5e359b037d97d508dc1abcdc1d917a50a5d26a917f4a488b99213fc5eb834",
     "AUTHORS": "bcfebe78a974e4f439613d2acfea24a612b2675d75c1428441ddee5d51f2bf55",
-    "COPYING": "b4bbff835ca86b6051284a77138b7b31db215fb3e8aa70221464126cc9ad60fa"
+    "COPYING": "b4bbff835ca86b6051284a77138b7b31db215fb3e8aa70221464126cc9ad60fa",
+    "lib/ft4/clockit.f90": "b04de008e4e141866e7fa141aba903e0159f61cb038998810fb6b5e71e9bbb52",
+    "lib/ft4/ft4_baseline.f90": "68c0c686120471878b853219661d8b2844af167027f54ef4ab47ebc7f80bb10d",
+    "lib/ft4/ft4_downsample.f90": "e12dd4a4b9e9f90ef0d0f532a45cf0dfb99fe2bc5144a5f76efa6058c6d0d011",
+    "lib/ft4/ft4_params.f90": "d3ed8b1049ec214f240ac2071c9e712daa26037f49ab3eb52d2b49b49c75d651",
+    "lib/ft4/ft4_testmsg.f90": "8d4e1144a3fa2a792ab6d59af2ddddd31f4c49b82ee8b3b21abcc0bf2095cfdc",
+    "lib/ft4/ft4code.f90": "527608554e8fd3c58c61b5f03b4025fff4db3f38952ec2ddfbda6899f4c4cd19",
+    "lib/ft4/ft4sim.f90": "dfca44c09984636d9487d483e7c58f32c3425de452b231726bc5874a70a9a49a",
+    "lib/ft4/ft4sim_mult.f90": "2cad049c68fe630865fd496205f58ef145ec6df58444bda423816b71802c4143",
+    "lib/ft4/gen_ft4wave.f90": "887a0db8546ec27c8481ee30cb8098245c0635df0f50187b212a6c0ff96471f3",
+    "lib/ft4/genft4.f90": "8cde7ea98191a81439da34c9cf722baec28b4c7e432f3ad8dd9f352034fabb74",
+    "lib/ft4/get_ft4_bitmetrics.f90": "37ecfe843d5eaf57c7ba03db71157b4a514f24a781cdaceb597b1cf240ec4f99",
+    "lib/ft4/getcandidates4.f90": "6c48cd699c68f3838c94fac4bd65495cc0172b86c5021c3b66c477f9c0612e09",
+    "lib/ft4/messages.txt": "2444d707b302173a76b3737a589c5e20399ee6155f5a3d483530cab06dbbb293",
+    "lib/ft4/subtractft4.f90": "9724a56ee73ebc88b46a037fdcb2156c2e79177f6c25d524e40b20ef7ed9f959",
+    "lib/ft4/sync4d.f90": "bf5a6113af9d0943660ba103fee8411b8311d871539caa54874c50fe45426812",
+    "lib/ft4_decode.f90": "d70d1ccce8d36bc0e9f628e27a4fb71ce0a837b7f9c98d392f1a318b26ddd412",
+    "samples/FT4/000000_000002.wav": "d9e91fa04ba138a7b9f41b4103823c77ca1c3a9775101f6b14d60935bcd3813b"
   },
   "fragments": {
     "lib/stdcall.f90": {

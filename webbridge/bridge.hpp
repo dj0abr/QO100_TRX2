@@ -1,5 +1,6 @@
 #pragma once
 #include "wire.hpp"
+#include "ft_mode.hpp"
 #include "mm_monitor.hpp"
 #include "qo100/channels.hpp"
 #include "rtty_rx.hpp"
@@ -23,7 +24,9 @@ struct Config {
     std::string listen="0.0.0.0", web_root=QO100_WEB_ROOT;
     uint16_t port=8080,backend_port=40900;
     struct Decoder { uint16_t audio_port=0,text_port=0; }; // Both zero disables this link.
-    std::array<Decoder,2> decoders;
+    static constexpr std::size_t rx2_ft8 = 2;
+    std::array<Decoder,3> decoders;
+    unsigned ft8_tx_lead_ms = 80;
     uint16_t digital_audio_port=0,digital_bridge_port=0;
     uint16_t rx5_decoder_audio_port=0,mm_http_port=0;
     unsigned idle_seconds=0,heartbeat_seconds=60,max_clients=16;
@@ -35,7 +38,7 @@ struct Peer {
     virtual void close(const std::string& reason)=0;
 };
 class Bridge {
-    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;bool mm_diagnostics=false;std::optional<bool> rx2_audio{};bool sstv_rx=false, rtty_rx=false;};
+    struct Client {std::shared_ptr<Peer> peer; Clock::time_point activity;bool mm_diagnostics=false;std::optional<bool> rx2_audio{};bool sstv_rx=false, rtty_rx=false, ft8_rx=false;};
     struct Pending {
         Bytes packet;uint8_t reply;uint64_t client=0;Json id;std::string command;
         Clock::time_point sent{},started=Clock::now();bool safety=false;
@@ -59,8 +62,11 @@ class Bridge {
         std::array<char,4097> buffer{};
         explicit DecoderLink(net::io_context& io):socket(io) {}
     };
-    std::array<std::unique_ptr<DecoderLink>,2> decoders_;
-    enum class Tx2Mode { sstv, rtty };
+    std::array<std::unique_ptr<DecoderLink>,3> decoders_;
+    bool ft8_active_ = false;
+    FtMode ft_mode_ = FtMode::ft8;
+    uint32_t ft_mode_revision_ = 1;
+    enum class Tx2Mode { sstv, rtty, ft8 };
     static constexpr auto tx2_key = (uint64_t(6) << 32) | qo100::tx2_stream;
     struct SstvUpload {
         uint32_t id;
@@ -71,8 +77,15 @@ class Bridge {
         size_t uploaded = 0;
         Clock::time_point deadline;
     };
+    struct Ft8Tx {
+        static constexpr auto preparation = std::chrono::seconds(1);
+        std::vector<int16_t> pcm;
+        double slot_utc;
+        std::chrono::system_clock::time_point dispatch_utc;
+        Clock::time_point dispatch_at;
+    };
     using Tx2Source = std::variant<std::unique_ptr<qo100::sstv::Sender>,
-                                   std::unique_ptr<qo100::rtty::Encoder>>;
+                                   std::unique_ptr<qo100::rtty::Encoder>, Ft8Tx>;
     struct RttyTx {
         uint32_t id;
         std::optional<Clock::time_point> ptt_until{};
@@ -117,7 +130,10 @@ class Bridge {
     Clock::time_point ptt_until_{};
     void receive();void packet(Bytes p);void tick();void reset_backend();void bootstrap();
     void send_udp(Bytes p);
-    void receive_decoder(size_t index);void send_decoder(size_t index,Bytes p);
+    void receive_decoder(size_t index);
+    void update_ft8_subscription();
+    void set_ft_mode(uint64_t client, const Json& id, const std::string& mode);
+    void publish_ft8(const std::string& text);void send_decoder(size_t index,Bytes p);
     void receive_digital();void send_digital(Bytes p);
     void update_mm_subscription();void update_digital_activity();
     void subscribe_sstv(uint64_t client, bool enabled);
@@ -141,6 +157,8 @@ class Bridge {
     bool tx2_active(Tx2Mode mode) const;
     bool can_start_tx2(uint64_t client, uint32_t id, uint64_t frequency, unsigned level);
     bool tx2_ready(uint64_t frequency, Clock::time_point now) const;
+    void begin_ft8_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level,
+                      const std::string& message, unsigned audio_hz, unsigned parity, const std::string& mode);
     void begin_sstv_tx(uint64_t client, uint32_t upload_id, uint64_t frequency, unsigned level);
     void sstv_tx_chunk(const Bytes& bytes);
     void begin_rtty_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level, const std::string& message);

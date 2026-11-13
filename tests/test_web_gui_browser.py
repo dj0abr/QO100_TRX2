@@ -86,9 +86,15 @@ def main():
             call('POST', f'/session/{session}/element/{element["element-6066-11e4-a52e-4f735466cecf"]}/click', {})
         def changed(selector, value):
             execute('const n=document.querySelector(arguments[0]);n.value=arguments[1];n.dispatchEvent(new Event("input",{bubbles:true}));n.dispatchEvent(new Event("change",{bubbles:true}));', selector, str(value))
+        def select_view(source):
+            if source == 'zoom':
+                click('#decoder-sourcezoom')
+                return
+            group = 'monitor' if source in ('3', '4') else 'multimedia' if source.startswith('5-') else 'digital'
+            changed('#decoder-' + group, source)
         def toggle_decoder():
             source=execute('return document.getElementById("decoder-panel").hidden ? (localStorage.getItem("qo100.decoderSource") || "3") : "zoom"')
-            click('#decoder-source'+source)
+            select_view(source)
         def show_zoom():
             if not execute('return document.getElementById("decoder-panel").hidden'):
                 click('#decoder-sourcezoom')
@@ -215,7 +221,7 @@ def main():
             original_zoom_height=execute('return document.getElementById("zoom").getBoundingClientRect().height')
             original_display_height=execute('return document.getElementById("zoom-display").getBoundingClientRect().height')
             history=mark_history();toggle_decoder();expect_history(history)
-            assert execute('return !document.getElementById("decoder-toggle") && document.querySelectorAll("#zoom-sources input[type=radio]").length===9')
+            assert execute('return !document.getElementById("decoder-toggle") && document.querySelectorAll("#decoder-sourcezoom, #zoom-sources > label").length===4')
             assert execute('''const body=document.getElementById('zoom-output').getBoundingClientRect(),
                 monitor=document.getElementById('decoder-panel').getBoundingClientRect();
                 return Math.abs(body.height-monitor.height)<1 && Math.abs(body.width-monitor.width)<1 && body.height>150
@@ -223,18 +229,18 @@ def main():
             assert execute('return document.getElementById("zoom-display").getBoundingClientRect().height')==original_display_height
             psk_socket.sendto(b'PSK beacon background\n', ('127.0.0.1', psk_text_port))
             wait(lambda:execute('return document.getElementById("decoder-text-4").textContent')=='PSK beacon background\n')
-            click('#decoder-source4')
+            select_view('4')
             assert execute('return document.getElementById("decoder-text").hidden && !document.getElementById("decoder-text-4").hidden')
             decoder_socket.sendto(b'FT8 in background\n', ('127.0.0.1', decoder_text_port))
             wait(lambda:execute('return document.getElementById("decoder-text").textContent.endsWith("FT8 in background\\n")'))
             assert execute('return document.getElementById("decoder-text-4").textContent')=='PSK beacon background\n'
             click('#frequency2')
-            assert execute('return document.getElementById("decoder-source4").checked && document.getElementById("zoom-choice-label").textContent==="RX2-Zoom"')
+            assert execute('return document.getElementById("decoder-monitor").value==="4" && document.getElementById("zoom-choice-label").textContent==="RX2-Zoom"')
             click('#frequency1')
-            assert execute('return document.getElementById("decoder-source4").checked && document.getElementById("zoom-choice-label").textContent==="RX1-Zoom"')
+            assert execute('return document.getElementById("decoder-monitor").value==="4" && document.getElementById("zoom-choice-label").textContent==="RX1-Zoom"')
             click('#decoder-clear')
             assert execute('return document.getElementById("decoder-text-4").textContent')==''
-            click('#decoder-source3')
+            select_view('3')
             assert execute('return !document.getElementById("decoder-text").hidden && document.getElementById("decoder-text-4").hidden')
             # All MM text channels arrive concurrently, and HTML remains inert text.
             mm_text.update({'dx-cluster':'DX <b>DL1TEST</b> äöü\n','cw-skimmer':'CW CQ TEST\n',
@@ -242,16 +248,16 @@ def main():
             for channel in mm_text:
                 output='decoder-text-5-'+channel
                 wait(lambda:execute('return document.getElementById(arguments[0]).textContent',output)==mm_text[channel])
-                click('#decoder-source5-'+channel)
+                select_view('5-'+channel)
                 assert execute('return !document.getElementById(arguments[0]).hidden',output)
             assert execute('return document.querySelector("#decoder-text-5-dx-cluster b")===null')
             assert execute('return document.getElementById("decoder-text-5-bulletin").scrollTop')==0,'Bulletin should start at the beginning'
             mm_text['dx-cluster']='DX replacement\n'
             wait(lambda:execute('return document.getElementById("decoder-text-5-dx-cluster").textContent')=='DX replacement\n')
-            assert execute('return document.getElementById("decoder-source5-bulletin").checked')
+            assert execute('return document.getElementById("decoder-multimedia").value==="5-bulletin"')
             save_screenshot(capture.with_name(capture.stem+'-mm-bulletin.png'))
             assert mm_requests[0]==0,'Diagnostics polled without a subscriber'
-            click('#decoder-source5-diagnostics')
+            select_view('5-diagnostics')
             wait(lambda:execute('return document.getElementById("mm-lock").dataset.state')=='locked')
             assert execute('return document.getElementById("mm-pilot").textContent')=='500.0 Hz'
             assert execute('return document.getElementById("decoder-panel").hidden && !document.getElementById("mm-diagnostics").hidden && document.getElementById("decoder-clear").hidden')
@@ -267,7 +273,7 @@ def main():
             assert execute('return document.getElementById("mm-pilot").textContent')=='—'
             mm_available[0]=True
             wait(lambda:execute('return document.getElementById("mm-pilot").textContent')=='500.0 Hz')
-            click('#decoder-source3')
+            select_view('3')
             time.sleep(.3);count=mm_requests[0];time.sleep(.4)
             assert mm_requests[0]==count,'Hidden diagnostics continued polling'
             decoder_probe += 'FT8 in background\n'
@@ -286,7 +292,7 @@ def main():
             decoder_socket.sendto(b'new line\n', ('127.0.0.1', decoder_text_port))
             wait(lambda:execute('return document.getElementById("decoder-text").textContent')==ft8_tail(decoder_history+'new line\n'))
             assert execute('return document.getElementById("decoder-text").scrollTop')==0,'New text moved the reading position'
-            click('#decoder-source4');click('#decoder-source3')
+            select_view('4');select_view('3')
             assert execute('return document.getElementById("decoder-text").scrollTop')==0,'Source switch lost the reading position'
             click('#decoder-clear')
             decoder_socket.sendto(b'abcdef\n', ('127.0.0.1', decoder_text_port))
@@ -420,7 +426,7 @@ def main():
             toggle_decoder()
             save_screenshot(capture.with_name(capture.stem+'-rx2-zoom.png'))
             toggle_decoder()
-            click('#decoder-sourcertty')
+            select_view('rtty')
             wait(lambda:execute("""const c=document.getElementById('rtty-waterfall');
                 return c.getContext('2d').getImageData(c.width/2,0,1,1).data[3]===255;"""))
             assert execute("""const rx=document.getElementById('rtty-rx-text').getBoundingClientRect(),
@@ -456,9 +462,9 @@ def main():
             click('#rtty-preset-send')
             sending=snapshot(lambda s:s['rtty_tx']['phase']=='sending')
             wait(lambda:execute('return document.getElementById("rtty-tx-text").value')=='DK1XYZ DE\nDL0ABC')
-            click('#decoder-source3')
+            select_view('3')
             snapshot(lambda s:s['rtty_tx'].get('result')=='complete' and s['rtty_tx']['tx_id']==sending['rtty_tx']['tx_id'])
-            click('#decoder-sourcertty')
+            select_view('rtty')
             wait(lambda:execute('return document.getElementById("rtty-tx-toggle").textContent==="Start" && !document.getElementById("rtty-tx-toggle").disabled'))
             observer.messages.clear()
             click('#rtty-tx-toggle')
@@ -468,7 +474,7 @@ def main():
             tx_epoch=live['tx2']['epoch']
             assert execute('return document.activeElement.id==="rtty-tx-text" && document.getElementById("rtty-tx-toggle").textContent==="Stop"')
             click('#frequency1')
-            click('#decoder-source4')
+            select_view('4')
             click('#audio')
             wait(lambda:execute('return !document.getElementById("ptt").disabled'))
             start=len(proxy.log)
@@ -480,11 +486,13 @@ def main():
             observer.messages.clear()
             snapshot(both_sending)
             assert {p[11] for p in proxy.log[start:] if p[5]==8 and any(p[64:])} >= {3,7}
-            execute('document.getElementById("decoder-sourcertty").click()')
+            select_view('rtty')
             assert execute('return document.getElementById("zoom-display").dataset.receiver==="1" && document.getElementById("rtty-tx-toggle").textContent==="Stop"')
             observer.messages.clear()
             snapshot(both_sending)
-            execute('document.getElementById("rtty-tx-toggle").click()')
+            select_view('5-diagnostics')
+            snapshot(both_sending)
+            select_view('sstv')
             snapshot(lambda s:s['tx']['ptt'] and s['rtty_tx'].get('result')=='stopped' and s['rtty_tx']['tx_id']==tx_id and s['tx2']['epoch']!=tx_epoch)
             call('DELETE',f'/session/{session}/actions')
             expect_ptt(False)
@@ -502,6 +510,10 @@ def main():
             changed('#frequency-input',10489.600000)
             execute('document.getElementById("frequency-form").requestSubmit()');rx2=10489600000
             expect_frequency(2,rx2)
+            assert execute('return document.getElementById("decoder-digital").value==="sstv"')
+            wait(lambda:rx2_demand() is True)
+            changed('#decoder-digital','')
+            wait(lambda:rx2_demand() is False)
             assert rx2_demand() is False,'Selecting RX2 with audio off kept DSP awake'
             click('#audio')
             wait(lambda:rx2_demand() is True)
@@ -697,7 +709,8 @@ def main():
             key('keyUp');expect_ptt(False)
             click('#tx-listen-mute')
             execute('document.activeElement.blur()')
-            execute('document.getElementById("decoder-source3").focus()')
+            select_view('3')
+            execute('document.getElementById("decoder-monitor").focus()')
             key('keyDown');key('keyUp');expect_ptt(False)
             assert not execute('return document.getElementById("decoder-panel").hidden')
             execute('document.getElementById("decoder-clear").focus()')
@@ -803,7 +816,7 @@ def main():
             rx=round(int(initial['settings']['rx_center_hz'])+(ratio-.5)*600000);expect_frequency(1,rx)
             if execute('return document.getElementById("decoder-panel").hidden'):
                 toggle_decoder()
-            click('#decoder-source3');click('#decoder-clear')
+            select_view('3');click('#decoder-clear')
             decoder_history=''.join(f'120000 -10 0.1 1200 ~ CQ DJ0ABR JN68 {i:03d}\n' for i in range(450))
             for start in range(0,len(decoder_history),3500):
                 decoder_socket.sendto(decoder_history[start:start+3500].encode(),('127.0.0.1',decoder_text_port))
@@ -847,12 +860,12 @@ def main():
             assert burst_audio['packets']>50 and burst_audio['gaps']==0,burst_audio
             assert 0<execute('return window.__decoderMutations')<100,'FT8 burst triggered per-line DOM updates'
             assert execute('return document.getElementById("role").textContent')=='Bediener'
-            click('#decoder-source5-diagnostics')
+            select_view('5-diagnostics')
             wait(lambda:execute('return document.getElementById("mm-lock").dataset.state')=='locked')
             time.sleep(.8)
             diagnostic_continuity=audio_measurement()
             assert diagnostic_continuity['total']>10000 and diagnostic_continuity['longest_ms']==0,diagnostic_continuity
-            click('#decoder-source3')
+            select_view('3')
             execute('window.__decoderObserver.disconnect();window.__radioNode.port.postMessage=window.__burstPost;delete window.__burstPost')
             toggle_decoder()
             execute('window.__radioNode.disconnect(window.__probe);window.__probe.disconnect()')
@@ -999,7 +1012,7 @@ def main():
             new_rx=round(int(initial['settings']['rx_center_hz'])+(ratio-.5)*600000)
             expect_frequency(1,new_rx);snapshot(lambda s:s.get('tx',{}).get('frequency_hz')==before_tx+new_rx-target)
             save_screenshot(capture.with_name(capture.stem+'-mobile.png'))
-            click('#decoder-source3')
+            select_view('3')
             execute('document.getElementById("decoder-panel").scrollIntoView({block:"center"})')
             save_screenshot(capture.with_name(capture.stem+'-decoder-mobile.png'))
             decoder_socket.sendto(('X'*3000).encode(), ('127.0.0.1', decoder_text_port))
@@ -1012,20 +1025,20 @@ def main():
                 assert execute('''const text=document.getElementById('decoder-text').getBoundingClientRect(),
                     body=document.getElementById('zoom-output').getBoundingClientRect(),header=document.querySelector('.zoom-heading').getBoundingClientRect();
                     return text.height>100 && Math.abs(text.height-body.height)<1 &&
-                        [...document.querySelectorAll('#zoom-sources label')].every(n=>{const r=n.getBoundingClientRect();return r.left>=header.left && r.right<=header.right && r.bottom<=header.bottom;});'''),('monitor must fill the tile and all six choices remain visible',width,height)
+                        [...document.querySelectorAll('#decoder-sourcezoom, #zoom-sources > label')].every(n=>{const r=n.getBoundingClientRect();return r.left>=header.left && r.right<=header.right && r.bottom<=header.bottom;});'''),('monitor must fill the tile and all four groups remain visible',width,height)
                 wait(lambda:execute('''const axis=document.getElementById('fullband-axis'),button=document.getElementById('fullband-axis-switch').getBoundingClientRect();
                     const labels=[...axis.querySelectorAll('.bandplan-label')].filter(n=>n.textContent);
                     const bounds=labels.map(n=>n.getBoundingClientRect()).sort((a,b)=>a.left-b.left);
                     return labels.some(n=>n.textContent.startsWith('CW')) && bounds.every((r,i)=>r.right<=button.left+1 && (!i || r.left>=bounds[i-1].right));'''))
                 if width==320:save_screenshot(capture.with_name(capture.stem+'-bandplan-320.png'))
-                click('#decoder-source5-diagnostics')
+                select_view('5-diagnostics')
                 wait(lambda:execute('return document.getElementById("mm-lock").dataset.state')=='locked')
                 assert execute('const n=document.getElementById("mm-diagnostics");return n.scrollWidth<=n.clientWidth && document.getElementById("mm-spectrum").clientWidth>80'),('diagnostic layout',width,height)
                 if width==320:save_screenshot(capture.with_name(capture.stem+'-mm-diagnostics-mobile.png'))
-                click('#decoder-source3')
+                select_view('3')
             click('#fullband-axis-switch')
             # Preferences survive a reload; transmitting is never restored.
-            click('#decoder-source5-bulletin')
+            select_view('5-bulletin')
             changed('#language','en')
             click('#setup');click('#theme')
             assert execute('return document.documentElement.dataset.theme')=='light'
@@ -1044,9 +1057,9 @@ def main():
             assert execute('return document.getElementById("display-color").value')=='green'
             assert execute('return document.getElementById("fullband-axis").dataset.mode')=='bandplan'
             assert not execute('return document.getElementById("decoder-panel").hidden'),'Decoder visibility was not restored'
-            assert execute('return document.getElementById("decoder-source5-bulletin").checked && !document.getElementById("decoder-text-5-bulletin").hidden'),'Decoder source was not restored'
+            assert execute('return document.getElementById("decoder-multimedia").value==="5-bulletin" && !document.getElementById("decoder-text-5-bulletin").hidden'),'Decoder source was not restored'
             wait(lambda:execute('return document.getElementById("decoder-text-5-bulletin").textContent')==mm_text['bulletin'])
-            click('#decoder-source3')
+            select_view('3')
             expect_ptt(False)
             # Backend restart must refresh the session with PTT off.
             old_session=snapshot()['session'];radio.terminate();radio.wait(timeout=8);radio=start_backend()

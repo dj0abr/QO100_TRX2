@@ -4,5 +4,9 @@
 extern "C" {
 using Ft8Callback = void (*)(const char*, int, int, float, float, float, float, int, void*);
 void ft8_decode_slot(const std::int16_t* samples, int low, int high, int depth,
+                     Ft8Callback callback, void* context, int early);
+void ft4_decode_slot(const std::int16_t* samples, int low, int high, int depth,
                      Ft8Callback callback, void* context);
+int ft_encode_wave(const char* message, int length, float frequency, int mode,
+                   char* sent, std::int16_t* samples);
 }

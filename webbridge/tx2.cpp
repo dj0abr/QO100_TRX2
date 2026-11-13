@@ -11,7 +11,8 @@ using qo100::sstv::Sender;
 
 constexpr auto audio_period = Milliseconds(20);
 constexpr unsigned prefill = 8;
-constexpr unsigned rtty_tail_blocks = 13;
+constexpr unsigned tx_tail_blocks = 13;
+constexpr auto ft8_start_tolerance = Milliseconds(40);
 constexpr std::size_t rtty_text_limit = 512;
 constexpr std::size_t rtty_pending_frames = 512;
 constexpr auto rtty_ptt_lease = Milliseconds(1000);
@@ -34,10 +35,13 @@ bool Bridge::tx2_active(Tx2Mode mode) const {
 }
 
 void Bridge::tx2_state(Tx2Mode mode, const char* phase, const char* result, std::optional<uint32_t> id) {
-    auto& tx = state_[mode == Tx2Mode::sstv ? "sstv_tx" : "rtty_tx"];
+    const char* key = mode == Tx2Mode::sstv ? "sstv_tx" : mode == Tx2Mode::rtty ? "rtty_tx" : "ft8_tx";
+    auto& tx = state_[key];
     tx = {{"phase", phase}, {"result", result}};
     if (mode == Tx2Mode::rtty && tx2_job_ && tx2_job_->rtty) id = tx2_job_->rtty->id;
     if (id) tx["tx_id"] = *id;
+    if (mode == Tx2Mode::ft8 && tx2_job_)
+        tx["slot_utc"] = std::get<Ft8Tx>(tx2_job_->source).slot_utc;
     dirty_ = true;
 }
 
@@ -118,10 +122,12 @@ void Bridge::write_rtty_tx(uint64_t client, const Json& id, uint32_t tx_id, cons
 void Bridge::start_tx2(Tx2Mode mode, Tx2Source source, uint64_t frequency, unsigned level,
                        std::optional<RttyTx> rtty) {
     tx2_job_ = Tx2Job{mode, std::move(source), frequency, level, Clock::now() + std::chrono::seconds(3), rtty};
-    tx2_state(mode, "preparing");
+    const auto* ft8 = std::get_if<Ft8Tx>(&tx2_job_->source);
+    if (ft8) tx2_job_->deadline = ft8->dispatch_at + ft8_start_tolerance;
+    tx2_state(mode, ft8 ? "scheduled" : "preparing");
     next_activity_ = {};
     update_digital_activity();
-    schedule_tx2(Clock::now());
+    schedule_tx2(ft8 ? ft8->dispatch_at - Ft8Tx::preparation : Clock::now());
 }
 
 void Bridge::reset_tx2_audio(uint64_t frequency) {
@@ -136,10 +142,19 @@ std::optional<audio::TxBlock> Bridge::take_tx2_block(Tx2Job& job) {
         return (*sstv)->take(100);
 
     audio::TxBlock block;
+    if (const auto* ft8 = std::get_if<Ft8Tx>(&job.source)) {
+        if (job.sample_index < ft8->pcm.size()) {
+            const auto count = std::min(block.pcm.size(), ft8->pcm.size() - job.sample_index);
+            std::copy_n(ft8->pcm.begin() + job.sample_index, count, block.pcm.begin());
+        } else {
+            block.last = ++job.tail == tx_tail_blocks;
+        }
+        return block;
+    }
     auto& encoder = *std::get<std::unique_ptr<Encoder>>(job.source);
     // Flush the backend FIFO and interpolator with the same tail as SSTV.
     if (job.tail || encoder.read(block.pcm.data(), block.pcm.size()) < block.pcm.size())
-        block.last = ++job.tail == rtty_tail_blocks;
+        block.last = ++job.tail == tx_tail_blocks;
     return block;
 }
 
@@ -194,26 +209,39 @@ void Bridge::step_tx2() {
     const auto epoch = tx.at("epoch").get<uint32_t>();
     const auto available = tx.value("ptt", false);
     if (job.phase == Tx2Job::Phase::preparing) {
+        const auto* ft8 = std::get_if<Ft8Tx>(&job.source);
         if (now >= job.deadline) {
-            end_tx2("unavailable");
+            end_tx2(ft8 ? "missed_slot" : "unavailable");
             return;
         }
         const auto* sstv = std::get_if<std::unique_ptr<Sender>>(&job.source);
+        if (ft8) {
+            const auto drift = (std::chrono::system_clock::now() - ft8->dispatch_utc) - (now - ft8->dispatch_at);
+            if (drift > ft8_start_tolerance || drift < -ft8_start_tolerance) {
+                end_tx2("clock_changed");
+                return;
+            }
+        }
         if (!job.epoch_requested && available && !pending_.count(tx2_key)) {
             job.epoch_requested = true;
             job.epoch = epoch;
             reset_tx2_audio(job.frequency);
         } else if (job.epoch_requested && available && !pending_.count(tx2_key) &&
                    epoch != job.epoch && !tx.value("status", 0) && (!sstv || (*sstv)->available() >= prefill)) {
+            if (ft8 && now < ft8->dispatch_at) {
+                schedule_tx2(ft8->dispatch_at);
+                return;
+            }
             job.epoch = epoch;
-            // Both sources include a silence tail longer than the prefill.
             for (unsigned i = 0; i < prefill; ++i)
                 send_tx2_audio(job, take_tx2_block(job)->pcm);
             job.phase = Tx2Job::Phase::sending;
             job.next_audio = now + audio_period;
             tx2_state(job.mode, "sending");
         }
-        schedule_tx2(now + audio_period);
+        auto next = now + audio_period;
+        if (ft8 && now < ft8->dispatch_at) next = std::min(next, ft8->dispatch_at);
+        schedule_tx2(next);
         return;
     }
 

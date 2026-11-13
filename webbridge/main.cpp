@@ -18,6 +18,9 @@ void setting(bridge::Config& c,const std::string& k,const std::string& v,const s
     if(k=="listen") c.listen=v;
     else if(k=="port") c.port=number(v,1,65535);
     else if(k=="backend_port") c.backend_port=number(v,1,65535);
+    else if(k=="rx2_decoder_audio_port") c.decoders[bridge::Config::rx2_ft8].audio_port=number(v,0,65535);
+    else if(k=="rx2_decoder_text_port") c.decoders[bridge::Config::rx2_ft8].text_port=number(v,0,65535);
+    else if(k=="ft8_tx_lead_ms") c.ft8_tx_lead_ms=number(v,0,500);
     else if(k=="rx3_decoder_audio_port") c.decoders[0].audio_port=number(v,0,65535);
     else if(k=="rx3_decoder_text_port") c.decoders[0].text_port=number(v,0,65535);
     else if(k=="rx4_decoder_audio_port") c.decoders[1].audio_port=number(v,0,65535);
@@ -53,6 +56,7 @@ int main(int argc,char** argv) {
             std::string option=argv[i];
             if(option=="--help") {
                 std::cout<<"qo100_webbridge [--config FILE] [--listen IPv4] [--port 8080] [--backend-port 40900]\n"
+                    "                [--rx2-decoder-audio-port 0] [--rx2-decoder-text-port 0] [--ft8-tx-lead-ms 80]\n"
                     "                [--rx3-decoder-audio-port 0] [--rx3-decoder-text-port 0]\n"
                     "                [--rx4-decoder-audio-port 0] [--rx4-decoder-text-port 0]\n"
                     "                [--rx5-decoder-audio-port 0] [--mm-http-port 0]\n"
@@ -77,7 +81,7 @@ int main(int argc,char** argv) {
         std::cout<<"HTTP/WS http://"<<c.listen<<':'<<c.port<<"; backend UDP 127.0.0.1:"<<c.backend_port
             <<"; idle timeout "<<c.idle_seconds<<" s (0=disabled); WebSocket heartbeat timeout "<<c.heartbeat_seconds<<" s\n"<<std::flush;
         for(size_t i=0;i<c.decoders.size();++i) if(c.decoders[i].audio_port)
-            std::cout<<"RX"<<i+3<<" audio UDP 127.0.0.1:"<<c.decoders[i].audio_port
+            std::cout<<"RX"<<(i==bridge::Config::rx2_ft8?2:i+3)<<" audio UDP 127.0.0.1:"<<c.decoders[i].audio_port
                 <<"; decoder text UDP 127.0.0.1:"<<c.decoders[i].text_port<<'\n'<<std::flush;
         io.run();return 0;
     } catch(const std::exception& e) {std::cerr<<"Webbridge: "<<e.what()<<'\n';return 1;}
