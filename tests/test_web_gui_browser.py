@@ -375,11 +375,25 @@ def main():
             for log_id in ('ft8-log', 'ft8-own-log'):
                 top, end = ft_log_scroll(log_id)
                 assert end > 0 and abs(end - top) < 2, (log_id, top, end)
+            # A smaller receive area must keep both lists pinned to the end.
+            receive = '.ft-receive'
+            execute('const n=document.querySelector(arguments[0]); n.style.height=(n.clientHeight - 30) + "px";', receive)
+
+            def ft_log_at_end(log_id):
+                top, end = ft_log_scroll(log_id)
+                return end > 0 and abs(end - top) < 2
+
+            wait(lambda: all(ft_log_at_end(log_id) for log_id in ('ft8-log', 'ft8-own-log')))
+            execute('''const log = document.getElementById('ft8-log');
+                window.__ftLogScrolled = false;
+                log.addEventListener('scroll', () => { window.__ftLogScrolled = true; }, {once: true});
+                log.scrollTop = 0;''')
+            wait(lambda: execute('return window.__ftLogScrolled'))
             decode('TEST DJ0ABR')
             wait(lambda: lines('ft8-own-log')[-1] == 'TEST DJ0ABR')
-            for log_id in ('ft8-log', 'ft8-own-log'):
-                top, end = ft_log_scroll(log_id)
-                assert abs(end - top) < 2, (log_id, top, end)
+            assert not ft_log_at_end('ft8-log')
+            assert ft_log_at_end('ft8-own-log')
+            execute('document.querySelector(arguments[0]).style.height = "";', receive)
             click('#decoder-clear')
             assert lines('ft8-log') == lines('ft8-own-log') == []
             observer=Client(http_port);observer.role('viewer')
@@ -453,13 +467,24 @@ def main():
             repeat_slot = observer.state(lambda s: s.get('ft8_tx', {}).get('phase') == 'scheduled'
                                          and s['ft8_tx']['slot_utc'] > cq_slot, timeout=26)['ft8_tx']['slot_utc']
             assert repeat_slot - cq_slot >= 15 and (repeat_slot - cq_slot) % 15 == 0
+
+            # A signed report in the receive slot after our CQ starts a QSO.
+            response_slot = repeat_slot + 7.5
+            time.sleep(max(0, response_slot + 0.1 - time.time()))
+            wait(lambda: execute('return !document.getElementById("ft8-send").disabled'))
+            decode('DJ0ABR UT5UGR +16', response_slot, 'FT4')
+            response_tx = observer.state(lambda s: s.get('ft8_tx', {}).get('phase') == 'scheduled'
+                                         and s['ft8_tx']['slot_utc'] > repeat_slot)['ft8_tx']['slot_utc']
+            assert (response_tx - repeat_slot) % 15 == 0
+            assert execute('return document.getElementById("ft8-message").value') == 'UT5UGR DJ0ABR R-05'
             click('#ft8-stop')
-            wait(lambda: execute('return !document.getElementById("ft-auto-cq").checked && document.getElementById("ft8-status").textContent === "Sendung abgebrochen"'))
+            wait(lambda: execute('return !document.getElementById("ft-auto-cq").checked && document.getElementById("ft8-status").textContent === "Auto-QSO abgebrochen."'))
 
             # Without a reply, send the same message three times and then give up.
             execute('document.getElementById("ft-auto").checked = true')
             observer.messages.clear()
-            silent_slot = int(time.time() // 7.5) * 7.5
+            # A manually selected decode may be older than three slots.
+            silent_slot = (int(time.time() // 7.5) - 5) * 7.5
             decode('CQ K5ABC FN42', silent_slot, 'FT4')
             wait(lambda: lines('ft8-log')[-1] == 'CQ K5ABC FN42')
             click('#ft8-log button:last-child')

@@ -26,15 +26,19 @@ einschließlich Leerzeichen begrenzt. Ein Beispiel ist `TEST DJ0ABR`. Längere
 Nachrichten müssen einem Standardformat entsprechen.
 
 Für ein Standard-QSO eigenes Rufzeichen und QTH-Locator eingeben. Mit
-**Auto-QSO** startet ein Klick auf eine aktuelle CQ-Zeile die Antwort
-mit Locator in der passenden UTC-Slotfolge. Ein Klick auf eine Zeile aus
+**Auto-QSO** startet ein Klick auf eine CQ-Zeile die Antwort mit Locator
+im nächsten verfügbaren Slot der passenden UTC-Slotfolge. Auch ältere
+Zeilen in der Empfangsliste lassen sich auswählen. Ein Klick auf eine Zeile aus
 einem fremden QSO ruft die sendende Station mit dem eigenen Locator. Bei
 `C8K DK2DB 73` ist das DK2DB. Auf einen Rapport der gewählten
 Gegenstation folgt `R±nn`, auf `RRR` oder `RR73` folgt `73`.
 
 Bei aktiviertem **Auto-Antwort** startet ein Anruf mit Locator an das eigene
-Rufzeichen automatisch ein QSO. Ein vorheriger CQ-Ruf ist optional. Wenn
-mehrere Stationen rufen, übernimmt die Automatik den ersten passenden Decode
+Rufzeichen automatisch ein QSO. Ein vorheriger CQ-Ruf ist optional. Im
+Empfangsslot nach einem eigenen CQ-Ruf startet auch ein direkt an das eigene
+Rufzeichen gerichteter Rapport wie `DJ0ABR UT5UGR +16` ein QSO. Darauf folgt
+ein bestätigter Rapport (`R±nn`). Wenn mehrere Stationen rufen, übernimmt
+die Automatik den ersten passenden Decode
 und bleibt für das laufende QSO bei dieser Gegenstation. Auf den Locator
 folgt der Rapport, auf `R±nn` folgt `RR73`. Das abschließende `73` der
 Gegenstation beendet das QSO. Die eingestellte TX-Audiofrequenz gilt für das

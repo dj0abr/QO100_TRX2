@@ -42,8 +42,8 @@ let ftQso = null, ftQsoTransmission = null, ftAutoQso = null;
 const ftAutoMaxAttempts = 3;
 const ftAutoReplySlots = 2;
 let ftQsoLog = null, ftLogError = false;
-const ft8Log = {output: $('ft8-log'), lines: []};
-const ftOwnLog = {output: $('ft8-own-log'), lines: []};
+const ft8Log = {output: $('ft8-log'), lines: [], follow: true};
+const ftOwnLog = {output: $('ft8-own-log'), lines: [], follow: true};
 const ft8Visible = () => !$('ft8-panel').hidden;
 const ftWaterfall = new Rx2Waterfall($('ft-waterfall'), 0, 4000);
 const ftStandardRxHz = 10_489_540_000;
@@ -938,8 +938,8 @@ $('decoder-show-digital').onclick = () => {
   if (!digitalView) return;
   selectDecoder(digitalView);
   if (digitalView === 'ft8') {
-    scrollFtLogToEnd(ft8Log.output);
-    scrollFtLogToEnd(ftOwnLog.output);
+    scrollFtLogToEnd(ft8Log);
+    scrollFtLogToEnd(ftOwnLog);
   }
 };
 for (const [group, sources] of Object.entries(viewGroups)) {
@@ -960,27 +960,43 @@ for (const [group, sources] of Object.entries(viewGroups)) {
 for (const id of ['zoom-sources', 'decoder-clear', 'decoder-panel', 'mm-diagnostics', 'sstv-panel', 'rtty-panel', 'ft8-panel']) $(id).addEventListener('keydown', event => {
   if (event.code === 'Space' || event.key === ' ') event.stopPropagation();
 });
-for (const button of document.querySelectorAll('.ft-log-end')) {
-  const output = $(button.getAttribute('aria-controls'));
-  button.onclick = () => scrollFtLogToEnd(output);
+for (const log of [ft8Log, ftOwnLog]) {
+  const {output} = log;
+  const resize = new ResizeObserver(() => {
+    log.width = output.clientWidth;
+    log.height = output.clientHeight;
+    if (log.height && log.follow) scrollFtLogToEnd(log);
+    else log.scrollTop = output.scrollTop;
+  });
+  resize.observe(output);
+  output.addEventListener('scroll', () => {
+    if (!log.height || log.height !== output.clientHeight || log.width !== output.clientWidth ||
+        log.scrollTop === output.scrollTop) return;
+    log.scrollTop = output.scrollTop;
+    log.follow = output.scrollHeight - output.clientHeight - log.scrollTop < 2;
+  });
+  document.querySelector(`.ft-log-end[aria-controls="${output.id}"]`).onclick = () => scrollFtLogToEnd(log);
 }
-function scrollFtLogToEnd(output) {
-  output.scrollTop = output.scrollHeight;
+function scrollFtLogToEnd(log) {
+  log.follow = true;
+  log.output.scrollTop = log.output.scrollHeight;
+  log.scrollTop = log.output.scrollTop;
 }
-function clearFtLog({output, lines}) {
-  lines.length = 0;
-  output.textContent = '';
+function clearFtLog(log) {
+  log.lines.length = 0;
+  log.output.textContent = '';
+  scrollFtLogToEnd(log);
 }
 function clearFt8() {
   clearFtLog(ft8Log);
   clearFtLog(ftOwnLog);
 }
-function appendFtLine({output, lines}, entry) {
-  const follow = output.scrollHeight - output.scrollTop - output.clientHeight < 4;
+function appendFtLine(log, entry) {
+  const {output, lines} = log;
   lines.push(entry);
   output.append(entry.line);
   if (lines.length > 50) lines.shift().line.remove();
-  if (follow) scrollFtLogToEnd(output);
+  if (log.follow) scrollFtLogToEnd(log);
 }
 function appendFtOwnLine(entry, own) {
   if (!own || !entry.text.toUpperCase().split(/[^A-Z0-9]+/).includes(own)) return;
@@ -1005,7 +1021,7 @@ function appendFt8(message) {
       const own = ftCall($('ft-own-call').value);
       // For a third-party exchange, call the station that transmitted the selected line.
       const target = contact.recipient && contact.recipient !== own ? {...contact, kind:'cq'} : contact;
-      if ($('ft-auto').checked && (target.kind === 'cq' || canStartFtAuto(target, own))) startFtAutoQso(target);
+      if ($('ft-auto').checked && (target.kind === 'cq' || canStartFtAuto(target, own))) startFtAutoQso(target, true);
       else prepareFtReply(target, true);
     };
   }
@@ -1024,8 +1040,10 @@ function appendFt8(message) {
   }
 }
 function isFtAutoReply(contact, own) {
-  return ftAutoReply.checked && contact.recipient === own &&
-    contact.peer !== own && contact.kind !== 'RR73' && !!ftGrid(contact.kind);
+  if (!ftAutoReply.checked || contact.recipient !== own || !canStartFtAuto(contact, own)) return false;
+  if (ftGrid(contact.kind)) return true;
+  return ftQso?.step === 'cq' && ftQso.waiting &&
+    contact.parity === ftQso.parity && contact.slot === ftQso.sentSlot + ftPeriod(state.ft_mode);
 }
 function canChooseFtContact(contact) {
   const own = ftCall($('ft-own-call').value);
@@ -1078,18 +1096,13 @@ function prepareFtReply(contact, selected) {
     saveFtQsoLog(contact.slot);
   setFtDraft(draft, selected);
 }
-function startFtAutoQso(contact) {
+function startFtAutoQso(contact, selected = false) {
   if ($('ft8-send').disabled || ftAutoQso) return;
   const identity = ftIdentity(true);
   if (!identity) return;
   const draft = ftReply(contact, identity.own, identity.locator);
   const period = ftPeriod(state.ft_mode);
-  if (!draft || !period) return;
-  if (Date.now() / 1000 - contact.slot > 3 * period) {
-    ft8Error = t('Für Auto-QSO eine aktuelle Empfangszeile wählen.', 'Select a recent decode for Auto QSO.');
-    renderFt8Controls();
-    return;
-  }
+  if (!draft || !period || (!selected && Date.now() / 1000 - contact.slot > 3 * period)) return;
   ftAutoQso = {own: identity.own, period, attempts: 1, timer: null};
   setFtDraft(draft, true);
   transmitFtDraft(ftAutoQso);
@@ -1337,6 +1350,9 @@ function renderFt8Controls() {
   $('ft8-stop').disabled = !operator || !isOpen() || (!ftAutoCq.checked && !ftAutoQso && (!active || ft8Pending));
   renderFtQsoControls(!$('ft8-send').disabled);
   for (const id of ['ft8-message', 'ft8-audio-hz', 'ft8-level', 'ft8-parity']) $(id).disabled = !writable || busy || !!ftAutoQso;
+  renderFt8Status(tx);
+}
+function renderFt8Status(tx) {
   const time = tx?.slot_utc ?
     new Date(tx.slot_utc * 1000).toISOString().slice(11, Number.isInteger(tx.slot_utc) ? 19 : 21) + ' UTC' : '';
   const result = {
@@ -1352,9 +1368,12 @@ function renderFt8Controls() {
   const logError = ftLogError && t('QSO konnte nicht im ADIF-Logbuch gespeichert werden.', 'Could not save QSO to the ADIF logbook.');
   status.classList.toggle('error', !!(ft8Error || logError));
   status.classList.toggle('sending', tx?.phase === 'sending' && !ft8Error && !logError);
-  status.textContent = ft8Error || logError || (tx?.phase === 'scheduled' ? `${t('Geplant für', 'Scheduled for')} ${time}` :
+  const seconds = Math.max(0, Math.ceil(tx?.slot_utc - Date.now() / 1000));
+  const text = ft8Error || logError || (tx?.phase === 'scheduled' && time ?
+    `${t('Geplant für', 'Scheduled for')} ${time} · ${t(`noch ${seconds} s`, `${seconds} s remaining`)}` :
     tx?.phase === 'sending' ? `${t('Sendet', 'Transmitting')} · ${time}` :
     result[tx?.result] ?? (state.ready && !state.ft8_enabled ? t('FT4/8 an RX2 ist deaktiviert.', 'RX2 FT4/8 is disabled.') : ''));
+  if (status.textContent !== text) status.textContent = text;
 }
 $('ft8-frequency').onclick = () => {
   if ($('ft8-frequency').disabled) return;
@@ -1672,6 +1691,7 @@ setInterval(() => {
   if (!ptt.checkTimeout() && operator && pttHeld) send({type: 'ptt_keepalive'});
   if (operator && rttyTx?.live && !rttyTx.stopping) send({type: 'rtty_tx_keepalive', tx_id: rttyTx.id});
   renderPttHint(); renderNoiseLevels(); renderFtSlotClock();
+  if (ft8Visible() && state.ft8_tx?.phase === 'scheduled') renderFt8Status(state.ft8_tx);
   sendIdleFtCq();
 }, 250);
 $('theme').checked = window.QO100Theme.value === 'light';
