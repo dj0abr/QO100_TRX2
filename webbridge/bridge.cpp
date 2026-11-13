@@ -81,6 +81,10 @@ Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp
         digital_.bind({net::ip::make_address_v4("127.0.0.1"),config_.digital_bridge_port});
         digital_.connect({net::ip::make_address_v4("127.0.0.1"),config_.digital_audio_port});
     }
+    if (!config_.ft_log_path.empty() && decoders_[Config::rx2_ft8]) {
+        try { ft_logbook_.emplace(config_.ft_log_path); }
+        catch (const std::exception& e) { std::cerr << "FT4/8 logbook: " << e.what() << '\n'; }
+    }
     state_={{"type","state"},{"software_version",QO100_SOFTWARE_VERSION},{"session",0},{"ready",false},{"settings",Json::object()},
         {"revision","0"},{"flags",0},{"sstv_mode","auto"},{"sstv_tx",{{"phase","idle"}}},
         {"ft_mode","FT8"},{"ft8_enabled",bool(decoders_[Config::rx2_ft8])},{"ft8_tx",{{"phase","idle"}}},
@@ -499,6 +503,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
         if(type=="ft_mode") {
             set_ft_mode(client,id,j.at("mode").get<std::string>());return;
         }
+        if(type=="ft_qso_log") {save_ft_qso(client,id,j);return;}
         if(type=="ft8_tx_start") {
             begin_ft8_tx(client,integer(j,"id"),integer(j,"frequency_hz",6000000000ULL),integer(j,"level",100),
                 j.at("message").get<std::string>(),integer(j,"audio_hz",3950),integer(j,"parity",1),

@@ -1,6 +1,7 @@
 #pragma once
 #include "wire.hpp"
 #include "ft_mode.hpp"
+#include "ft_logbook.hpp"
 #include "mm_monitor.hpp"
 #include "qo100/channels.hpp"
 #include "rtty_rx.hpp"
@@ -27,6 +28,7 @@ struct Config {
     static constexpr std::size_t rx2_ft8 = 2;
     std::array<Decoder,3> decoders;
     unsigned ft8_tx_lead_ms = 80;
+    std::string ft_log_path;
     uint16_t digital_audio_port=0,digital_bridge_port=0;
     uint16_t rx5_decoder_audio_port=0,mm_http_port=0;
     unsigned idle_seconds=0,heartbeat_seconds=60,max_clients=16;
@@ -63,6 +65,7 @@ class Bridge {
         explicit DecoderLink(net::io_context& io):socket(io) {}
     };
     std::array<std::unique_ptr<DecoderLink>,3> decoders_;
+    std::optional<FtLogbook> ft_logbook_;
     bool ft8_active_ = false;
     FtMode ft_mode_ = FtMode::ft8;
     uint32_t ft_mode_revision_ = 1;
@@ -133,6 +136,7 @@ class Bridge {
     void receive_decoder(size_t index);
     void update_ft8_subscription();
     void set_ft_mode(uint64_t client, const Json& id, const std::string& mode);
+    void save_ft_qso(uint64_t client, const Json& id, const Json& qso);
     void publish_ft8(const std::string& text);void send_decoder(size_t index,Bytes p);
     void receive_digital();void send_digital(Bytes p);
     void update_mm_subscription();void update_digital_activity();

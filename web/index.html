@@ -183,7 +183,22 @@
                 </label>
               </header>
               <div class="ft-receive">
-                <div id="ft8-log" class="decoder-text" role="log" aria-live="polite" aria-label="FT4/8 RX2" tabindex="0"></div>
+                <div class="ft-logs">
+                  <div class="ft-log-pane">
+                    <div id="ft8-log" class="decoder-text" role="log" aria-live="polite" aria-label="Alle FT4/8-Nachrichten"
+                      data-en-aria-label="All FT4/8 messages" tabindex="0"></div>
+                    <button type="button" class="ft-log-end" aria-controls="ft8-log" aria-label="Zum Ende aller Nachrichten"
+                      title="Zum Ende aller Nachrichten" data-en-aria-label="Go to end of all messages"
+                      data-en-title="Go to end of all messages">↓</button>
+                  </div>
+                  <div class="ft-log-pane ft-own-messages">
+                    <div id="ft8-own-label" class="ft-log-heading" data-en="Messages with my callsign">Nachrichten mit eigenem Rufzeichen</div>
+                    <div id="ft8-own-log" class="decoder-text" role="log" aria-live="off" aria-labelledby="ft8-own-label" tabindex="0"></div>
+                    <button type="button" class="ft-log-end" aria-controls="ft8-own-log" aria-label="Zum Ende der Nachrichten mit eigenem Rufzeichen"
+                      title="Zum Ende der Nachrichten mit eigenem Rufzeichen" data-en-aria-label="Go to end of messages with my callsign"
+                      data-en-title="Go to end of messages with my callsign">↓</button>
+                  </div>
+                </div>
                 <div class="ft-waterfall">
                   <canvas id="ft-waterfall" width="400" height="150" role="img"
                     aria-label="RX2-Wasserfall von 0 bis 4 kHz" data-en-aria-label="RX2 waterfall from 0 to 4 kHz"></canvas>
@@ -196,9 +211,15 @@
                     <input id="ft-own-call" maxlength="6" spellcheck="false" autocomplete="off">
                   </label>
                   <label><span>QTH-Locator</span><input id="ft-own-grid" maxlength="6" spellcheck="false" autocomplete="off"></label>
-                  <button id="ft-cq" type="button" class="small-button" data-en="Prepare CQ" disabled>CQ vorbereiten</button>
+                  <button id="ft-cq" type="button" class="small-button" data-en="Call CQ" disabled>CQ rufen</button>
                   <label class="ft-auto"><input id="ft-auto" type="checkbox" checked>
                     <span data-en="Auto QSO">Auto-QSO</span>
+                  </label>
+                  <label class="ft-auto"><input id="ft-auto-reply" type="checkbox">
+                    <span data-en="Auto reply">Auto-Antwort</span>
+                  </label>
+                  <label class="ft-auto"><input id="ft-auto-cq" type="checkbox" autocomplete="off">
+                    <span>Auto-CQ</span>
                   </label>
                 </div>
                 <form id="ft8-tx-form">

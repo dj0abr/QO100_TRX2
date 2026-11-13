@@ -5,6 +5,8 @@ __pycache__/
 *.settings
 *.settings.tmp-*
 /data/mm-beacon/
+/data/ft4-ft8.adi
+/data/ft4-ft8.adi.tmp-*
 /external/mmdecoder/build/
 /external/mmdecoder/logs/
 /external/mmdecoder/data/

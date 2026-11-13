@@ -32,23 +32,53 @@ einem fremden QSO ruft die sendende Station mit dem eigenen Locator. Bei
 `C8K DK2DB 73` ist das DK2DB. Auf einen Rapport der gewählten
 Gegenstation folgt `R±nn`, auf `RRR` oder `RR73` folgt `73`.
 
-Nach einem eigenen CQ-Ruf startet ein Klick auf eine adressierte Antwort mit
-Locator oder Rapport ebenfalls die Automatik. Auf den Locator folgt der
-Rapport, auf `R±nn` folgt `RR73`. Das abschließende `73` der Gegenstation
-beendet das QSO. Die eingestellte TX-Audiofrequenz gilt für das ganze QSO.
+Bei aktiviertem **Auto-Antwort** startet ein Anruf mit Locator an das eigene
+Rufzeichen automatisch ein QSO. Ein vorheriger CQ-Ruf ist optional. Wenn
+mehrere Stationen rufen, übernimmt die Automatik den ersten passenden Decode
+und bleibt für das laufende QSO bei dieser Gegenstation. Auf den Locator
+folgt der Rapport, auf `R±nn` folgt `RR73`. Das abschließende `73` der
+Gegenstation beendet das QSO. Die eingestellte TX-Audiofrequenz gilt für das
+ganze QSO.
 
-**Abbrechen** stoppt das Auto-QSO auch während der Wartezeit. Ohne passende
-Antwort innerhalb von vier Slots endet die Automatik. Einen wiederholten
-Rapport beantwortet sie höchstens dreimal pro Schritt. Ein Frequenzwechsel,
+**Abbrechen** stoppt das Auto-QSO auch während der Wartezeit. Bleibt nach einer
+Sendung zwei Slots lang eine passende Antwort aus, plant die Automatik die
+gleiche Nachricht im nächsten verfügbaren Sendeslot derselben Folge ein.
+Nach drei Sendungen pro Schritt und zwei weiteren Slots ohne passende Antwort
+endet die Automatik. Ein Frequenzwechsel,
 Verbindungsverlust oder der Wechsel zu SSTV oder RTTY beendet die Automatik.
 Beim Wechsel zu Zoom, Monitor oder Multimedia-Bake läuft der gewählte DigiMode
 im Hintergrund weiter. **Anzeigen** öffnet seine Kachel wieder. **Aus** beendet
 den DigiMode einschließlich einer laufenden oder geplanten Sendung.
 
-Ohne Häkchen an **Auto-QSO** bleibt die Antwort ein Entwurf. **CQ
-vorbereiten** erstellt den eigenen CQ-Ruf für den manuellen Betrieb.
-**Einmal senden** plant eine einzelne Aussendung. Ist die Vorbereitungsfrist
+Ohne Häkchen an **Auto-QSO** bleibt die Antwort ein Entwurf. **CQ rufen**
+erstellt den eigenen CQ-Ruf und plant ihn mit einem Klick für den gewählten
+UTC-Slot ein. **Einmal senden** plant eine einzelne Aussendung der
+eingetragenen TX-Nachricht. Ist die Vorbereitungsfrist
 für den nächsten Slot verstrichen, nimmt TX2 den nächsten Slot derselben Folge.
+
+**Auto-CQ** plant bei freiem TX2 einen CQ-Ruf für den nächsten verfügbaren
+Slot der gewählten Sendefolge. Nach dem Ruf bleibt der folgende Slot für
+Antworten frei. Mit **Auto-Antwort** kann daraus direkt ein QSO entstehen.
+Während eines laufenden QSOs pausiert Auto-CQ und setzt nach dessen Ende
+wieder ein. **Abbrechen** schaltet Auto-CQ aus. Nach einem Neuladen oder einer
+unterbrochenen Verbindung muss Auto-CQ erneut aktiviert werden.
+
+### ADIF-Logbuch
+
+Die FT4/8-Kachel protokolliert QSOs mit ausgetauschten Rapporten, sobald die
+Bestätigung gesendet wurde oder nach dem eigenen bestätigten Rapport ein
+abschließendes `73` eintrifft. Das gilt für Auto-QSOs und manuell gesendete
+Antwortvorschläge aus der Empfangsliste. Die Webbridge speichert die Datei
+unter `data/ft4-ft8.adi` auf ihrem Rechner. In `config/webbridge.conf` lässt sich der
+Pfad mit `ft_log_path` ändern. Die Datei kann direkt in ein ADIF-Logbuch
+importiert werden und enthält Rufzeichen, UTC-Zeiten, Rapporte, bekannte
+Locatoren sowie Sende- und Empfangsfrequenz für QO-100. Ein leerer Pfad
+schaltet Logbuch und CQ-Markierung aus.
+
+In der oberen Empfangsliste erscheint ein CQ-Ruf rot, wenn das Rufzeichen
+der Gegenstation in den vergangenen 24 Stunden im Logbuch fehlt. FT4 und FT8
+werden dabei gemeinsam betrachtet. Die untere Liste zeigt weiterhin die
+Nachrichten mit dem eigenen Rufzeichen.
 
 `start_all.sh` startet den RX2-Dienst separat mit `--rx 2`. Die beiden
 `rx2_decoder_*`-Ports in `config/webbridge.conf` sind standardmäßig 40918 und

@@ -2,12 +2,18 @@
 #include "ft8_bridge.h"
 
 #include <algorithm>
+#include <iostream>
+#include <regex>
 #include <sstream>
 
 namespace bridge {
 namespace {
 using namespace std::chrono;
 using Utc = system_clock;
+const std::regex callsign(R"((?:[A-Z]|[A-Z][A-Z0-9]|[0-9][A-Z])[0-9][A-Z]{1,3})");
+const std::regex grid(R"([A-R]{2}[0-9]{2}([A-X]{2})?)");
+const std::regex report(R"([+-][0-9]{2})");
+const std::regex cq(R"(^CQ +(?:[A-Z]{1,4} +|[0-9]{3} +)?<?([A-Z0-9/]*[0-9][A-Z0-9/]*)>?(?: |$))");
 }
 
 void Bridge::update_ft8_subscription() {
@@ -50,8 +56,54 @@ void Bridge::publish_ft8(const std::string& text) {
         decode.value("mode_revision", 0u) != ft_mode_revision_ ||
         decode.value("mode", "") != ft_mode_name(ft_mode_))
         return;
+    if (ft_logbook_) {
+        const auto message = decode.value("message", "");
+        std::smatch match;
+        if (std::regex_search(message, match, cq)) {
+            const auto call = match[1].str();
+            decode["cq_call"] = call;
+            decode["worked_recently"] = ft_logbook_->worked_recently(call, std::time(nullptr));
+        }
+    }
     decode["type"] = "ft8_decode";
     send_rx2(decode, &Client::ft8_rx);
+}
+
+void Bridge::save_ft_qso(uint64_t client, const Json& id, const Json& data) {
+    if (config_.ft_log_path.empty()) {
+        error(client, id, "ft_log_disabled", "FT4/8 logbook is disabled");
+        return;
+    }
+    if (!ft_logbook_) {
+        error(client, id, "ft_log_failed", "Cannot read FT4/8 logbook");
+        return;
+    }
+    const FtQsoRecord qso{
+        data.at("call").get<std::string>(), data.at("own_call").get<std::string>(),
+        data.value("grid", ""), data.at("own_grid").get<std::string>(), data.at("mode").get<std::string>(),
+        data.at("sent_report").get<std::string>(), data.at("received_report").get<std::string>(),
+        data.at("start").get<std::time_t>(), data.at("end").get<std::time_t>(),
+        data.at("tx_hz").get<uint64_t>(), data.at("rx_hz").get<uint64_t>()
+    };
+    const auto now = std::time(nullptr);
+    if (!std::regex_match(qso.call, callsign) || !std::regex_match(qso.own_call, callsign) ||
+        qso.call == qso.own_call || !std::regex_match(qso.own_grid, grid) ||
+        (!qso.grid.empty() && !std::regex_match(qso.grid, grid)) ||
+        !std::regex_match(qso.sent_report, report) || !std::regex_match(qso.received_report, report) ||
+        (qso.mode != "FT4" && qso.mode != "FT8") ||
+        qso.start < now - 86400 || qso.end < qso.start || qso.end > now + 2 ||
+        qso.tx_hz < 2300000000 || qso.tx_hz > 2450000000 ||
+        qso.rx_hz < 10000000000ULL || qso.rx_hz > 10500000000ULL)
+        throw std::runtime_error("Invalid FT4/8 QSO record");
+
+    try { ft_logbook_->save(qso); }
+    catch (const std::exception& e) {
+        std::cerr << "FT4/8 logbook: " << e.what() << '\n';
+        error(client, id, "ft_log_failed", "Cannot write FT4/8 logbook");
+        return;
+    }
+    text(client, {{"type", "ack"}, {"command", "ft_qso_log"}, {"id", id}, {"status", 0}});
+    send_rx2({{"type", "ft_qso_logged"}, {"call", qso.call}}, &Client::ft8_rx);
 }
 
 void Bridge::begin_ft8_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level,

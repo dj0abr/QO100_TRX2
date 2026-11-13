@@ -20,6 +20,7 @@ void setting(bridge::Config& c,const std::string& k,const std::string& v,const s
     else if(k=="backend_port") c.backend_port=number(v,1,65535);
     else if(k=="rx2_decoder_audio_port") c.decoders[bridge::Config::rx2_ft8].audio_port=number(v,0,65535);
     else if(k=="rx2_decoder_text_port") c.decoders[bridge::Config::rx2_ft8].text_port=number(v,0,65535);
+    else if(k=="ft_log_path") c.ft_log_path=v.empty()?"":std::filesystem::absolute(base/v).lexically_normal().string();
     else if(k=="ft8_tx_lead_ms") c.ft8_tx_lead_ms=number(v,0,500);
     else if(k=="rx3_decoder_audio_port") c.decoders[0].audio_port=number(v,0,65535);
     else if(k=="rx3_decoder_text_port") c.decoders[0].text_port=number(v,0,65535);
@@ -44,6 +45,7 @@ int main(int argc,char** argv) {
             if(++i==argc) throw std::runtime_error("Missing config path");
             const auto path=std::filesystem::absolute(argv[i]);std::ifstream file(path);
             if(!file) throw std::runtime_error("Cannot read "+path.string());
+            setting(c,"ft_log_path","../data/ft4-ft8.adi",path.parent_path());
             std::string line;std::set<std::string> seen;
             while(std::getline(file,line)) {
                 line=trim(line.substr(0,line.find('#')));if(line.empty()) continue;
@@ -57,6 +59,7 @@ int main(int argc,char** argv) {
             if(option=="--help") {
                 std::cout<<"qo100_webbridge [--config FILE] [--listen IPv4] [--port 8080] [--backend-port 40900]\n"
                     "                [--rx2-decoder-audio-port 0] [--rx2-decoder-text-port 0] [--ft8-tx-lead-ms 80]\n"
+                    "                [--ft-log-path FILE]\n"
                     "                [--rx3-decoder-audio-port 0] [--rx3-decoder-text-port 0]\n"
                     "                [--rx4-decoder-audio-port 0] [--rx4-decoder-text-port 0]\n"
                     "                [--rx5-decoder-audio-port 0] [--mm-http-port 0]\n"

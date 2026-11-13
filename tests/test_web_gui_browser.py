@@ -1,5 +1,6 @@
 """Real browser + private synthetic backend. Does not connect to the station."""
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 import base64
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,7 +15,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
-from test_webbridge import Proxy, port, wait, private_config
+from test_webbridge import HEADER, Proxy, port, wait, private_config
 from ws_client import Client
 
 
@@ -27,6 +28,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix='qo100-webgui-') as temp:
         root = Path(temp)
         backend_port, http_port, driver_port = port(), port(), port()
+        ft_audio_port, ft_text_port = port(), port()
+        ft_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        ft_socket.bind(('127.0.0.1', ft_audio_port))
+        ft_socket.settimeout(5)
         decoder_audio_port, decoder_text_port = port(), port()
         decoder_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         decoder_socket.bind(('127.0.0.1', decoder_audio_port))
@@ -59,9 +64,19 @@ def main():
         logs = [(root / name).open('w') for name in ['backend.log', 'adapter.log', 'driver.log']]
         def start_backend():
             return subprocess.Popen([str(backend), '--config', str(config), '--source', 'synthetic'], stdout=logs[0], stderr=logs[0])
+        logbook = root / 'ft4-ft8.adi'
+        now = datetime.now(timezone.utc)
+        recent = now - timedelta(hours=23, minutes=55)
+        old = now - timedelta(hours=24, minutes=5)
+        logbook.write_text(
+            "Existing ADIF log\n<ADIF_VER:5>3.1.8 <EOH>\n"
+            f"<call:5>k2abc <MODE:4>MFSK <SUBMODE:3>FT4 <QSO_DATE:8>{recent:%Y%m%d} <TIME_ON:4>{recent:%H%M} <EOR>\n"
+            f"<CALL:5>K3ABC <MODE:3>FT8 <QSO_DATE:8>{old:%Y%m%d} <TIME_ON:6>{old:%H%M%S} <EOR>\n",
+            encoding='ascii',
+        )
         radio = start_backend()
         proxy = Proxy(backend_port)
-        bridge = subprocess.Popen([str(adapter), '--listen', '127.0.0.1', '--port', str(http_port), '--backend-port', str(proxy.port), '--web-root', str(assets), '--rx3-decoder-audio-port', str(decoder_audio_port), '--rx3-decoder-text-port', str(decoder_text_port), '--rx4-decoder-audio-port', str(psk_audio_port), '--rx4-decoder-text-port', str(psk_text_port), '--rx5-decoder-audio-port',str(mm_audio_port),'--mm-http-port',str(mm_http_port)], stdout=logs[1], stderr=logs[1])
+        bridge = subprocess.Popen([str(adapter), '--listen', '127.0.0.1', '--port', str(http_port), '--backend-port', str(proxy.port), '--web-root', str(assets), '--rx2-decoder-audio-port', str(ft_audio_port), '--rx2-decoder-text-port', str(ft_text_port), '--ft-log-path', str(logbook), '--rx3-decoder-audio-port', str(decoder_audio_port), '--rx3-decoder-text-port', str(decoder_text_port), '--rx4-decoder-audio-port', str(psk_audio_port), '--rx4-decoder-text-port', str(psk_text_port), '--rx5-decoder-audio-port',str(mm_audio_port),'--mm-http-port',str(mm_http_port)], stdout=logs[1], stderr=logs[1])
         driver = '/usr/bin/chromedriver' if Path('/usr/bin/chromedriver').is_file() else shutil.which('chromedriver')
         driver_args = [driver, f'--port={driver_port}', '--allowed-ips=127.0.0.1']
         if os.environ.get('QO100_TEST_SKIP_DRIVER_VERSION_CHECK') == '1':
@@ -298,6 +313,179 @@ def main():
             decoder_socket.sendto(b'abcdef\n', ('127.0.0.1', decoder_text_port))
             wait(lambda:execute('return document.getElementById("decoder-text").textContent')=='abcdef\n')
             toggle_decoder()
+            select_view('ft8')
+            assert execute("""const all = document.getElementById('ft8-log').parentElement.getBoundingClientRect();
+                const own = document.querySelector('.ft-own-messages').getBoundingClientRect();
+                const waterfall = document.querySelector('.ft-waterfall').getBoundingClientRect();
+                return Math.abs(all.height - 2 * own.height) < 1 && own.top > all.bottom
+                    && Math.abs(waterfall.bottom - own.bottom) < 1 && waterfall.left > all.right;""")
+            changed('#ft-own-call', 'dj0abr')
+            changed('#ft-own-grid', 'JN68')
+            execute('document.getElementById("ft-auto").checked = false')
+            _, _, _, _, _, epoch, _, _, dial_hz, _, revision, _, _, _, _, radio_session = HEADER.unpack_from(ft_socket.recv(4096))
+            slot = int(time.time() // 15) * 15
+
+            def decode(message, decode_slot=slot, mode='FT8'):
+                packet = dict(type='decode', mode=mode, session=radio_session, epoch=epoch, dial_hz=dial_hz,
+                              mode_revision=revision, utc='120000', slot_utc=decode_slot, snr_db=-5, dt_s=.2,
+                              frequency_hz=1500, message=message)
+                ft_socket.sendto(json.dumps(packet).encode(), ('127.0.0.1', ft_text_port))
+
+            def lines(log_id):
+                return execute('return [...document.getElementById(arguments[0]).children].map(n => n.textContent.split(" Hz  ")[1])', log_id)
+
+            decodes = ['CQ K1ABC FN42', 'DJ0ABR K1ABC -05', 'K1ABC DJ0ABR R-04',
+                       'TEST DJ0ABR', 'CQ DJ0ABRA JN68', 'CQ K2ABC FN42', 'CQ DX K3ABC FN42']
+            for message in decodes:
+                decode(message)
+            wait(lambda: lines('ft8-log') == decodes)
+            assert lines('ft8-own-log') == decodes[1:4]
+            assert execute('return [...document.querySelectorAll("#ft8-log [data-new-cq]")].map(n => n.textContent.split(" Hz  ")[1])') == [decodes[0], decodes[4], decodes[-1]]
+            assert execute("""const log = document.getElementById('ft8-log');
+                const color = index => getComputedStyle(log.children[index]).color;
+                return color(0) === 'rgb(255, 170, 161)' && color(5) !== color(0)
+                    && !document.querySelector('#ft8-own-log [data-new-cq]');""")
+            click('#ft8-own-log button:first-child')
+            assert execute('return document.getElementById("ft8-message").value').startswith('K1ABC DJ0ABR R')
+            changed('#ft-own-call', 'K1ABC')
+            assert lines('ft8-own-log') == decodes[:3]
+            changed('#ft-own-call', 'DJ0ABR')
+            for i in range(50):
+                decode(f'CQ K2ABC FN{i:02d}')
+            wait(lambda: len(lines('ft8-log')) == 50 and lines('ft8-log')[-1] == 'CQ K2ABC FN49')
+            assert lines('ft8-own-log') == decodes[1:4]
+            for i in range(24):
+                decode(f'TEST DJ0ABR {i}')
+            wait(lambda: lines('ft8-own-log')[-1] == 'TEST DJ0ABR 23')
+
+            def ft_log_scroll(log_id):
+                return execute('''const log = document.getElementById(arguments[0]);
+                    return [log.scrollTop, log.scrollHeight - log.clientHeight];''', log_id)
+
+            execute('for (const id of ["ft8-log", "ft8-own-log"]) document.getElementById(id).scrollTop = 0')
+            for log_id, other_id in (('ft8-log', 'ft8-own-log'), ('ft8-own-log', 'ft8-log')):
+                other_position = ft_log_scroll(other_id)
+                click(f'.ft-log-end[aria-controls="{log_id}"]')
+                top, end = ft_log_scroll(log_id)
+                assert end > 0 and abs(end - top) < 2, (log_id, top, end)
+                assert ft_log_scroll(other_id) == other_position
+            execute('for (const id of ["ft8-log", "ft8-own-log"]) document.getElementById(id).scrollTop = 0')
+            select_view('3')
+            click('#decoder-show-digital')
+            for log_id in ('ft8-log', 'ft8-own-log'):
+                top, end = ft_log_scroll(log_id)
+                assert end > 0 and abs(end - top) < 2, (log_id, top, end)
+            decode('TEST DJ0ABR')
+            wait(lambda: lines('ft8-own-log')[-1] == 'TEST DJ0ABR')
+            for log_id in ('ft8-log', 'ft8-own-log'):
+                top, end = ft_log_scroll(log_id)
+                assert abs(end - top) < 2, (log_id, top, end)
+            click('#decoder-clear')
+            assert lines('ft8-log') == lines('ft8-own-log') == []
+            observer=Client(http_port);observer.role('viewer')
+            observer.send({'type':'audio_subscription','stream':2,'enabled':False})
+            # The CQ button prepares and schedules one transmission without a second click.
+            assert execute('return document.getElementById("ft-cq").textContent') == 'CQ rufen'
+            changed('#ft8-parity', '1')
+            click('#ft-cq')
+            cq = snapshot(lambda s: s.get('ft8_tx', {}).get('phase') == 'scheduled')['ft8_tx']
+            assert cq['slot_utc'] % 30 == 15
+            assert execute('return document.getElementById("ft8-message").value') == 'CQ DJ0ABR JN68'
+            click('#ft8-stop')
+            snapshot(lambda s: s.get('ft8_tx', {}).get('result') == 'stopped')
+            observer.messages.clear()
+            wait(lambda: execute('return !document.getElementById("ft-mode").disabled'))
+            # Complete an FT4 QSO from the first direct call with a locator, without CQ.
+            changed('#ft-mode', 'FT4')
+            wait(lambda: execute('return !document.getElementById("ft-mode").disabled'))
+            def ft4_header():
+                header = HEADER.unpack_from(ft_socket.recv(4096))
+                return header if header[11] == 4 else None
+
+            deadline = time.monotonic() + 5
+            header = ft4_header()
+            while header is None and time.monotonic() < deadline:
+                header = ft4_header()
+            assert header is not None, 'No FT4 audio on RX2'
+            epoch, dial_hz, revision, radio_session = (header[i] for i in (5, 8, 10, 15))
+            assert execute('return !document.getElementById("ft-auto-reply").checked')
+            call_slot = int(time.time() // 7.5) * 7.5
+            decode('DJ0ABR K2ABC FN42', call_slot, 'FT4')
+            wait(lambda: lines('ft8-log') == ['DJ0ABR K2ABC FN42'])
+            assert execute('return document.getElementById("ft8-message").value') == ''
+            assert execute('return document.querySelector("label:has(#ft-auto-reply) span").textContent') == 'Auto-Antwort'
+            click('#ft-auto-reply')
+            decode('CQ K4ABC FN42', call_slot, 'FT4')
+            decode('K1ABC K2ABC FN42', call_slot, 'FT4')
+            decode('DJ0ABR K2ABC -09', call_slot, 'FT4')
+            decode('DJ0ABR K2ABC RR73', call_slot, 'FT4')
+            decode('DJ0ABR K4ABC FN42', call_slot, 'FT4')
+            decode('DJ0ABR K3ABC FN42', call_slot, 'FT4')
+            wait(lambda: len(lines('ft8-log')) == 7)
+            first_tx = observer.state(lambda s: s.get('ft8_tx', {}).get('phase') == 'scheduled'
+                                      and s['ft8_tx']['slot_utc'] > call_slot)['ft8_tx']['slot_utc']
+            assert (first_tx - call_slot) % 15 == 7.5
+            assert execute('return document.getElementById("ft8-message").value') == 'K4ABC DJ0ABR -05'
+            assert execute('return !document.getElementById("ft-auto-cq").checked')
+            click('#ft-auto-cq')
+            wait(lambda: execute('return document.getElementById("ft-qso-status").textContent.includes("K4ABC") && document.getElementById("ft-qso-status").textContent.includes("Warte auf Antwort")'),
+                 timeout=24)
+            assert '<CALL:5>K4ABC' not in logbook.read_text()
+            time.sleep(max(0, first_tx + 7.5 - time.time()))
+            decode('DJ0ABR K4ABC R-09', first_tx + 7.5, 'FT4')
+            wait(lambda: '<CALL:5>K4ABC' in logbook.read_text(), timeout=27)
+            record = logbook.read_text().split('<EOR>')[-2]
+            for field in ('<CALL:5>K4ABC', '<STATION_CALLSIGN:6>DJ0ABR', '<MODE:4>MFSK', '<SUBMODE:3>FT4',
+                          '<BAND:4>13cm', '<BAND_RX:3>3cm', '<SAT_NAME:6>QO-100',
+                          '<GRIDSQUARE:4>FN42', '<MY_GRIDSQUARE:4>JN68', '<RST_SENT:3>-05', '<RST_RCVD:3>-09'):
+                assert field in record, record
+            wait(lambda: execute('return !document.querySelector("#ft8-log [data-new-cq]")'))
+            decode('CQ K4ABC FN42', first_tx + 22.5, 'FT4')
+            wait(lambda: lines('ft8-log')[-1] == 'CQ K4ABC FN42')
+            assert execute('return !document.querySelector("#ft8-log [data-new-cq]")')
+            decode('DJ0ABR K4ABC 73', first_tx + 22.5, 'FT4')
+            assert logbook.read_text().count('<CALL:5>K4ABC') == 1
+
+            # Auto CQ waits for the QSO and then keeps calling until cancelled.
+            cq_slot = observer.state(lambda s: s.get('ft8_tx', {}).get('phase') == 'scheduled'
+                                     and s['ft8_tx']['slot_utc'] > first_tx + 15)['ft8_tx']['slot_utc']
+            assert execute('return document.getElementById("ft8-message").value') == 'CQ DJ0ABR JN68'
+            repeat_slot = observer.state(lambda s: s.get('ft8_tx', {}).get('phase') == 'scheduled'
+                                         and s['ft8_tx']['slot_utc'] > cq_slot, timeout=26)['ft8_tx']['slot_utc']
+            assert repeat_slot - cq_slot >= 15 and (repeat_slot - cq_slot) % 15 == 0
+            click('#ft8-stop')
+            wait(lambda: execute('return !document.getElementById("ft-auto-cq").checked && document.getElementById("ft8-status").textContent === "Sendung abgebrochen"'))
+
+            # Without a reply, send the same message three times and then give up.
+            execute('document.getElementById("ft-auto").checked = true')
+            observer.messages.clear()
+            silent_slot = int(time.time() // 7.5) * 7.5
+            decode('CQ K5ABC FN42', silent_slot, 'FT4')
+            wait(lambda: lines('ft8-log')[-1] == 'CQ K5ABC FN42')
+            click('#ft8-log button:last-child')
+            attempt_slot = silent_slot
+            for _ in range(3):
+                scheduled = observer.state(lambda s: s.get('ft8_tx', {}).get('phase') == 'scheduled'
+                                           and s['ft8_tx']['slot_utc'] > attempt_slot, timeout=34)
+                attempt_slot = scheduled['ft8_tx']['slot_utc']
+                assert (attempt_slot - silent_slot) % 15 == 7.5
+                assert execute('return document.getElementById("ft8-message").value') == 'K5ABC DJ0ABR JN68'
+                wait(lambda: execute('return document.getElementById("ft-qso-status").textContent.includes("Warte auf Antwort")'),
+                     timeout=24)
+            waiting_since = time.monotonic()
+            wait(lambda: execute('return document.getElementById("ft8-status").textContent.includes("keine passende Antwort nach drei Sendeversuchen")'),
+                 timeout=19)
+            assert time.monotonic() - waiting_since >= 14
+            assert not any(isinstance(s, dict) and s.get('ft8_tx', {}).get('slot_utc', 0) > attempt_slot
+                           for s in list(observer.messages))
+            assert '<CALL:5>K5ABC' not in logbook.read_text()
+            changed('#ft-mode', 'FT8')
+            wait(lambda: execute('return !document.getElementById("ft-mode").disabled'))
+            changed('#ft-own-call', '')
+            changed('#ft-own-grid', '')
+            execute('document.getElementById("ft-auto").checked = true')
+            select_view('')
+            select_view('zoom')
             assert execute('return document.getElementById("waterfall-floor").value')=='-5'
             assert execute('return document.getElementById("waterfall-ceiling").value')=='40'
             assert execute('return document.querySelectorAll("#waterfall-content input[type=range]:not(#spectrum-average)").length')==2
@@ -314,8 +502,6 @@ def main():
             expect_auto_ranges()
             audio_off=execute('return getComputedStyle(document.getElementById("audio")).backgroundColor')
             assert audio_off=='rgb(122, 45, 53)',audio_off
-            observer=Client(http_port);observer.role('viewer')
-            observer.send({'type':'audio_subscription','stream':2,'enabled':False})
             def rx2_demand():
                 reports=[struct.unpack_from('!I',p,48)[0] for p in proxy.log if p[5]==20]
                 return bool(reports[-1]&1) if reports else None
@@ -1038,6 +1224,13 @@ def main():
                 select_view('3')
             click('#fullband-axis-switch')
             # Preferences survive a reload; transmitting is never restored.
+            select_view('ft8')
+            wait(lambda:execute('return !document.getElementById("ft8-audio-hz").disabled'))
+            changed('#ft8-audio-hz', '1325')
+            changed('#ft8-level', '12')
+            changed('#ft8-audio-hz', '')
+            changed('#ft8-level', '101')
+            select_view('')
             select_view('5-bulletin')
             changed('#language','en')
             click('#setup');click('#theme')
@@ -1054,6 +1247,8 @@ def main():
             click('#tx-listen-mute')
             assert execute('return [document.getElementById("waterfall-floor").value,document.getElementById("waterfall-ceiling").value]')==['-7','37']
             assert execute('return document.getElementById("spectrum-average").value')=='20'
+            assert execute('return ["ft8-audio-hz", "ft8-level"].map(id => document.getElementById(id).value)')==['1325','12']
+            assert execute('return document.getElementById("ft-auto-reply").checked')
             assert execute('return document.getElementById("display-color").value')=='green'
             assert execute('return document.getElementById("fullband-axis").dataset.mode')=='bandplan'
             assert not execute('return document.getElementById("decoder-panel").hidden'),'Decoder visibility was not restored'
@@ -1095,7 +1290,7 @@ def main():
             time.sleep(.5);assert execute('return document.getElementById("connect").textContent')=='Verbinden'
             errors=call('POST',f'/session/{session}/log',{'type':'browser'})
             assert not [e for e in errors if e['level']=='SEVERE'],errors
-            print(f'WebGUI browser: spectra, split/right-click/wheel, waterfall history/floors, audio continuity ({continuity}), FT8 burst audio ({burst_continuity}), RX2 tuning/decoder text, copy, DSP/settings, {len(packets)} microphone packets, PTT hold/toggle/Space/timeout/blur, touch, layouts, preferences, restart, viewer and disconnect passed.')
+            print(f'WebGUI browser: spectra, split/right-click/wheel, waterfall history/floors, audio continuity ({continuity}), FT8 burst audio ({burst_continuity}), RX2 tuning/decoder text, FT4/8 callsign filter and ADIF logbook, copy, DSP/settings, {len(packets)} microphone packets, PTT hold/toggle/Space/timeout/blur, touch, layouts, preferences, restart, viewer and disconnect passed.')
             print('Screenshots:',capture,capture.with_name(capture.stem+'-mobile.png'))
         except BaseException:
             if session:
@@ -1114,6 +1309,7 @@ def main():
             for process in [chrome,bridge,radio]:
                 process.terminate();process.wait(timeout=8)
             proxy.close()
+            ft_socket.close()
             decoder_socket.close()
             psk_socket.close()
             mm_server.shutdown();mm_server.server_close()

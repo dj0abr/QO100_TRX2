@@ -646,7 +646,7 @@ html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-rows: auto minmax(42px, 1fr) auto;
+  grid-template-rows: auto minmax(114px, 1fr) auto;
   gap: 8px;
   padding: 8px 10px;
   overflow: auto;
@@ -697,14 +697,43 @@ html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text
 .ft-frequency:enabled { cursor: pointer; }
 .ft-frequency:enabled:hover { border-color: var(--rx2-border); color: var(--rx2); }
 .ft-receive { display: grid; grid-template-columns: minmax(0, 1fr) minmax(94px, 31%); min-height: 0; gap: 8px; }
+.ft-logs { display: grid; grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); gap: 6px; min-width: 0; min-height: 0; }
 .ft8-panel .decoder-text { padding: 5px 6px; }
-.ft8-panel .decoder-text, .ft-waterfall {
+.ft-log-pane, .ft-waterfall {
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--input-bg);
 }
+.ft-log-pane { position: relative; display: grid; grid-template-rows: minmax(0, 1fr); }
+.ft-own-messages { grid-template-rows: auto minmax(0, 1fr); }
+.ft8-panel .ft-log-pane .decoder-text { padding-inline-end: 30px; }
+.ft-log-end {
+  position: absolute;
+  right: 12px;
+  bottom: 4px;
+  width: 23px;
+  height: 23px;
+  padding: 0;
+  border: 1px solid var(--button-border);
+  border-radius: 4px;
+  background: var(--button-bg);
+  color: var(--text);
+  font: 14px/1 var(--mono);
+  cursor: pointer;
+}
+.ft-log-end:hover, .ft-log-end:focus-visible { border-color: var(--rx2); color: var(--rx2); }
+.ft-log-heading {
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 7px 7px 0 0;
+  background: var(--heading-bg);
+  color: var(--text-secondary);
+}
+#ft8-own-log { padding-block: 0; }
+#ft8-own-log:empty::before { content: "Noch keine passenden Nachrichten"; }
+html[lang="en"] #ft8-own-log:empty::before { content: "No matching messages yet"; }
 .ft-waterfall { display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
 .ft-waterfall canvas { display: block; width: 100%; height: 100%; }
 .ft-waterfall-axis {
@@ -723,6 +752,7 @@ html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text
 button.ft-decode-line:enabled { color: var(--rx2); cursor: pointer; }
 button.ft-decode-line:enabled:hover, button.ft-decode-line:focus-visible { background: var(--panel-raised); }
 button.ft-decode-line:disabled { opacity: 1; }
+#ft8-log .ft-decode-line[data-new-cq] { color: var(--error); }
 .ft-controls {
   display: grid;
   gap: 7px;
@@ -763,12 +793,12 @@ button.ft-decode-line:disabled { opacity: 1; }
 .ft-contact { align-items: center; flex: 1 1 auto; }
 #ft-qso-status { font-family: var(--mono); color: var(--rx2); overflow-wrap: anywhere; }
 #ft8-status { margin: 0; }
+#ft8-status.sending { color: var(--error); font-weight: 700; }
 @media (min-width: 801px) {
   .visuals:has(.zoom-output[data-view="ft8"]) #fullband { flex: .43; }
 }
 @media (max-width: 800px) {
   .zoom-output[data-view="ft8"] { height: 435px; }
-  .ft8-panel { grid-template-rows: auto minmax(78px, 1fr) auto; }
 }
 @media (max-width: 440px) {
   .ft8-panel { padding-inline: 6px; }

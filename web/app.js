@@ -39,7 +39,11 @@ const rttyInputLimit = 1024;
 let rttyTx = null;
 let ft8Pending = false, ftModePending = false, ft8Error = '';
 let ftQso = null, ftQsoTransmission = null, ftAutoQso = null;
-const ft8Lines = [];
+const ftAutoMaxAttempts = 3;
+const ftAutoReplySlots = 2;
+let ftQsoLog = null, ftLogError = false;
+const ft8Log = {output: $('ft8-log'), lines: []};
+const ftOwnLog = {output: $('ft8-own-log'), lines: []};
 const ft8Visible = () => !$('ft8-panel').hidden;
 const ftWaterfall = new Rx2Waterfall($('ft-waterfall'), 0, 4000);
 const ftStandardRxHz = 10_489_540_000;
@@ -118,7 +122,7 @@ function connect() {
       const wasOperator = operator; operator = message.role === 'operator';
       $('role').textContent = operator ? t('Bediener', 'Operator') : t('Zuschauer', 'Viewer');
       $('role').title = `${message.clients} Verbindung(en) · ${message.idle_seconds ? `Inaktivitätslimit ${message.idle_seconds} s` : t('Keine Abmeldung bei Inaktivität', 'No inactivity logout')}`;
-      if (wasOperator && !operator) { stopPtt(); resetRttyTx(); clearFtQso(); radio.stopMic(); clearTimers(); }
+      if (wasOperator && !operator) { ftAutoCq.checked = false; stopPtt(); resetRttyTx(); clearFtQso(); radio.stopMic(); clearTimers(); }
       controls();
     } else if (message.type === 'state') update(message);
     else if (message.type === 'decoder_text' && [3, 4].includes(message.stream) && typeof message.text === 'string') appendDecoderText(message.stream, message.text);
@@ -126,6 +130,10 @@ function connect() {
     else if (message.type === 'mm_diagnostics' && message.stream === 5) mmDiagnostics.update(message);
     else if (['sstv_begin', 'sstv_end', 'sstv_reset'].includes(message.type)) sstv.message(message, session);
     else if (message.type === 'ft8_decode' && digitalView === 'ft8' && message.session === session && message.mode === state.ft_mode) appendFt8(message);
+    else if (message.type === 'ft_qso_logged') {
+      for (const {line} of ft8Log.lines)
+        if (line.dataset.cqCall === message.call) line.removeAttribute('data-new-cq');
+    }
     else if (message.type === 'rtty_text' || message.type === 'rtty_reset') rtty.receive(message, session);
     else if (message.type === 'ack' || message.type === 'error') {
       const item = pending.get(message.id);
@@ -144,6 +152,7 @@ function connect() {
     stopPtt(); resetRttyTx(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset(); mmDiagnostics.reset(); sstv.reset(true); rtty.waterfall.clear();
     sstvUpload = null; sstvStopRequested = false;
     for (const item of pending.values()) { clearTimeout(item.timeout); item.reject(fail('Verbindung getrennt.', 'closed')); }
+    ftAutoCq.checked = false;
     ft8Error = ''; clearFt8(); ftWaterfall.clear(); clearFtQso(); pending.clear(); frames.reset(); views.forEach(view => view.clear());
     cursor = null; queueCursorUpdate();
     $('role').textContent = t('Getrennt', 'Disconnected'); controls();
@@ -328,6 +337,7 @@ function update(next) {
       (ftAutoQso && (!next.ready || next.flags & 6 || next.loop?.mode))) clearFtQso();
   updateFtQsoTransmission(next.ft8_tx);
   if (next.session !== session) {
+    ftAutoCq.checked = false;
     stopPtt(); resetRttyTx(); session = next.session; wanted.clear(); guiLoaded = false;
     loopGeneration = null; cutoff = 0n; clearTimers(); frames.reset(); views.forEach(view => view.clear()); radio.reset(); sstv.reset(); rtty.resetRx(); rtty.waterfall.clear();
   }
@@ -834,6 +844,7 @@ function stopDigitalView() {
   if (digitalView === 'sstv' && sstvTxActive()) stopSstvTx();
   if (digitalView === 'rtty' && rttyTxActive()) stopRttyTx();
   if (digitalView === 'ft8') {
+    ftAutoCq.checked = false;
     if (!ftAutoQso && (ft8Pending || (state.ft8_tx?.phase ?? 'idle') !== 'idle'))
       send({type:'ft8_tx_stop'});
     clearFtQso();
@@ -924,7 +935,12 @@ function flushDecoderText() {
 $('decoder-clear').onclick = () => { if (ft8Visible()) { clearFt8(); return; } if (rtty.visible) { rtty.clearRx(); return; } decoderPending[decoderSource] = null; decoderOutput(decoderSource).textContent = ''; decoderScroll[decoderSource] = {top: 0, follow: decoderSource !== '5-bulletin'}; };
 $('decoder-sourcezoom').onclick = () => selectDecoder('zoom');
 $('decoder-show-digital').onclick = () => {
-  if (digitalView) selectDecoder(digitalView);
+  if (!digitalView) return;
+  selectDecoder(digitalView);
+  if (digitalView === 'ft8') {
+    scrollFtLogToEnd(ft8Log.output);
+    scrollFtLogToEnd(ftOwnLog.output);
+  }
 };
 for (const [group, sources] of Object.entries(viewGroups)) {
   const menu = $(`decoder-${group}`);
@@ -944,13 +960,37 @@ for (const [group, sources] of Object.entries(viewGroups)) {
 for (const id of ['zoom-sources', 'decoder-clear', 'decoder-panel', 'mm-diagnostics', 'sstv-panel', 'rtty-panel', 'ft8-panel']) $(id).addEventListener('keydown', event => {
   if (event.code === 'Space' || event.key === ' ') event.stopPropagation();
 });
+for (const button of document.querySelectorAll('.ft-log-end')) {
+  const output = $(button.getAttribute('aria-controls'));
+  button.onclick = () => scrollFtLogToEnd(output);
+}
+function scrollFtLogToEnd(output) {
+  output.scrollTop = output.scrollHeight;
+}
+function clearFtLog({output, lines}) {
+  lines.length = 0;
+  output.textContent = '';
+}
 function clearFt8() {
-  ft8Lines.length = 0;
-  $('ft8-log').textContent = '';
+  clearFtLog(ft8Log);
+  clearFtLog(ftOwnLog);
+}
+function appendFtLine({output, lines}, entry) {
+  const follow = output.scrollHeight - output.scrollTop - output.clientHeight < 4;
+  lines.push(entry);
+  output.append(entry.line);
+  if (lines.length > 50) lines.shift().line.remove();
+  if (follow) scrollFtLogToEnd(output);
+}
+function appendFtOwnLine(entry, own) {
+  if (!own || !entry.text.toUpperCase().split(/[^A-Z0-9]+/).includes(own)) return;
+  const line = entry.line.cloneNode(true);
+  line.onclick = entry.line.onclick;
+  line.removeAttribute('data-new-cq');
+  line.removeAttribute('data-cq-call');
+  appendFtLine(ftOwnLog, {...entry, line});
 }
 function appendFt8(message) {
-  const log = $('ft8-log');
-  const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 4;
   const {utc, snr_db, dt_s, frequency_hz, message: text} = message;
   if (typeof utc !== 'string' || typeof text !== 'string' ||
       ![snr_db, dt_s, frequency_hz].every(Number.isFinite)) return;
@@ -969,14 +1009,23 @@ function appendFt8(message) {
       else prepareFtReply(target, true);
     };
   }
-  ft8Lines.push({line, contact});
-  log.append(line);
-  if (ft8Lines.length > 50) ft8Lines.shift().line.remove();
-  if (follow) log.scrollTop = log.scrollHeight;
+  const entry = {line, contact, text};
+  appendFtLine(ft8Log, entry);
+  const own = ftCall($('ft-own-call').value);
+  appendFtOwnLine(entry, own);
+  if (typeof message.cq_call === 'string') {
+    line.dataset.cqCall = message.cq_call;
+    line.toggleAttribute('data-new-cq', message.worked_recently === false);
+  }
   if (contact) {
     if (ftAutoQso) advanceFtAutoQso(contact);
+    else if (isFtAutoReply(contact, own)) startFtAutoQso(contact);
     else prepareFtReply(contact, false);
   }
+}
+function isFtAutoReply(contact, own) {
+  return ftAutoReply.checked && contact.recipient === own &&
+    contact.peer !== own && contact.kind !== 'RR73' && !!ftGrid(contact.kind);
 }
 function canChooseFtContact(contact) {
   const own = ftCall($('ft-own-call').value);
@@ -994,6 +1043,7 @@ function clearFtQso() {
   if (ftDraftInForm(ftQso)) $('ft8-message').value = '';
   ftQso = null;
   ftQsoTransmission = null;
+  ftQsoLog = null;
 }
 function ftIdentity(showError) {
   const own = ftCall($('ft-own-call').value);
@@ -1008,6 +1058,8 @@ function ftIdentity(showError) {
   return null;
 }
 function setFtDraft(draft, selected) {
+  if (ftQsoLog && (draft.peer !== ftQsoLog.call || (selected && draft.step === 'locator')))
+    ftQsoLog = null;
   const use = selected || ftDraftInForm(ftQso) || !$('ft8-message').value;
   ftQso = draft;
   if (use) applyFtDraft(draft);
@@ -1021,7 +1073,10 @@ function prepareFtReply(contact, selected) {
   const identity = ftIdentity(selected);
   if (!identity) return;
   const draft = ftReply(contact, identity.own, identity.locator);
-  if (draft) setFtDraft(draft, selected);
+  if (!draft) return;
+  if (!selected && draft.step === 'complete' && ftQsoLog?.acknowledged)
+    saveFtQsoLog(contact.slot);
+  setFtDraft(draft, selected);
 }
 function startFtAutoQso(contact) {
   if ($('ft8-send').disabled || ftAutoQso) return;
@@ -1051,21 +1106,24 @@ function advanceFtAutoQso(contact) {
   const draft = ftReply(contact, ftAutoQso.own, '');
   if (!draft || !nextFtAutoStep(ftQso.step, draft.step)) return;
   if (draft.step === 'complete') {
+    if (ftQsoLog?.acknowledged) saveFtQsoLog(contact.slot);
     endFtAutoQso(false);
     setFtDraft(draft, true);
     return;
   }
+  const sameStep = draft.step === ftQso.step;
+  if (sameStep && ftAutoQso.attempts >= ftAutoMaxAttempts) return;
+  clearTimeout(ftAutoQso.timer);
+  sendFtAutoStep(draft, sameStep ? ftAutoQso.attempts + 1 : 1);
+}
+function sendFtAutoStep(draft, attempts) {
   if (!canSendFtDraft()) {
     stopFtAutoQso(t('TX2 ist belegt oder nicht bereit.', 'TX2 is busy or unavailable.'));
     return;
   }
-  if (draft.step === ftQso.step && ftAutoQso.attempts >= 3) {
-    stopFtAutoQso(t('Auto-QSO nach drei Sendeversuchen beendet.', 'Auto QSO stopped after three attempts.'));
-    return;
-  }
-  ftAutoQso.attempts = draft.step === ftQso.step ? ftAutoQso.attempts + 1 : 1;
-  clearTimeout(ftAutoQso.timer);
-  setFtDraft(draft, true);
+  ftAutoQso.attempts = attempts;
+  draft.waiting = false;
+  if (draft !== ftQso) setFtDraft(draft, true);
   transmitFtDraft(ftAutoQso);
 }
 function stopFtAutoQso(message, cancelTx = false) {
@@ -1073,6 +1131,42 @@ function stopFtAutoQso(message, cancelTx = false) {
   clearFtQso();
   ft8Error = message;
   renderFt8Controls();
+}
+function trackFtQsoTransmission({draft, slot, values, identity, rxHz}) {
+  if (!draft.peer || !identity) return;
+  if (!ftQsoLog) {
+    ftQsoLog = {
+      call: draft.peer, own_call: identity.own, own_grid: identity.locator, mode: values.mode,
+      start: Math.floor(slot), tx_hz: values.frequency_hz + values.audio_hz,
+      rx_hz: rxHz + Math.round(draft.audioHz),
+    };
+  }
+  const {received} = draft;
+  if (received.locator || (/^[A-R]{2}\d{2}$/.test(received.kind) && received.kind !== 'RR73'))
+    ftQsoLog.grid = received.locator ?? received.kind;
+  if (/^R?[+-]\d{2}$/.test(received.kind))
+    ftQsoLog.received_report = received.kind.replace(/^R/, '');
+  if (draft.step === 'report' || draft.step === 'ackReport')
+    ftQsoLog.sent_report = values.message.split(/\s+/).pop().replace(/^R/, '');
+  if (draft.step === 'ack' || draft.step === 'signoff') saveFtQsoLog(slot);
+  if (draft.step === 'ackReport') ftQsoLog.acknowledged = true;
+}
+async function saveFtQsoLog(slot) {
+  const record = ftQsoLog;
+  if (!record || record.saving || record.saved || !record.sent_report || !record.received_report) return;
+  record.saving = true;
+  try {
+    const {call, own_call, grid, own_grid, mode, start, tx_hz, rx_hz, sent_report, received_report} = record;
+    await checked('ft_qso_log', {call, own_call, grid, own_grid, mode, start, tx_hz, rx_hz, sent_report, received_report,
+      end: Math.floor(slot)});
+    record.saved = true;
+    ftLogError = false;
+  } catch (error) {
+    ftLogError = error.code !== 'ft_log_disabled';
+  } finally {
+    record.saving = false;
+    renderFt8Controls();
+  }
 }
 function updateFtQsoTransmission(tx) {
   const sending = ftQsoTransmission;
@@ -1092,6 +1186,7 @@ function updateFtQsoTransmission(tx) {
     return;
   }
   ftQso.sentSlot = sending.slot;
+  trackFtQsoTransmission(sending);
   if (ftQso.step === 'signoff') {
     ftQso.step = 'complete';
     if (ftDraftInForm(ftQso)) $('ft8-message').value = '';
@@ -1102,17 +1197,24 @@ function updateFtQsoTransmission(tx) {
     if (ftAutoQso) {
       const automatic = ftAutoQso;
       automatic.timer = setTimeout(() => {
-        if (ftAutoQso === automatic)
-          stopFtAutoQso(t('Auto-QSO beendet: keine passende Antwort.', 'Auto QSO ended: no matching reply.'));
-      }, 4 * automatic.period * 1000);
+        if (ftAutoQso !== automatic) return;
+        if (automatic.attempts >= ftAutoMaxAttempts) {
+          stopFtAutoQso(t('Auto-QSO beendet: keine passende Antwort nach drei Sendeversuchen.',
+            'Auto QSO ended: no matching reply after three attempts.'));
+          return;
+        }
+        sendFtAutoStep(ftQso, automatic.attempts + 1);
+      }, ftAutoReplySlots * automatic.period * 1000);
     }
   }
 }
 function renderFtQsoControls(enabled) {
   const manual = enabled && !ftAutoQso;
-  for (const id of ['ft-own-call', 'ft-own-grid', 'ft-cq', 'ft-apply-reply', 'ft-end-qso', 'ft-auto']) $(id).disabled = !manual;
-  for (const {line, contact} of ft8Lines)
-    if (contact) line.disabled = !manual || !canChooseFtContact(contact);
+  for (const id of ['ft-own-call', 'ft-own-grid', 'ft-cq', 'ft-apply-reply', 'ft-end-qso', 'ft-auto', 'ft-auto-reply']) $(id).disabled = !manual;
+  for (const {lines} of [ft8Log, ftOwnLog]) {
+    for (const {line, contact} of lines)
+      if (contact) line.disabled = !manual || !canChooseFtContact(contact);
+  }
   $('ft-contact').hidden = !ftQso;
   if (!ftQso) return;
   const {peer, audioHz, step, text, waiting} = ftQso;
@@ -1121,7 +1223,7 @@ function renderFtQsoControls(enabled) {
   $('ft-end-qso').hidden = !!ftAutoQso;
   const name = peer ? `${peer} · RX ${Math.round(audioHz)} Hz` : 'CQ';
   const status = step === 'complete' ? t('QSO abgeschlossen', 'QSO complete') :
-    waiting ? (peer ? t('Warte auf Antwort', 'Waiting for reply') : t('Antwort anklicken', 'Select a reply')) :
+    waiting ? (peer || ftAutoReply.checked ? t('Warte auf Antwort', 'Waiting for reply') : t('Antwort anklicken', 'Select a reply')) :
     ready ? text : t('Sendung vorbereitet', 'Transmission prepared');
   const output = $('ft-qso-status');
   const label = `${ftAutoQso ? 'Auto · ' : ''}${name} · ${status}`;
@@ -1134,14 +1236,56 @@ for (const [id, preference] of [['ft-own-call', 'ftOwnCall'], ['ft-own-grid', 'f
     clearFtQso();
     ft8Error = '';
     writePreference(preference, input.value.trim().toUpperCase());
+    if (id === 'ft-own-call') {
+      clearFtLog(ftOwnLog);
+      const own = ftCall(input.value);
+      for (const entry of ft8Log.lines) appendFtOwnLine(entry, own);
+    }
     renderFt8Controls();
   };
+}
+const ftAutoReply = $('ft-auto-reply');
+ftAutoReply.checked = readPreference('ftAutoReply') === 'true';
+ftAutoReply.onchange = () => {
+  writePreference('ftAutoReply', ftAutoReply.checked);
+  renderFt8Controls();
+};
+const ftAutoCq = $('ft-auto-cq');
+let ftAutoCqRetryAt = 0;
+ftAutoCq.checked = false;
+ftAutoCq.onchange = () => {
+  if (ftAutoCq.checked) {
+    if (!ftIdentity(true)) ftAutoCq.checked = false;
+    ftAutoCqRetryAt = 0;
+    sendIdleFtCq();
+  } else if (ftQso?.autoCq && (ft8Pending || state.ft8_tx?.phase === 'scheduled')) {
+    send({type:'ft8_tx_stop'});
+    clearFtQso();
+  }
+  renderFt8Controls();
+};
+function prepareFtCq(identity, autoCq = false) {
+  setFtDraft({step:'cq', autoCq, text:`CQ ${identity.own} ${identity.locator}`,
+    parity:Number($('ft8-parity').value)}, true);
 }
 $('ft-cq').onclick = () => {
   const identity = ftIdentity(true);
   if (!identity) return;
-  setFtDraft({step:'cq', text:`CQ ${identity.own} ${identity.locator}`, parity:Number($('ft8-parity').value)}, true);
+  prepareFtCq(identity);
+  $('ft8-tx-form').requestSubmit($('ft8-send'));
 };
+function sendIdleFtCq() {
+  if (!ftAutoCq.checked || digitalView !== 'ft8' || ftAutoQso || !canSendFtDraft()) return;
+  if (ftQso?.peer && ftQso.step !== 'complete') return;
+  const period = ftPeriod(state.ft_mode);
+  const now = Date.now() / 1000;
+  if (now < ftAutoCqRetryAt ||
+      (ftQso?.step === 'cq' && ftQso.waiting && now < ftQso.sentSlot + 2 * period + 1)) return;
+  const identity = ftIdentity(false);
+  if (!identity || !$('ft8-audio-hz').validity.valid || !$('ft8-level').validity.valid) return;
+  prepareFtCq(identity, true);
+  transmitFtDraft();
+}
 $('ft-apply-reply').onclick = () => {
   if (ftQso) applyFtDraft(ftQso);
   renderFt8Controls();
@@ -1189,7 +1333,8 @@ function renderFt8Controls() {
   parity.options[1].textContent = ft4 ? ':07.5 / :22.5 / :37.5 / :52.5' : ':15 / :45';
   $('ft8-audio-hz').max = ft4 ? 3930 : 3950;
   $('ft8-send').disabled = !canSendFtDraft() || !!ftAutoQso;
-  $('ft8-stop').disabled = !operator || !isOpen() || (!ftAutoQso && (!active || ft8Pending));
+  ftAutoCq.disabled = !writable && !ftAutoCq.checked;
+  $('ft8-stop').disabled = !operator || !isOpen() || (!ftAutoCq.checked && !ftAutoQso && (!active || ft8Pending));
   renderFtQsoControls(!$('ft8-send').disabled);
   for (const id of ['ft8-message', 'ft8-audio-hz', 'ft8-level', 'ft8-parity']) $(id).disabled = !writable || busy || !!ftAutoQso;
   const time = tx?.slot_utc ?
@@ -1204,8 +1349,10 @@ function renderFt8Controls() {
     underrun: t('TX2-Audiopuffer unterbrochen', 'TX2 audio buffer underrun'),
   };
   const status = $('ft8-status');
-  status.classList.toggle('error', !!ft8Error);
-  status.textContent = ft8Error || (tx?.phase === 'scheduled' ? `${t('Geplant für', 'Scheduled for')} ${time}` :
+  const logError = ftLogError && t('QSO konnte nicht im ADIF-Logbuch gespeichert werden.', 'Could not save QSO to the ADIF logbook.');
+  status.classList.toggle('error', !!(ft8Error || logError));
+  status.classList.toggle('sending', tx?.phase === 'sending' && !ft8Error && !logError);
+  status.textContent = ft8Error || logError || (tx?.phase === 'scheduled' ? `${t('Geplant für', 'Scheduled for')} ${time}` :
     tx?.phase === 'sending' ? `${t('Sendet', 'Transmitting')} · ${time}` :
     result[tx?.result] ?? (state.ready && !state.ft8_enabled ? t('FT4/8 an RX2 ist deaktiviert.', 'RX2 FT4/8 is disabled.') : ''));
 }
@@ -1254,13 +1401,21 @@ async function transmitFtDraft(automatic = null) {
   ft8Pending = true;
   renderFt8Controls();
   const draft = ftDraftInForm(ftQso) ? ftQso : null;
+  const identity = draft?.peer ? ftIdentity(false) : null;
+  if (identity) identity.locator = $('ft-own-grid').value.trim().toUpperCase();
+  const rxHz = state.rx?.['2']?.frequency_hz;
   try {
     const answer = await checked('ft8_tx_start', values);
     if (draft && draft === ftQso && Number.isFinite(answer.slot_utc))
-      ftQsoTransmission = {draft, slot:answer.slot_utc, observed:state.ft8_tx?.slot_utc === answer.slot_utc};
+      ftQsoTransmission = {draft, slot:answer.slot_utc, values, identity, rxHz,
+        observed:state.ft8_tx?.slot_utc === answer.slot_utc};
   }
   catch (error) {
     if (automatic && automatic !== ftAutoQso) return;
+    if (draft?.autoCq && draft === ftQso) {
+      if (error.code === 'tx2_busy') ftAutoCqRetryAt = Date.now() / 1000 + ftPeriod(values.mode);
+      else ftAutoCq.checked = false;
+    }
     if (automatic) {
       endFtAutoQso(error.code === 'timeout');
       clearFtQso();
@@ -1273,13 +1428,27 @@ async function transmitFtDraft(automatic = null) {
   }
   finally { ft8Pending = false; renderFt8Controls(); }
 }
+for (const [id, preference] of [['ft8-audio-hz', 'ftAudioHz'], ['ft8-level', 'ftTxLevel']]) {
+  const input = $(id);
+  const saved = Number(readPreference(preference));
+  if (Number.isInteger(saved) && saved >= Number(input.min) && saved <= Number(input.max)) {
+    input.value = saved;
+  }
+  input.addEventListener('input', () => {
+    if (input.validity.valid) writePreference(preference, input.value);
+  });
+}
 $('ft8-tx-form').addEventListener('input', () => {
   ft8Error = '';
   renderFt8Controls();
 });
 $('ft8-stop').onclick = () => {
+  ftAutoCq.checked = false;
   if (ftAutoQso) stopFtAutoQso(t('Auto-QSO abgebrochen.', 'Auto QSO cancelled.'), true);
-  else send({type: 'ft8_tx_stop'});
+  else {
+    send({type: 'ft8_tx_stop'});
+    renderFt8Controls();
+  }
 };
 
 const rx2TuneStep = 10;
@@ -1503,6 +1672,7 @@ setInterval(() => {
   if (!ptt.checkTimeout() && operator && pttHeld) send({type: 'ptt_keepalive'});
   if (operator && rttyTx?.live && !rttyTx.stopping) send({type: 'rtty_tx_keepalive', tx_id: rttyTx.id});
   renderPttHint(); renderNoiseLevels(); renderFtSlotClock();
+  sendIdleFtCq();
 }, 250);
 $('theme').checked = window.QO100Theme.value === 'light';
 $('theme').onchange = () => window.QO100Theme.set($('theme').checked ? 'light' : 'dark');

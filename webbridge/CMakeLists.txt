@@ -15,7 +15,7 @@ endif()
 if(NOT TARGET qo100_rtty)
     add_subdirectory(../decoder/rtty rtty)
 endif()
-add_executable(qo100_webbridge main.cpp bridge.cpp server.cpp mm_monitor.cpp sstv_rx.cpp sstv_tx.cpp rtty_rx.cpp tx2.cpp ft8.cpp)
+add_executable(qo100_webbridge main.cpp bridge.cpp server.cpp mm_monitor.cpp sstv_rx.cpp sstv_tx.cpp rtty_rx.cpp tx2.cpp ft8.cpp ft_logbook.cpp)
 target_include_directories(qo100_webbridge PRIVATE ${Boost_INCLUDE_DIRS} ../include)
 target_compile_definitions(qo100_webbridge PRIVATE BOOST_ERROR_CODE_HEADER_ONLY
     QO100_SOFTWARE_VERSION="${PROJECT_VERSION}"

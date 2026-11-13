@@ -41,7 +41,7 @@ export function parseFtContact(packet) {
     const directed = /^(?:[A-Z]{1,4}|\d{3})$/.test(words[1] ?? '');
     const [peer, locator, ...rest] = words.slice(directed ? 2 : 1);
     if (!peer || !ftCall(peer) || rest.length || (locator && !grid.test(locator))) return null;
-    return {...result, peer, kind: 'cq'};
+    return {...result, peer, kind: 'cq', locator};
   }
   const [recipient, peer, exchange, ...rest] = words;
   if (!recipient || !peer || !ftCall(recipient) || !ftCall(peer) || !exchange || rest.length) return null;
@@ -62,5 +62,5 @@ export function ftReply(received, ownCall, locator) {
   else if (ackReport.test(kind)) [step, reply] = ['ack', 'RR73'];
   else if (kind === '73') [step, reply] = ['complete', ''];
   else [step, reply] = ['signoff', '73'];
-  return {peer, slot, parity, audioHz, step, text: reply ? `${peer} ${ownCall} ${reply}` : ''};
+  return {peer, slot, parity, audioHz, step, received, text: reply ? `${peer} ${ownCall} ${reply}` : ''};
 }
