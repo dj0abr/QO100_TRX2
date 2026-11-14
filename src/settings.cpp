@@ -18,7 +18,7 @@ SettingsMap settings_values(const Config& c) {
         {"lnb_reference_hz",value(c.lnb_reference_hz)},{"rx_correction_hz",value(c.rx_correction_hz)},
         {"tx_correction_hz",value(c.tx_correction_hz)},{"pluto_tx_base_hz",value(c.pluto_tx_base_hz)},
         {"tx_attenuation_db",value(c.tx_attenuation_db)},
-        {"shelly_ptt_ip",c.shelly_ptt_ip},{"shelly_ptt_external_ft",value(c.shelly_ptt_external_ft)},
+        {"shelly_ptt_ip",c.shelly_ptt_ip},
         {"initial_rx_hz",value(c.initial_rx_hz)},{"initial_rx2_hz",value(c.initial_rx2_hz)},
         {"rx3_frequency_hz",value(c.rx3_frequency_hz)},{"rx4_frequency_hz",value(c.rx4_frequency_hz)},
         {"rx5_frequency_hz",value(c.rx5_frequency_hz)},
@@ -56,7 +56,8 @@ Config patch_settings(const Config& old,const SettingsMap& patch) {
     if(legacy && (patch.count("rx1_filter_low_hz") || patch.count("rx1_filter_high_hz")))
         throw std::runtime_error("Use filter edges or legacy bandwidth/center, not both");
     for(const auto& [k,v]:patch) {
-        if(!supported.count(k) && k!="rx1_filter_bandwidth_hz" && k!="rx1_filter_center_hz") throw std::runtime_error("Unknown or read-only setting: "+k);
+        if(!supported.count(k) && k!="rx1_filter_bandwidth_hz" && k!="rx1_filter_center_hz" &&
+           k!="shelly_ptt_external_ft") throw std::runtime_error("Unknown or read-only setting: "+k);
         set_config_value(next,k,v);
     }
     if(next.rx1_nr_percent) next.gui_nr_strength=next.rx1_nr_percent;

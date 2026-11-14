@@ -148,11 +148,11 @@ int main(int argc, char** argv) {
         uint16_t tx2_command_status=0;
         auto last_tx2_audio=last_tx_audio,last_tx2_state=last_tx_audio;
         auto last_tx2_signal=last_tx_audio;
-        bool tx2_fast_ptt=false;
+        auto tx2_source=qo100::Tx2AudioSource::internal;
         auto reset_tx2=[&] {
             ++tx2_epoch;tx2.reset(int64_t(tx2_frequency)-int64_t(c.tx_center_hz));
             last_tx2_audio=last_tx2_signal=Clock::now()-10s;
-            tx2_fast_ptt=false;
+            tx2_source=qo100::Tx2AudioSource::internal;
         };
         uint32_t filter_request=0;
         uint16_t filter_status=0;
@@ -190,7 +190,7 @@ int main(int argc, char** argv) {
             return tx_enabled && (loop_mode==TestLoop::audio || shelly.ready(now,ptt_lead));
         };
         auto tx2_wants_ptt=[&](Clock::time_point now) {
-            return now-last_tx2_signal < (tx2_fast_ptt ? 200ms : 650ms);
+            return now-last_tx2_signal < (tx2_source==qo100::Tx2AudioSource::internal ? 650ms : 200ms);
         };
         auto send_tx_state=[&]() {
             tx_reported_on=tx1_can_send(Clock::now());
@@ -246,10 +246,12 @@ int main(int argc, char** argv) {
             const bool recent=tx1_can_send(now) && active() && loop_mode!=TestLoop::audio && !loop_pending
                 && now-last_tx_audio<200ms;
             const bool managed_ptt=!c.shelly_ptt_ip.empty();
-            const auto digital_timeout=managed_ptt && !tx2_fast_ptt ? 650ms : 200ms;
+            const auto digital_timeout=managed_ptt && tx2_source==qo100::Tx2AudioSource::internal ? 650ms : 200ms;
             const bool digital_recent=tx2_used && active() && hardware_online && !loop_pending && loop_mode==TestLoop::normal &&
                 now-last_tx2_audio<digital_timeout && (!managed_ptt || tx2_wants_ptt(now));
-            const bool digital_ready=shelly.ready(now,tx2_fast_ptt ? 0ms : ptt_lead);
+            // FT4/FT8 keeps its slot timing while the relay request runs in parallel.
+            const bool digital_ready=tx2_source==qo100::Tx2AudioSource::ft ||
+                shelly.ready(now,tx2_source==qo100::Tx2AudioSource::internal ? ptt_lead : 0ms);
             const auto first_id=tx_block_id;
             const bool pack_iq=bool(tx_status);
             pending_tx_blocks=blocks;
@@ -375,7 +377,7 @@ int main(int argc, char** argv) {
             if(receivers[i].dsp) receivers[i].dsp->retune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
         };
         auto apply_runtime=[&](const qo100::Config& old,bool reset_all) {
-            if(old.shelly_ptt_ip!=c.shelly_ptt_ip || old.shelly_ptt_external_ft!=c.shelly_ptt_external_ft) {
+            if(old.shelly_ptt_ip!=c.shelly_ptt_ip) {
                 mute_tx();
                 shelly.configure(c.shelly_ptt_ip);
                 relay_release_at={};
@@ -662,8 +664,7 @@ int main(int argc, char** argv) {
                                     });
                                 const auto now=Clock::now();
                                 if(managed_ptt && !signal && !tx2_wants_ptt(now)) continue;
-                                const bool fast=audio.source==qo100::Tx2AudioSource::ft ||
-                                    (audio.source==qo100::Tx2AudioSource::external && c.shelly_ptt_external_ft);
+                                const bool fast=audio.source!=qo100::Tx2AudioSource::internal;
                                 // Reserve room for the lead and one HTTP timeout at 20 ms per block.
                                 const auto capacity=qo100::TxChannel::capacity +
                                     (managed_ptt && !fast ? qo100::TxChannel::audio_block * 25 : 0);
@@ -671,7 +672,7 @@ int main(int argc, char** argv) {
                                     last_tx2_audio=now;
                                     if(signal) {
                                         last_tx2_signal=now;
-                                        tx2_fast_ptt=fast;
+                                        tx2_source=audio.source;
                                     }
                                 }
                                 continue;

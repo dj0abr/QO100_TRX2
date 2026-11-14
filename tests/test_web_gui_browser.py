@@ -383,6 +383,17 @@ def main():
                 decode(f'CQ K2ABC FN{i:02d}')
             wait(lambda: len(lines('ft8-log')) == 50 and lines('ft8-log')[-1] == 'CQ K2ABC FN49')
             assert lines('ft8-own-log') == decodes[1:4]
+            # Repeated backend snapshots must leave the disabled sign-off row untouched.
+            decode('DJ0ABR K1ABC 73', message_type=8)
+            wait(lambda: execute("return document.getElementById('ft8-log').lastElementChild.disabled"))
+            execute('''window.__ftDecodeMutations = 0;
+                window.__ftDecodeObserver = new MutationObserver(records => window.__ftDecodeMutations += records.length);
+                for (const id of ['ft8-log', 'ft8-own-log'])
+                  window.__ftDecodeObserver.observe(document.getElementById(id), {
+                    attributes: true, attributeFilter: ['disabled'], subtree: true
+                  });''')
+            time.sleep(.6)
+            assert execute('window.__ftDecodeObserver.disconnect(); return window.__ftDecodeMutations') == 0
             for i in range(24):
                 decode(f'TEST DJ0ABR {i}')
             wait(lambda: lines('ft8-own-log')[-1] == 'TEST DJ0ABR 23')
@@ -391,27 +402,46 @@ def main():
                 return execute('''const log = document.getElementById(arguments[0]);
                     return [log.scrollTop, log.scrollHeight - log.clientHeight];''', log_id)
 
+            def ft_log_at_end(log_id):
+                top, end = ft_log_scroll(log_id)
+                return end > 0 and abs(end - top) < 2
+
             execute('for (const id of ["ft8-log", "ft8-own-log"]) document.getElementById(id).scrollTop = 0')
             for log_id, other_id in (('ft8-log', 'ft8-own-log'), ('ft8-own-log', 'ft8-log')):
                 other_position = ft_log_scroll(other_id)
                 click(f'.ft-log-end[aria-controls="{log_id}"]')
-                top, end = ft_log_scroll(log_id)
-                assert end > 0 and abs(end - top) < 2, (log_id, top, end)
+                wait(lambda: ft_log_at_end(log_id))
                 assert ft_log_scroll(other_id) == other_position
             execute('for (const id of ["ft8-log", "ft8-own-log"]) document.getElementById(id).scrollTop = 0')
             select_view('3')
             assert execute('return document.getElementById("decoder-active-mode").textContent.includes("FT4/8")')
             click('#zoom-sources input[value="digital"]')
             for log_id in ('ft8-log', 'ft8-own-log'):
-                top, end = ft_log_scroll(log_id)
-                assert end > 0 and abs(end - top) < 2, (log_id, top, end)
+                wait(lambda: ft_log_at_end(log_id))
+            # Keep both logs at their 50-row limit while adding taller country rows.
+            ft_logs = ('ft8-log', 'ft8-own-log')
+            execute('''const style = document.createElement('style');
+                style.textContent = '.ft-country { max-inline-size: 13ch; }';
+                document.head.append(style); window.__ftWrapStyle = style;''')
+            for i in range(55):
+                decode(f'DJ0ABR DL1ABC R-{i%50:02d}', message_type=8)
+            wait(lambda: all(len(lines(log)) == 50 for log in ft_logs))
+            wait(lambda: all(ft_log_at_end(log) for log in ft_logs))
+            for text in ('DJ0ABR M1DST R-06', 'DJ0ABR DL1ABC R-07', 'DJ0ABR M1DST R-08'):
+                decode(text, message_type=8)
+                wait(lambda: all(lines(log)[-1] == text for log in ft_logs))
+                if 'M1DST' in text:
+                    assert execute('''return ['ft8-log', 'ft8-own-log'].every(id => {
+                        const name = document.getElementById(id).lastElementChild.querySelector('.ft-country-name');
+                        const range = document.createRange();
+                        range.selectNodeContents(name);
+                        return name.textContent === 'Vereinigtes Königreich' && range.getClientRects().length === 2;
+                    });''')
+                wait(lambda: all(ft_log_at_end(log) for log in ft_logs))
+            execute('window.__ftWrapStyle.remove();')
             # A smaller receive area must keep both lists pinned to the end.
             receive = '.ft-receive'
             execute('const n=document.querySelector(arguments[0]); n.style.height=(n.clientHeight - 30) + "px";', receive)
-
-            def ft_log_at_end(log_id):
-                top, end = ft_log_scroll(log_id)
-                return end > 0 and abs(end - top) < 2
 
             wait(lambda: all(ft_log_at_end(log_id) for log_id in ('ft8-log', 'ft8-own-log')))
             execute('''const log = document.getElementById('ft8-log');
@@ -422,7 +452,7 @@ def main():
             decode('TEST DJ0ABR')
             wait(lambda: lines('ft8-own-log')[-1] == 'TEST DJ0ABR')
             assert not ft_log_at_end('ft8-log')
-            assert ft_log_at_end('ft8-own-log')
+            wait(lambda: ft_log_at_end('ft8-own-log'))
             execute('document.querySelector(arguments[0]).style.height = "";', receive)
             click('#decoder-clear')
             assert lines('ft8-log') == lines('ft8-own-log') == []

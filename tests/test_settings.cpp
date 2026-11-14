@@ -49,8 +49,8 @@ int main() {
             {{"ptt","1"}},{{"pluto_rx_hz","1"}},{{"gui_audio_gain","nan"}}}) rejects([&]{qo100::patch_settings(base,patch);});
         rejects([&]{qo100::parse_settings("gui_audio_gain=4\ngui_audio_gain=5\n");});
         rejects([&]{qo100::patch_settings(base,{{"shelly_ptt_ip","192.168.1.256"}});});
-        auto shelly=qo100::patch_settings(next,{{"shelly_ptt_ip","192.168.10.41"},{"shelly_ptt_external_ft","1"}});
-        require(shelly.shelly_ptt_external_ft && shelly.shelly_ptt_ip=="192.168.10.41","Shelly settings lost");
+        auto shelly=qo100::patch_settings(next,{{"shelly_ptt_ip","192.168.10.41"}});
+        require(shelly.shelly_ptt_ip=="192.168.10.41","Shelly IP lost");
         const auto shelly_disabled=qo100::patch_settings(shelly,qo100::parse_settings("shelly_ptt_ip=\n"));
         require(shelly_disabled.shelly_ptt_ip.empty(),"Could not disable Shelly PTT");
         next=shelly;
@@ -66,10 +66,12 @@ int main() {
             {{"rx1_filter_low_hz","2300"},{"rx1_filter_high_hz","2700"}},{{"rx1_filter_low_hz","nan"}},
             {{"rx1_filter_low_hz","300"},{"rx1_filter_bandwidth_hz","500"}}}) rejects([&]{qo100::patch_settings(base,patch);});
         const auto path=directory/"backend.settings";
-        {std::ofstream saved(path);saved<<"rx1_filter_bandwidth_hz=501\nrx1_filter_center_hz=700\n";}
-        {qo100::SettingsStore legacy(base,path);require(legacy.config().rx1_filter==migrated.rx1_filter,"Legacy saved settings not migrated");legacy.changed();legacy.flush();}
+        {std::ofstream saved(path);saved<<"rx1_filter_bandwidth_hz=501\nrx1_filter_center_hz=700\n"
+            <<"shelly_ptt_ip=192.168.10.41\nshelly_ptt_external_ft=0\n";}
+        {qo100::SettingsStore legacy(base,path);require(legacy.config().rx1_filter==migrated.rx1_filter,"Legacy saved settings not migrated");require(legacy.config().shelly_ptt_ip==shelly.shelly_ptt_ip,"Legacy Shelly settings lost IP");legacy.changed();legacy.flush();}
         {std::ifstream saved(path);std::string text((std::istreambuf_iterator<char>(saved)),{});
-            require(text.find("rx1_filter_low_hz=449.5")!=std::string::npos && text.find("rx1_filter_bandwidth_hz")==std::string::npos,"Saved filter was not migrated to cutoff keys");}
+            require(text.find("rx1_filter_low_hz=449.5")!=std::string::npos && text.find("rx1_filter_bandwidth_hz")==std::string::npos,"Saved filter was not migrated to cutoff keys");
+            require(text.find("shelly_ptt_external_ft=")==std::string::npos,"Obsolete TX2 mode was saved again");}
 
         qo100::SettingsStore store(base,path);const auto initial_revision=store.revision();
         store.commit(next);

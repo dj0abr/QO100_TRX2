@@ -198,7 +198,8 @@ RX5-Audio bleibt 12 kHz/PCM16/240 Samples, ohne zusätzlichen Zoom oder Browser-
 TX2 verwendet `TX_CONTROL`/`TX_STATE`/`TX_AUDIO` mit Stream **7**. Frequenz-,
 Session-, Epochen-, PCM- und Sampleindexfelder entsprechen TX1. In TX2-`TX_AUDIO`
 kennzeichnet Offset 44 (4 Byte) die Quelle für die Hardware-PTT: 0 externes
-Audio, 1 eingebauter DigiMode mit Vorlauf, 2 eingebautes FT4/FT8 ohne Vorlauf.
+Audio ohne zusätzlichen Vorlauf, 1 eingebauter DigiMode mit Vorlauf,
+2 eingebautes FT4/FT8 mit paralleler Relaisanfrage und sofortiger Audiofreigabe.
 Bei TX2 bedeutet
 `TX_STATE.first` (Offset 48) **Audioweg bereit**, unabhängig von einer PTT.
 `TX_CONTROL.format=0` stimmt TX2 ab; `format=1` fordert bei einem Adapterneustart

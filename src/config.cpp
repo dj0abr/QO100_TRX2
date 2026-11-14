@@ -119,7 +119,8 @@ void set_config_value(Config& c,const std::string& k,const std::string& v) {
         else if (k=="pluto_connection") c.pluto_connection=v;
         else if (k=="pluto_ip") c.pluto_ip=v;
         else if (k=="shelly_ptt_ip") c.shelly_ptt_ip=v;
-        else if (k=="shelly_ptt_external_ft") c.shelly_ptt_external_ft=enabled(v);
+        // Accept the former mode selection in existing configuration files.
+        else if (k=="shelly_ptt_external_ft") (void)enabled(v);
         else if (k=="lnb_reference_hz") c.lnb_reference_hz=integer(v);
         else if (k=="rx_correction_hz") c.rx_correction_hz=signed_integer(v);
         else if (k=="tx_correction_hz") c.tx_correction_hz=signed_integer(v);

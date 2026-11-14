@@ -482,8 +482,7 @@
       <form id="settings-form">
         <fieldset><legend data-en="Hardware PTT">Hardware-PTT</legend><div class="form-grid">
           <label data-en="Shelly IPv4 address">Shelly IPv4-Adresse<input type="text" data-setting="shelly_ptt_ip" placeholder="192.168.10.41" maxlength="15" autocomplete="off" data-control></label>
-          <label data-en="External TX2 mode">Externe TX2-Betriebsart<select data-setting="shelly_ptt_external_ft" data-control><option value="0" data-en="Other modes · 250 ms lead">Andere Modi · 250 ms Vorlauf</option><option value="1" data-en="FT4/FT8 · no extra lead">FT4/FT8 · ohne zusätzlichen Vorlauf</option></select></label>
-        </div><p class="field-help" data-en="Leave the IP address empty to disable relay control. The built-in FT4/FT8 modes use their slot timing automatically.">Bei leerer IP-Adresse ist die Relaissteuerung aus. Die eingebauten FT4/FT8-Modi verwenden automatisch ihr Slot-Timing.</p></fieldset>
+        </div><p class="field-help" data-en="Leave the IP address empty to disable relay control. External TX2 audio and built-in FT4/FT8 use no additional lead time.">Bei leerer IP-Adresse ist die Relaissteuerung aus. Externes TX2-Audio und die eingebauten FT4/FT8-Modi verwenden keinen zusätzlichen Vorlauf.</p></fieldset>
         <fieldset><legend data-en="Monitoring receivers">Monitoring-Empfänger</legend><div class="form-grid">
           <label>RX3 · FT8 (Hz)<input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx3_frequency_hz" data-control></label>
           <label>RX4 · PSK (Hz)<input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx4_frequency_hz" data-control></label>

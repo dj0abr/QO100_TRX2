@@ -337,9 +337,10 @@ vom Backend aus per HTTP erreichbar sein. Das Backend bedient Relais 0 mit
 
 TX1 und die eingebauten Modi RTTY, SSTV und Waterfall-Text geben das
 Sendesignal 250 ms nach der Relaisbestätigung frei. Die eingebauten Modi
-FT4 und FT8 verwenden ihr Slot-Timing ohne diese Wartezeit. Externe Programme
-lösen die PTT per TX2-Audio aus. Bei WSJT-X oder einem anderen externen
-FT4/FT8-Programm im selben Setup **Externe TX2-Betriebsart → FT4/FT8** wählen.
+FT4 und FT8 geben das Sendesignal frei, während die Shelly-Anfrage parallel
+läuft. Bei einer langsamen oder fehlgeschlagenen Schaltung kann der Anfang
+der Aussendung fehlen. Externe TX2-Programme lösen die PTT über das Audio
+auf `toQO100` aus und senden nach der Relaisbestätigung ohne zusätzlichen Vorlauf.
 
 ### Audio, PTT und Einstellungen
 

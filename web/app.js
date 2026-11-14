@@ -972,25 +972,43 @@ for (const id of ['zoom-sources', 'decoder-monitor', 'decoder-digital', 'decoder
 });
 for (const log of [ft8Log, ftOwnLog]) {
   const {output} = log;
-  const resize = new ResizeObserver(() => {
-    log.width = output.clientWidth;
-    log.height = output.clientHeight;
-    if (log.height && log.follow) scrollFtLogToEnd(log);
-    else log.scrollTop = output.scrollTop;
+  const resize = new ResizeObserver(([entry]) => {
+    // Keep layout selection independent of whether the log has a scrollbar.
+    const width = entry.borderBoxSize[0].inlineSize;
+    const layout = width < 510 ? 'stacked' : width < 670 ? 'compact' : 'wide';
+    if (output.dataset.ftLayout !== layout) output.dataset.ftLayout = layout;
+    scheduleFtLogScroll(log);
   });
-  resize.observe(output);
+  resize.observe(output, {box: 'border-box'});
   output.addEventListener('scroll', () => {
     if (!log.height || log.height !== output.clientHeight || log.width !== output.clientWidth ||
         log.scrollTop === output.scrollTop) return;
     log.scrollTop = output.scrollTop;
     log.follow = output.scrollHeight - output.clientHeight - log.scrollTop < 2;
-  });
+    output.toggleAttribute('data-ft-reading-history', !log.follow);
+  }, {passive: true});
   document.querySelector(`.ft-log-end[aria-controls="${output.id}"]`).onclick = () => scrollFtLogToEnd(log);
+}
+function scheduleFtLogScroll(log) {
+  if (log.scrollFrame) return;
+  log.scrollFrame = requestAnimationFrame(() => {
+    log.scrollFrame = 0;
+    const {output} = log;
+    const width = output.clientWidth, height = output.clientHeight;
+    const resized = width !== log.width || height !== log.height;
+    log.width = width;
+    log.height = height;
+    if (height && log.follow) {
+      const end = Math.max(0, output.scrollHeight - height);
+      if (output.scrollTop !== end) output.scrollTop = end;
+      log.scrollTop = output.scrollTop;
+    } else if (resized) log.scrollTop = output.scrollTop;
+  });
 }
 function scrollFtLogToEnd(log) {
   log.follow = true;
-  log.output.scrollTop = log.output.scrollHeight;
-  log.scrollTop = log.output.scrollTop;
+  log.output.removeAttribute('data-ft-reading-history');
+  scheduleFtLogScroll(log);
 }
 function clearFtLog(log) {
   log.lines.length = 0;
@@ -1006,7 +1024,7 @@ function appendFtLine(log, entry) {
   lines.push(entry);
   output.append(entry.line);
   if (lines.length > 50) lines.shift().line.remove();
-  if (log.follow) scrollFtLogToEnd(log);
+  if (log.follow) scheduleFtLogScroll(log);
 }
 function appendFtOwnLine(entry, own) {
   if (!own || !entry.text.toUpperCase().split(/[^A-Z0-9]+/).includes(own)) return;
@@ -1068,13 +1086,14 @@ function appendFt8(message) {
   if (typeof utc !== 'string' || typeof text !== 'string' ||
       ![snr_db, dt_s, frequency_hz].every(Number.isFinite)) return;
   const contact = parseFtContact(message);
+  const own = ftCall($('ft-own-call').value);
   const line = document.createElement(contact ? 'button' : 'div');
   line.className = 'ft-decode-line';
   const metadata = `${utc} ${String(snr_db).padStart(3)} dB ${dt_s.toFixed(2).padStart(5)} s ${frequency_hz.toFixed(0).padStart(4)} Hz  `;
   ftDecodeFields(line, metadata, text, splitFtMessage(text, message.message_type));
   if (contact) {
     line.type = 'button';
-    line.disabled = $('ft-cq').disabled || !canChooseFtContact(contact);
+    line.disabled = $('ft-cq').disabled || !canChooseFtContact(contact, own);
     line.onclick = () => {
       const own = ftCall($('ft-own-call').value);
       // For a third-party exchange, call the station that transmitted the selected line.
@@ -1085,7 +1104,6 @@ function appendFt8(message) {
   }
   const entry = {line, contact, text};
   appendFtLine(ft8Log, entry);
-  const own = ftCall($('ft-own-call').value);
   appendFtOwnLine(entry, own);
   if (typeof message.cq_call === 'string') {
     line.dataset.cqCall = message.cq_call;
@@ -1103,8 +1121,7 @@ function isFtAutoReply(contact, own) {
   return ftQso?.step === 'cq' && ftQso.waiting &&
     contact.parity === ftQso.parity && contact.slot === ftQso.sentSlot + ftPeriod(state.ft_mode);
 }
-function canChooseFtContact(contact) {
-  const own = ftCall($('ft-own-call').value);
+function canChooseFtContact(contact, own) {
   return contact.peer !== own && !(contact.recipient === own && contact.kind === '73');
 }
 function ftDraftInForm(draft) {
@@ -1282,9 +1299,13 @@ function updateFtQsoTransmission(tx) {
 function renderFtQsoControls(enabled) {
   const manual = enabled && !ftAutoQso;
   for (const id of ['ft-own-call', 'ft-own-grid', 'ft-cq', 'ft-apply-reply', 'ft-end-qso', 'ft-auto', 'ft-auto-reply']) $(id).disabled = !manual;
+  const own = ftCall($('ft-own-call').value);
   for (const {lines} of [ft8Log, ftOwnLog]) {
-    for (const {line, contact} of lines)
-      if (contact) line.disabled = !manual || !canChooseFtContact(contact);
+    for (const {line, contact} of lines) {
+      if (!contact) continue;
+      const disabled = !manual || !canChooseFtContact(contact, own);
+      if (line.disabled !== disabled) line.disabled = disabled;
+    }
   }
   $('ft-contact').hidden = !ftQso;
   if (!ftQso) return;
