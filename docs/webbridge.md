@@ -53,8 +53,11 @@ Startwerte: FT8 **10489540000 Hz**, PSK **10489748821 Hz** (USB-Träger).
 Nur der geänderte Monitoringkanal setzt Filter, Epoche und Samplezähler zurück;
 RX1, RX2 und der andere Monitor laufen weiter. Normales `tune` erlaubt nur RX1/RX2.
 
-Die Zoom-Kachel bietet oben neun Radiobuttons: **RX1-/RX2-Zoom**, **FT8-Monitor**,
-**PSK-Monitor**, **DX-Cluster**, **CW-Skimmer**, **QO100-Bulletin**, **RX5-Diagnose**, **SSTV** und **RTTY**.
+Die obere Zeile der Zoom-Kachel bietet **RX1-/RX2-Zoom**, **Monitor** und
+**DigiModes**. Unter **Monitor** stehen **FT8**, **PSK**, **DX-Cluster**,
+**CW-Skimmer**, **Bulletin** und **Diagnose** zur Wahl. Unter **DigiModes**
+stehen **Aus**, **SSTV**, **RTTY**, **FT4/8** und **Waterfall-Text** zur Wahl.
+Der gewählte DigiMode bleibt beim Wechsel zu Zoom oder Monitor aktiv.
 Genau eine Ansicht nutzt den gesamten Inhalt der Kachel, einschließlich des sonst
 für Zoom-Spektrum, Frequenzachse und Wasserfall verwendeten Platzes.
 Alle Textströme werden immer empfangen, mit getrennten Puffern und Lesepositionen.
@@ -137,6 +140,23 @@ Ein aktiver externer Stream zu `toQO100` belegt TX2. Während SSTV sendet,
 reserviert die Webbridge TX2 exklusiv. Wird der Audioadapter dauerhaft mit
 `--always-active` betrieben, meldet er den TX2-Audioweg durchgehend als belegt.
 
+### Waterfall-Text über TX2
+
+Unter **DigiModes → Waterfall-Text** lassen sich bis zu 24 Zeichen eingeben
+(A–Z, 0–9, Leerzeichen und `/-.?+_`). Jedes Zeichen erscheint seitlich gedreht
+mit neun Pixeln über die Frequenzachse und sieben in Scrollrichtung.
+Das Frequenzraster nutzt etwa 500 bis 2500 Hz. Bei einem nach unten
+scrollenden Wasserfall steht das erste Zeichen am Ende unten. Die
+**Rasterzeile** stellt die Dauer pro Rasterschritt zwischen 100 und 400 ms
+ein. Standard sind 160 ms. Die Vorschau und die Daueranzeige aktualisieren
+sich beim Ändern des Textes oder der Rasterdauer. Text, Rasterdauer und
+TX-Pegel werden in diesem Browser gespeichert.
+
+Das Frequenzfeld stimmt TX2 ab. Die Frequenz wird in den Backend-Einstellungen
+gespeichert.
+**Senden** reserviert TX2 exklusiv, **Stopp** bricht ab und leert den
+TX2-Audiopuffer. Der Sendeauftrag fordert ausschließlich TX2 an.
+
 ### RTTY über RX2 und TX2
 
 Die RTTY-Ansicht zeigt den auf RX2 empfangenen Text. **Start** startet
@@ -186,7 +206,7 @@ Der Browser hält getrennte Text-/Scrollzustände für alle fünf Quellen. MM-Sp
 auf 200 Zeilen, die Übertragung pro MM-Ansicht auf etwa 64 KiB begrenzt. Das
 vollständige MM-Archiv bleibt lokal persistent. [RX5-Betrieb und Daten](mm-beacon.md).
 
-**RX5-Diagnose** abonniert zusätzlich Spektrum, Pilotenmessung, Konstellation und
+**Monitor → Diagnose** abonniert zusätzlich Spektrum, Pilotenmessung, Konstellation und
 Empfangsstatus. Browser senden `{"type":"mm_diagnostics","enabled":true}` beim
 Öffnen und `enabled:false` beim Verlassen. Auch Zuschauer dürfen dies abonnieren;
 es löst keine Funkkommandos aus. Nur bei mindestens einem Abonnenten wird die lokale
@@ -546,6 +566,12 @@ Pegel der laufenden Sendung. Bei `sstv_mode=auto` sendet TX2 in Martin M1
 und RX2 erkennt den Modus automatisch. `state.sstv_tx.phase` meldet `idle`, `upload`,
 `preparing` oder `sending`. Das Ergebnis steht bei Abschluss unter
 `state.sstv_tx.result`.
+
+**Waterfall-Text.** `waterfall_tx_start` übergibt `id`, `frequency_hz`,
+`level` (1–100), `text` und `row_ms` (100–400 in 20-ms-Schritten).
+`waterfall_tx_stop` bricht den Auftrag mit passender `tx_id` ab.
+`state.waterfall_tx` enthält `phase` (`idle`, `preparing`, `sending`),
+`result` und die Kennung `tx_id` des Auftrags.
 
 **RTTY-RX.** `rtty_subscribe` mit booleschem `enabled` gilt pro Browser und
 aktiviert RX2 unabhängig von der Audiowiedergabe. Abonnenten erhalten

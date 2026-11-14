@@ -69,7 +69,7 @@ class Bridge {
     bool ft8_active_ = false;
     FtMode ft_mode_ = FtMode::ft8;
     uint32_t ft_mode_revision_ = 1;
-    enum class Tx2Mode { sstv, rtty, ft8 };
+    enum class Tx2Mode { sstv, rtty, ft8, waterfall };
     static constexpr auto tx2_key = (uint64_t(6) << 32) | qo100::tx2_stream;
     struct SstvUpload {
         uint32_t id;
@@ -88,8 +88,12 @@ class Bridge {
         std::chrono::system_clock::time_point dispatch_utc;
         Clock::time_point dispatch_at;
     };
+    struct WaterfallTx {
+        std::vector<int16_t> pcm;
+        uint32_t id;
+    };
     using Tx2Source = std::variant<std::unique_ptr<qo100::sstv::Sender>,
-                                   std::unique_ptr<qo100::rtty::Encoder>, Ft8Tx>;
+                                   std::unique_ptr<qo100::rtty::Encoder>, Ft8Tx, WaterfallTx>;
     struct RttyTx {
         uint32_t id;
         std::optional<Clock::time_point> ptt_until{};
@@ -112,7 +116,11 @@ class Bridge {
     };
     std::optional<SstvUpload> sstv_upload_;
     std::optional<Tx2Job> tx2_job_;
-    std::optional<uint32_t> tx2_releasing_epoch_;
+    struct Tx2Release {
+        uint32_t epoch;
+        Tx2Mode mode;
+    };
+    std::optional<Tx2Release> tx2_release_;
     uint64_t tx2_schedule_ = 0;
     Clock::time_point last_tx2_state_{};
     net::steady_timer timer_, tx2_timer_;
@@ -164,6 +172,8 @@ class Bridge {
     bool tx2_ready(uint64_t frequency, Clock::time_point now) const;
     void begin_ft8_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level,
                       const std::string& message, unsigned audio_hz, unsigned parity, const std::string& mode);
+    void begin_waterfall_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level,
+                            const std::string& message, unsigned row_ms);
     void begin_sstv_tx(uint64_t client, uint32_t upload_id, uint64_t frequency, unsigned level);
     void sstv_tx_chunk(const Bytes& bytes);
     void begin_rtty_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level, const std::string& message);

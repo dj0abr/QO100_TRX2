@@ -27,7 +27,7 @@ bool Bridge::digital_tx_busy() const {
 }
 
 bool Bridge::tx2_holds_audio() const {
-    return tx2_job_.has_value() || tx2_releasing_epoch_.has_value();
+    return tx2_job_.has_value() || tx2_release_.has_value();
 }
 
 bool Bridge::tx2_active(Tx2Mode mode) const {
@@ -35,10 +35,17 @@ bool Bridge::tx2_active(Tx2Mode mode) const {
 }
 
 void Bridge::tx2_state(Tx2Mode mode, const char* phase, const char* result, std::optional<uint32_t> id) {
-    const char* key = mode == Tx2Mode::sstv ? "sstv_tx" : mode == Tx2Mode::rtty ? "rtty_tx" : "ft8_tx";
+    const char* key = nullptr;
+    switch (mode) {
+        case Tx2Mode::sstv: key = "sstv_tx"; break;
+        case Tx2Mode::rtty: key = "rtty_tx"; break;
+        case Tx2Mode::ft8: key = "ft8_tx"; break;
+        case Tx2Mode::waterfall: key = "waterfall_tx"; break;
+    }
     auto& tx = state_[key];
     tx = {{"phase", phase}, {"result", result}};
     if (mode == Tx2Mode::rtty && tx2_job_ && tx2_job_->rtty) id = tx2_job_->rtty->id;
+    if (mode == Tx2Mode::waterfall && tx2_job_) id = std::get<WaterfallTx>(tx2_job_->source).id;
     if (id) tx["tx_id"] = *id;
     if (mode == Tx2Mode::ft8 && tx2_job_)
         tx["slot_utc"] = std::get<Ft8Tx>(tx2_job_->source).slot_utc;
@@ -143,10 +150,13 @@ std::optional<audio::TxBlock> Bridge::take_tx2_block(Tx2Job& job) {
         return (*sstv)->take(100);
 
     audio::TxBlock block;
-    if (const auto* ft8 = std::get_if<Ft8Tx>(&job.source)) {
-        if (job.sample_index < ft8->pcm.size()) {
-            const auto count = std::min(block.pcm.size(), ft8->pcm.size() - job.sample_index);
-            std::copy_n(ft8->pcm.begin() + job.sample_index, count, block.pcm.begin());
+    const auto* ft8 = std::get_if<Ft8Tx>(&job.source);
+    const auto* waterfall = std::get_if<WaterfallTx>(&job.source);
+    const auto* pcm = ft8 ? &ft8->pcm : waterfall ? &waterfall->pcm : nullptr;
+    if (pcm) {
+        if (job.sample_index < pcm->size()) {
+            const auto count = std::min(block.pcm.size(), pcm->size() - job.sample_index);
+            std::copy_n(pcm->begin() + job.sample_index, count, block.pcm.begin());
         } else {
             block.last = ++job.tail == tx_tail_blocks;
         }
@@ -281,14 +291,16 @@ void Bridge::end_tx2(const char* result, bool flush) {
 
     const auto mode = tx2_job_->mode;
     const auto frequency = tx2_job_->frequency;
-    const auto rtty = tx2_job_->rtty;
+    std::optional<uint32_t> id;
+    if (tx2_job_->rtty) id = tx2_job_->rtty->id;
+    if (const auto* waterfall = std::get_if<WaterfallTx>(&tx2_job_->source)) id = waterfall->id;
     tx2_job_.reset();
     if (flush && session_ && state_["tx2"].value("frequency_hz", uint64_t(0)) == frequency) {
-        tx2_releasing_epoch_ = state_["tx2"].at("epoch").get<uint32_t>();
+        tx2_release_ = Tx2Release{state_["tx2"].at("epoch").get<uint32_t>(), mode};
         reset_tx2_audio(frequency);
     }
     next_activity_ = {};
-    tx2_state(mode, "idle", result, rtty ? std::optional{rtty->id} : std::nullopt);
+    tx2_state(mode, "idle", result, id);
 }
 
 }

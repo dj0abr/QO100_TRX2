@@ -192,6 +192,11 @@ if(BUILD_TESTING)
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
             ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
         set_tests_properties(rtty_websocket PROPERTIES TIMEOUT 25)
+        add_test(NAME waterfall_tx_websocket COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_waterfall_tx.py
+            $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>
+            ${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/web)
+        set_tests_properties(waterfall_tx_websocket PROPERTIES TIMEOUT 25)
         add_test(NAME rx2_zoom_websocket COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_rx2_zoom.py
             $<TARGET_FILE:qo100_webbridge> $<TARGET_FILE:qo100_backend>

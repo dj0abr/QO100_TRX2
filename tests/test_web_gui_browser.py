@@ -101,12 +101,22 @@ def main():
             call('POST', f'/session/{session}/element/{element["element-6066-11e4-a52e-4f735466cecf"]}/click', {})
         def changed(selector, value):
             execute('const n=document.querySelector(arguments[0]);n.value=arguments[1];n.dispatchEvent(new Event("input",{bubbles:true}));n.dispatchEvent(new Event("change",{bubbles:true}));', selector, str(value))
-        def select_view(source):
+        def select_view(source, *, keyboard=False):
+            def choose(selector):
+                if keyboard:
+                    execute('document.querySelector(arguments[0]).focus()', selector)
+                    key('keyDown')
+                    key('keyUp')
+                else:
+                    if execute('return innerWidth <= 800'):
+                        execute('document.querySelector(arguments[0]).scrollIntoView({block:"center"})', selector)
+                    click(selector)
             if source == 'zoom':
-                click('#decoder-sourcezoom')
+                choose('#decoder-sourcezoom')
                 return
-            group = 'monitor' if source in ('3', '4') else 'multimedia' if source.startswith('5-') else 'digital'
-            changed('#decoder-' + group, source)
+            group = 'monitor' if source in ('3', '4') or source.startswith('5-') else 'digital'
+            choose(f'#zoom-sources input[value="{group}"]')
+            choose(f'#decoder-{group} input[value="{source or "off"}"]')
         def toggle_decoder():
             source=execute('return document.getElementById("decoder-panel").hidden ? (localStorage.getItem("qo100.decoderSource") || "3") : "zoom"')
             select_view(source)
@@ -233,10 +243,11 @@ def main():
             assert execute('return document.getElementById("volume-tx").value')=='0'
             assert execute('return document.getElementById("tx-listen-mute").getAttribute("aria-pressed")')=='true'
             assert execute('return document.getElementById("decoder-panel").hidden'),'Decoder should initially be optional'
+            assert execute('return document.getElementById("decoder-monitor").hidden && document.getElementById("decoder-digital").hidden')
             original_zoom_height=execute('return document.getElementById("zoom").getBoundingClientRect().height')
             original_display_height=execute('return document.getElementById("zoom-display").getBoundingClientRect().height')
             history=mark_history();toggle_decoder();expect_history(history)
-            assert execute('return !document.getElementById("decoder-toggle") && document.querySelectorAll("#decoder-sourcezoom, #zoom-sources > label").length===4')
+            assert execute('return document.querySelectorAll("#zoom-sources input[type=radio]").length===3 && document.querySelectorAll("#decoder-monitor input[type=radio]").length===6 && !document.getElementById("decoder-monitor").hidden && document.getElementById("decoder-digital").hidden')
             assert execute('''const body=document.getElementById('zoom-output').getBoundingClientRect(),
                 monitor=document.getElementById('decoder-panel').getBoundingClientRect();
                 return Math.abs(body.height-monitor.height)<1 && Math.abs(body.width-monitor.width)<1 && body.height>150
@@ -250,9 +261,9 @@ def main():
             wait(lambda:execute('return document.getElementById("decoder-text").textContent.endsWith("FT8 in background\\n")'))
             assert execute('return document.getElementById("decoder-text-4").textContent')=='PSK beacon background\n'
             click('#frequency2')
-            assert execute('return document.getElementById("decoder-monitor").value==="4" && document.getElementById("zoom-choice-label").textContent==="RX2-Zoom"')
+            assert execute('return document.querySelector("#decoder-monitor input:checked").value==="4" && document.getElementById("zoom-choice-label").textContent==="RX2-Zoom"')
             click('#frequency1')
-            assert execute('return document.getElementById("decoder-monitor").value==="4" && document.getElementById("zoom-choice-label").textContent==="RX1-Zoom"')
+            assert execute('return document.querySelector("#decoder-monitor input:checked").value==="4" && document.getElementById("zoom-choice-label").textContent==="RX1-Zoom"')
             click('#decoder-clear')
             assert execute('return document.getElementById("decoder-text-4").textContent')==''
             select_view('3')
@@ -269,7 +280,7 @@ def main():
             assert execute('return document.getElementById("decoder-text-5-bulletin").scrollTop')==0,'Bulletin should start at the beginning'
             mm_text['dx-cluster']='DX replacement\n'
             wait(lambda:execute('return document.getElementById("decoder-text-5-dx-cluster").textContent')=='DX replacement\n')
-            assert execute('return document.getElementById("decoder-multimedia").value==="5-bulletin"')
+            assert execute('return document.querySelector("#decoder-monitor input:checked").value==="5-bulletin"')
             save_screenshot(capture.with_name(capture.stem+'-mm-bulletin.png'))
             assert mm_requests[0]==0,'Diagnostics polled without a subscriber'
             select_view('5-diagnostics')
@@ -313,7 +324,10 @@ def main():
             decoder_socket.sendto(b'abcdef\n', ('127.0.0.1', decoder_text_port))
             wait(lambda:execute('return document.getElementById("decoder-text").textContent')=='abcdef\n')
             toggle_decoder()
-            select_view('ft8')
+            for mode in ('sstv', 'rtty', 'ft8'):
+                select_view(mode)
+                assert execute('return getComputedStyle(document.getElementById("fullband")).flexGrow') == '0.43', mode
+                assert execute('return document.getElementById("zoom-display").getBoundingClientRect().height') > original_display_height, mode
             assert execute("""const all = document.getElementById('ft8-log').parentElement.getBoundingClientRect();
                 const own = document.querySelector('.ft-own-messages').getBoundingClientRect();
                 const waterfall = document.querySelector('.ft-waterfall').getBoundingClientRect();
@@ -371,7 +385,8 @@ def main():
                 assert ft_log_scroll(other_id) == other_position
             execute('for (const id of ["ft8-log", "ft8-own-log"]) document.getElementById(id).scrollTop = 0')
             select_view('3')
-            click('#decoder-show-digital')
+            assert execute('return document.getElementById("decoder-active-mode").textContent.includes("FT4/8")')
+            click('#zoom-sources input[value="digital"]')
             for log_id in ('ft8-log', 'ft8-own-log'):
                 top, end = ft_log_scroll(log_id)
                 assert end > 0 and abs(end - top) < 2, (log_id, top, end)
@@ -697,13 +712,13 @@ def main():
             observer.messages.clear()
             snapshot(both_sending)
             assert {p[11] for p in proxy.log[start:] if p[5]==8 and any(p[64:])} >= {3,7}
-            select_view('rtty')
+            select_view('rtty', keyboard=True)
             assert execute('return document.getElementById("zoom-display").dataset.receiver==="1" && document.getElementById("rtty-tx-toggle").textContent==="Stop"')
             observer.messages.clear()
             snapshot(both_sending)
-            select_view('5-diagnostics')
+            select_view('5-diagnostics', keyboard=True)
             snapshot(both_sending)
-            select_view('sstv')
+            select_view('sstv', keyboard=True)
             snapshot(lambda s:s['tx']['ptt'] and s['rtty_tx'].get('result')=='stopped' and s['rtty_tx']['tx_id']==tx_id and s['tx2']['epoch']!=tx_epoch)
             call('DELETE',f'/session/{session}/actions')
             expect_ptt(False)
@@ -721,11 +736,46 @@ def main():
             changed('#frequency-input',10489.600000)
             execute('document.getElementById("frequency-form").requestSubmit()');rx2=10489600000
             expect_frequency(2,rx2)
-            assert execute('return document.getElementById("decoder-digital").value==="sstv"')
+            assert execute('return document.querySelector("#decoder-digital input:checked").value==="sstv" && document.getElementById("decoder-active-mode").textContent.includes("SSTV")')
             wait(lambda:rx2_demand() is True)
-            changed('#decoder-digital','')
+            select_view('')
+            assert execute('return document.querySelector("#decoder-digital input:checked").value === "off" && !document.getElementById("decoder-digital").hidden && !document.getElementById("zoom-plots").inert')
             wait(lambda:rx2_demand() is False)
             assert rx2_demand() is False,'Selecting RX2 with audio off kept DSP awake'
+
+            observer.messages.clear()
+            previous_tx2 = snapshot()['tx2']['frequency_hz']
+            select_view('waterfall')
+            assert execute('return !document.getElementById("waterfall-tx-panel").hidden')
+            wait(lambda: execute('return !document.getElementById("waterfall-tx-frequency").disabled'))
+            execute('document.getElementById("waterfall-tx-frequency").focus()')
+            changed('#waterfall-tx-frequency', '2400.100000')
+            execute('document.getElementById("waterfall-tx-frequency").blur()')
+            tuned = snapshot(lambda s: s['tx2'].get('frequency_hz') == 2400100000)
+            assert tuned['rx']['2']['frequency_hz'] == rx2
+            changed('#waterfall-tx-text', 'DJ0ABR')
+            wait(lambda: execute('return !document.getElementById("waterfall-tx-send").disabled'))
+            assert execute('return document.getElementById("waterfall-tx-duration").value') == '7,52 s'
+            height = execute('return document.getElementById("waterfall-tx-preview").height')
+            assert execute('''const preview = document.getElementById("waterfall-tx-preview");
+                return Math.abs(preview.getBoundingClientRect().width / preview.parentElement.clientWidth - .25) < .01;''')
+            changed('#waterfall-tx-row', 320)
+            changed('#waterfall-tx-level', 37)
+            assert execute('return document.getElementById("waterfall-tx-duration").value') == '15,04 s'
+            assert abs(execute('return document.getElementById("waterfall-tx-preview").height') - 2*height) <= 1
+            click('#waterfall-tx-send')
+            snapshot(lambda s: s['waterfall_tx']['phase'] == 'sending')
+            assert rx2_demand() is False, 'Waterfall Text activated RX2 audio'
+            click('#waterfall-tx-stop')
+            snapshot(lambda s: s['waterfall_tx'].get('result') == 'stopped')
+            wait(lambda: execute('return !document.getElementById("waterfall-tx-frequency").disabled'))
+            observer.messages.clear()
+            execute('document.getElementById("waterfall-tx-frequency").focus()')
+            changed('#waterfall-tx-frequency', previous_tx2 / 1e6)
+            execute('document.getElementById("waterfall-tx-frequency").blur()')
+            snapshot(lambda s: s['tx2'].get('frequency_hz') == previous_tx2)
+            select_view('')
+
             click('#audio')
             wait(lambda:rx2_demand() is True)
             wait(lambda:execute('return window.__audioSource?.endsWith(":2") && window.__audioPeak>.02'))
@@ -921,7 +971,7 @@ def main():
             click('#tx-listen-mute')
             execute('document.activeElement.blur()')
             select_view('3')
-            execute('document.getElementById("decoder-monitor").focus()')
+            execute('document.querySelector("#decoder-monitor input:checked").focus()')
             key('keyDown');key('keyUp');expect_ptt(False)
             assert not execute('return document.getElementById("decoder-panel").hidden')
             execute('document.getElementById("decoder-clear").focus()')
@@ -1236,7 +1286,7 @@ def main():
                 assert execute('''const text=document.getElementById('decoder-text').getBoundingClientRect(),
                     body=document.getElementById('zoom-output').getBoundingClientRect(),header=document.querySelector('.zoom-heading').getBoundingClientRect();
                     return text.height>100 && Math.abs(text.height-body.height)<1 &&
-                        [...document.querySelectorAll('#decoder-sourcezoom, #zoom-sources > label')].every(n=>{const r=n.getBoundingClientRect();return r.left>=header.left && r.right<=header.right && r.bottom<=header.bottom;});'''),('monitor must fill the tile and all four groups remain visible',width,height)
+                        [...document.querySelectorAll('#zoom-sources label, #decoder-monitor label')].every(n=>{const r=n.getBoundingClientRect();return r.left>=header.left && r.right<=header.right && r.bottom<=header.bottom;});'''),('monitor must fill the tile and both radio rows remain visible',width,height)
                 wait(lambda:execute('''const axis=document.getElementById('fullband-axis'),button=document.getElementById('fullband-axis-switch').getBoundingClientRect();
                     const labels=[...axis.querySelectorAll('.bandplan-label')].filter(n=>n.textContent);
                     const bounds=labels.map(n=>n.getBoundingClientRect()).sort((a,b)=>a.left-b.left);
@@ -1273,11 +1323,12 @@ def main():
             assert execute('return [document.getElementById("waterfall-floor").value,document.getElementById("waterfall-ceiling").value]')==['-7','37']
             assert execute('return document.getElementById("spectrum-average").value')=='20'
             assert execute('return ["ft8-audio-hz", "ft8-level"].map(id => document.getElementById(id).value)')==['1325','12']
+            assert execute('return ["text", "row", "level"].map(field => document.getElementById("waterfall-tx-" + field).value)') == ['DJ0ABR', '320', '37']
             assert execute('return document.getElementById("ft-auto-reply").checked')
             assert execute('return document.getElementById("display-color").value')=='green'
             assert execute('return document.getElementById("fullband-axis").dataset.mode')=='bandplan'
             assert not execute('return document.getElementById("decoder-panel").hidden'),'Decoder visibility was not restored'
-            assert execute('return document.getElementById("decoder-multimedia").value==="5-bulletin" && !document.getElementById("decoder-text-5-bulletin").hidden'),'Decoder source was not restored'
+            assert execute('return document.querySelector("#decoder-monitor input:checked").value==="5-bulletin" && !document.getElementById("decoder-text-5-bulletin").hidden'),'Decoder source was not restored'
             wait(lambda:execute('return document.getElementById("decoder-text-5-bulletin").textContent')==mm_text['bulletin'])
             select_view('3')
             expect_ptt(False)

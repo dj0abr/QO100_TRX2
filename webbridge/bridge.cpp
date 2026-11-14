@@ -88,7 +88,7 @@ Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp
     state_={{"type","state"},{"software_version",QO100_SOFTWARE_VERSION},{"session",0},{"ready",false},{"settings",Json::object()},
         {"revision","0"},{"flags",0},{"sstv_mode","auto"},{"sstv_tx",{{"phase","idle"}}},
         {"ft_mode","FT8"},{"ft8_enabled",bool(decoders_[Config::rx2_ft8])},{"ft8_tx",{{"phase","idle"}}},
-        {"rtty_reverse",false},{"rtty_tx",{{"phase","idle"}}},{"rx",Json::object()},{"tx",Json::object()},
+        {"waterfall_tx",{{"phase","idle"}}},{"rtty_reverse",false},{"rtty_tx",{{"phase","idle"}}},{"rx",Json::object()},{"tx",Json::object()},
         {"filter",Json::object()},{"compressor",Json::object()},{"nr",Json::object()},{"loop",Json::object()},{"tx2",Json::object()}};
 }
 void Bridge::start() {receive();if(digital_.is_open()) receive_digital();for(size_t i=0;i<decoders_.size();++i) if(decoders_[i]) receive_decoder(i);tick();}
@@ -132,7 +132,11 @@ void Bridge::update_digital_activity() {
     // Older adapters have no usage report and retain their always-active path.
     unsigned flags=live?(digital_usage_known_?digital_usage_:3u):0;
     if(sstv_active_ || rtty_active_ || ft8_active_) flags|=1;
-    if(tx2_holds_audio()) flags|=3;
+    if (tx2_holds_audio()) {
+        flags |= 2;
+        const auto mode = tx2_job_ ? tx2_job_->mode : tx2_release_->mode;
+        if (mode != Tx2Mode::waterfall) flags |= 1;
+    }
     for(const auto& item:clients_)if(!item.second.rx2_audio.has_value() || *item.second.rx2_audio)flags|=1;
     if(flags!=last_activity_ || now>=next_activity_) {
         auto p=header(20,qo100::tx2_stream,++activity_sequence_,session_);put(p,48,flags,4);
@@ -294,7 +298,7 @@ void Bridge::safety() {
 }
 void Bridge::reset_backend() {
     end_tx2("backend_reset", false);
-    tx2_releasing_epoch_.reset();
+    tx2_release_.reset();
     last_tx2_state_ = {};
     digital_tx_audio_at_ = {};
     for(const auto& q:pending_) if(q.second.client) error(q.second.client,q.second.id,"backend_reset","Backend session lost");
@@ -437,8 +441,8 @@ void Bridge::packet(Bytes p) {
     if(barrier_ && off_ack_ && normal_ack_ && initialized_) {barrier_=false;dirty_=true;}
     if(type==7 && stream==qo100::tx2_stream) {
         last_tx2_state_ = Clock::now();
-        if(tx2_releasing_epoch_) {
-            if(get(p,24,8)!=*tx2_releasing_epoch_) tx2_releasing_epoch_.reset();
+        if(tx2_release_) {
+            if(get(p,24,8)!=tx2_release_->epoch) tx2_release_.reset();
             else if(get(p,54,2) && !pending_.count(tx2_key))
                 reset_tx2_audio(get(p,32,8)); // A rejected retune may supersede the FIFO reset.
         }
@@ -500,6 +504,17 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             update_ft8_subscription();return;
         }
         if(client!=owner_) {error(client,id,"read_only","Only the operator can send commands");return;}
+        if (type == "waterfall_tx_start") {
+            begin_waterfall_tx(client, integer(j,"id"), integer(j,"frequency_hz",6000000000ULL), integer(j,"level",100),
+                               j.at("text").get<std::string>(), integer(j,"row_ms",400));
+            return;
+        }
+        if (type == "waterfall_tx_stop") {
+            const auto tx_id = integer(j,"tx_id");
+            if (tx2_active(Tx2Mode::waterfall) && std::get<WaterfallTx>(tx2_job_->source).id == tx_id)
+                end_tx2("stopped");
+            return;
+        }
         if(type=="ft_mode") {
             set_ft_mode(client,id,j.at("mode").get<std::string>());return;
         }

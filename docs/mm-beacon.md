@@ -36,7 +36,7 @@ FT8 behält seine Begrenzung auf 50 Zeilen.
 
 ## RX5-Diagnose und Pilot bei 500 Hz
 
-Die siebte Ansicht **RX5-Diagnose** zeigt das RX5-Audiospektrum von 0 bis 4000 Hz,
+Die Ansicht **Monitor → Diagnose** zeigt das RX5-Audiospektrum von 0 bis 4000 Hz,
 die gemessene Pilotenfrequenz, AFC-Korrektur, verbleibende PLL-Abweichung,
 Audiopegel, Empfangsfrequenz und AFC-Zustand sowie die 8APSK-Konstellation.
 Im Spektrum ist der Pilotsuchbereich von 20 bis 900 Hz hinterlegt; bei gültiger

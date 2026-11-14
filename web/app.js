@@ -7,6 +7,7 @@ import {SstvView} from './sstv.js';
 import {SstvTxView} from './sstv-tx.js';
 import {RttyPresets, RttyView} from './rtty.js';
 import {Rx2Waterfall} from './rx2-waterfall.js';
+import {drawWaterfallPreview, waterfallRaster} from './waterfall-tx.js';
 import {canStartFtAuto, ftCall, ftGrid, ftPeriod, ftReply, nextFtAutoStep, parseFtContact} from './ft-qso.js';
 import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
 
@@ -33,6 +34,8 @@ const mmDiagnostics = new MmDiagnostics($('mm-diagnostics'));
 const sstv = new SstvView($('sstv-panel'));
 const sstvTx = new SstvTxView($('sstv-panel'), $('sstv-tx-editor'), renderSstvTxControls);
 let sstvUpload = null, sstvStopRequested = false;
+let waterfallFont = null, waterfallFontLoading = false, waterfallRows = [];
+let waterfallStartId = null, waterfallStopId = null, waterfallError = '';
 const rtty = new RttyView($('rtty-panel'), writeRttyText);
 const rttyPresets = new RttyPresets($('rtty-preset-editor'), $('rtty-preset-slot'), readPreference('rttyPresets'));
 const rttyInputLimit = 1024;
@@ -151,6 +154,7 @@ function connect() {
     if (ws !== socket) return;
     stopPtt(); resetRttyTx(); operator = false; state = {}; wanted.clear(); clearTimers(); radio.stopMic(); radio.reset(); mmDiagnostics.reset(); sstv.reset(true); rtty.waterfall.clear();
     sstvUpload = null; sstvStopRequested = false;
+    waterfallStartId = waterfallStopId = null;
     for (const item of pending.values()) { clearTimeout(item.timeout); item.reject(fail('Verbindung getrennt.', 'closed')); }
     ftAutoCq.checked = false;
     ft8Error = ''; clearFt8(); ftWaterfall.clear(); clearFtQso(); pending.clear(); frames.reset(); views.forEach(view => view.clear());
@@ -174,7 +178,7 @@ function setFrequency(channel, hz, pair = selected) {
   const promise = command(tx ? 'tx' : 'tune', tx ? {frequency_hz: hz, ptt: false, channel: pair} : {stream: Number(channel), frequency_hz: hz});
   wanted.set(key, {hz, id: promise.id}); renderFrequencies();
   promise.then(answer => { if (answer.status !== 0) throw fail(`Frequenz wurde nicht übernommen (Status ${answer.status}).`); }).catch(error => {
-    if (wanted.get(key)?.id === promise.id) { wanted.delete(key); renderFrequencies(); renderFt8Controls(); report(error); }
+    if (wanted.get(key)?.id === promise.id) { wanted.delete(key); renderFrequencies(); renderFt8Controls(); renderWaterfallTxControls(); report(error); }
   });
 }
 function tune(hz, coupled = false) {
@@ -348,6 +352,8 @@ function update(next) {
   if ((next.flags & 6) && !(state.flags & 6)) radio.reset();
   updateSstvTx(next.sstv_tx);
   state = next;
+  if (next.waterfall_tx?.tx_id === waterfallStartId) waterfallStartId = null;
+  if (next.waterfall_tx?.phase === 'idle' && next.waterfall_tx?.tx_id === waterfallStopId) waterfallStopId = null;
   $('sstv-mode').value = next.sstv_mode ?? 'auto';
   $('rtty-reverse').checked = !!next.rtty_reverse;
   ftWaterfall.update(next.rx?.['2']?.frequency_hz);
@@ -400,6 +406,7 @@ function controls() {
   $('rtty-tx-level').disabled = !writable;
   renderRttyTxControls();
   renderFt8Controls();
+  renderWaterfallTxControls();
   $('ptt').disabled = selected === 2 || !writable || !!(state.flags & 6) || !radio.microphone || !radio.running;
   $('ptt-label').textContent = selected === 2 ? 'TX2' : 'PTT';
   $('audio').disabled = !!radio.starting;
@@ -417,12 +424,14 @@ function controls() {
   const sstvSending = state.sstv_tx?.phase === 'sending';
   const rttySending = state.rtty_tx?.phase === 'sending';
   const ft8Sending = state.ft8_tx?.phase === 'sending';
+  const waterfallSending = state.waterfall_tx?.phase === 'sending';
   $('tx-status').textContent = transmitting ? (state.loop?.mode === 1 ? t('Audio-Test', 'Audio test') : t('Senden', 'Transmitting')) : state.loop?.mode ? t(`Empfang · ${state.loop.mode === 1 ? 'Audio' : 'HF'}-Loop`, `Receiving · ${state.loop.mode === 1 ? 'Audio' : 'RF'} loop`) : t('Empfang', 'Receiving');
   if (selected === 2) $('tx-status').textContent = sstvSending ? t('SSTV · Senden', 'SSTV · Transmitting') : 'RX2 / TX2 · Digital';
   if (rttySending) $('tx-status').textContent = transmitting ?
     t('SSB + RTTY · Senden', 'SSB + RTTY · Transmitting') : t('RTTY · Senden', 'RTTY · Transmitting');
   if (ft8Sending) $('tx-status').textContent = `${state.ft_mode ?? 'FT8'} · ${t('Senden', 'Transmitting')}`;
-  $('tx-dot').className = `live-dot${transmitting || ft8Sending || rttySending || selected === 2 && sstvSending ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
+  if (waterfallSending) $('tx-status').textContent = t('Waterfall-Text · Senden', 'Waterfall text · Transmitting');
+  $('tx-dot').className = `live-dot${transmitting || waterfallSending || ft8Sending || rttySending || selected === 2 && sstvSending ? ' sending' : isOpen() && state.ready ? '' : ' offline'}`;
   $('ptt').classList.toggle('sending', transmitting);
   $('ptt').setAttribute('aria-pressed', String(transmitting));
   applyMonitorGain();
@@ -482,7 +491,7 @@ function rttyTxActive() {
 function canStartRtty() {
   return !rttyTxActive() && canControl() && Number.isSafeInteger(state.tx2?.frequency_hz) &&
     !(state.flags & 6) && !state.loop?.mode && !wanted.has('tx2') && state.rtty_tx?.phase === 'idle' &&
-    !sstvTxActive() && !ft8Pending && (state.ft8_tx?.phase ?? 'idle') === 'idle';
+    !sstvTxActive() && !waterfallTxActive() && !ft8Pending && (state.ft8_tx?.phase ?? 'idle') === 'idle';
 }
 function resetRttyTx() {
   if (!rttyTx) return;
@@ -826,23 +835,23 @@ $('tx-listen-mute').addEventListener('keydown', e => {
   if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') e.stopPropagation();
 });
 const decoderSources = [3, 4, '5-dx-cluster', '5-cw-skimmer', '5-bulletin'];
-const viewGroups = {
-  monitor: [3, 4],
-  multimedia: ['5-dx-cluster', '5-cw-skimmer', '5-bulletin', '5-diagnostics'],
-  digital: ['sstv', 'rtty', 'ft8'],
-};
-const zoomSources = ['zoom', ...Object.values(viewGroups).flat()];
+const monitorViews = [...decoderSources, '5-diagnostics'];
+const digitalReceivers = ['sstv', 'rtty', 'ft8'];
+const digitalModes = [...digitalReceivers, 'waterfall'];
+const digitalLabels = {sstv: 'SSTV', rtty: 'RTTY', ft8: 'FT4/8', waterfall: 'Waterfall-Text'};
+const zoomSources = ['zoom', ...monitorViews, 'off', ...digitalModes];
 let digitalView = null, subscribedDigitalView;
 function subscribeDigitalView() {
   if (!isOpen()) return;
   const mode = digitalView;
   if (mode === subscribedDigitalView) return;
-  for (const entry of viewGroups.digital) send({type:`${entry}_subscribe`, enabled: entry === mode});
+  for (const entry of digitalReceivers) send({type:`${entry}_subscribe`, enabled: entry === mode});
   subscribedDigitalView = mode;
 }
 function stopDigitalView() {
   if (digitalView === 'sstv' && sstvTxActive()) stopSstvTx();
   if (digitalView === 'rtty' && rttyTxActive()) stopRttyTx();
+  if (digitalView === 'waterfall' && waterfallTxActive()) stopWaterfallTx();
   if (digitalView === 'ft8') {
     ftAutoCq.checked = false;
     if (!ftAutoQso && (ft8Pending || (state.ft8_tx?.phase ?? 'idle') !== 'idle'))
@@ -851,10 +860,11 @@ function stopDigitalView() {
   }
 }
 function renderDigitalViewStatus() {
-  const active = ftAutoQso || ['sstv_tx', 'rtty_tx', 'ft8_tx'].some(key => (state[key]?.phase ?? 'idle') !== 'idle');
-  $('decoder-digital').toggleAttribute('data-running', !!active);
+  const active = ftAutoQso || ['sstv_tx', 'rtty_tx', 'ft8_tx', 'waterfall_tx'].some(key => (state[key]?.phase ?? 'idle') !== 'idle');
+  $('decoder-digital-choice').toggleAttribute('data-running', !!active);
 }
 let decoderSource = decoderSources.find(source => String(source) === readPreference('decoderSource')) ?? 3;
+let monitorView = monitorViews.find(source => String(source) === readPreference('monitorView')) ?? decoderSource;
 const decoderScroll = Object.fromEntries(decoderSources.map(source => [source, {top: 0, follow: source !== '5-bulletin'}]));
 const decoderPending = Object.fromEntries(decoderSources.map(source => [source, null]));
 const decoderReplace = {};
@@ -871,36 +881,45 @@ function restoreDecoderScroll() {
 }
 function selectDecoder(source) {
   rememberDecoderScroll();
-  const monitoring = source !== 'zoom';
+  const group = monitorViews.includes(source) ? 'monitor' :
+    source === 'off' || digitalModes.includes(source) ? 'digital' : 'zoom';
+  const showZoom = source === 'zoom' || source === 'off';
   const diagnostics = source === '5-diagnostics';
   const textView = decoderSources.includes(source), sstvView = source === 'sstv', rttyView = source === 'rtty';
   const ft8View = source === 'ft8';
   if (ft8View && !ft8Visible()) ftWaterfall.clear();
-  if (viewGroups.digital.includes(source) && source !== digitalView) {
+  const nextDigital = source === 'off' ? null : source;
+  if (group === 'digital' && nextDigital !== digitalView) {
     stopDigitalView();
-    digitalView = source;
+    digitalView = nextDigital;
+  }
+  if (group === 'monitor') {
+    monitorView = source;
+    writePreference('monitorView', source);
   }
   rtty.show(rttyView);
   if (textView) decoderSource = source;
   for (const channel of decoderSources) decoderOutput(channel).hidden = channel !== decoderSource;
-  $('decoder-sourcezoom').setAttribute('aria-pressed', String(!monitoring));
-  for (const [group, sources] of Object.entries(viewGroups)) {
-    const menu = $(`decoder-${group}`);
-    const active = sources.includes(source);
-    menu.toggleAttribute('data-active', active);
-    menu.value = group === 'digital' ? digitalView ?? '' : active ? String(source) : '';
-  }
-  $('decoder-show-digital').hidden = !digitalView || source === digitalView;
+  document.querySelector(`input[name="decoder-view"][value="${group}"]`).checked = true;
+  document.querySelector(`input[name="decoder-monitor"][value="${monitorView}"]`).checked = true;
+  document.querySelector(`input[name="decoder-digital"][value="${digitalView ?? 'off'}"]`).checked = true;
+  $('decoder-monitor').hidden = group !== 'monitor';
+  $('decoder-digital').hidden = group !== 'digital';
+  const activeMode = $('decoder-active-mode');
+  activeMode.hidden = !digitalView || group === 'digital';
+  activeMode.textContent = digitalView ? `· ${digitalLabels[digitalView]}` : '';
   $('decoder-panel').hidden = !textView;
   $('ft8-panel').hidden = !ft8View;
+  $('waterfall-tx-panel').hidden = source !== 'waterfall';
+  if (source === 'waterfall') loadWaterfallFont();
   $('decoder-clear').hidden = !textView && !rttyView && !ft8View;
   sstv.show(sstvView);
   mmDiagnostics.show(diagnostics);
   send({type:'mm_diagnostics',enabled:diagnostics});
   $('zoom-output').dataset.view = String(source);
   controls();
-  $('zoom-plots').setAttribute('aria-hidden', String(monitoring));
-  $('zoom-plots').inert = monitoring;
+  $('zoom-plots').setAttribute('aria-hidden', String(!showZoom));
+  $('zoom-plots').inert = !showZoom;
   writePreference('zoomView', source);
   if (textView) { writePreference('decoderSource', source); restoreDecoderScroll(); }
 }
@@ -933,31 +952,20 @@ function flushDecoderText() {
   if (visible) restoreDecoderScroll();
 }
 $('decoder-clear').onclick = () => { if (ft8Visible()) { clearFt8(); return; } if (rtty.visible) { rtty.clearRx(); return; } decoderPending[decoderSource] = null; decoderOutput(decoderSource).textContent = ''; decoderScroll[decoderSource] = {top: 0, follow: decoderSource !== '5-bulletin'}; };
-$('decoder-sourcezoom').onclick = () => selectDecoder('zoom');
-$('decoder-show-digital').onclick = () => {
-  if (!digitalView) return;
-  selectDecoder(digitalView);
-  if (digitalView === 'ft8') {
+$('zoom-sources').onchange = ({target}) => {
+  const source = {zoom: 'zoom', monitor: monitorView, digital: digitalView ?? 'off'}[target.value];
+  selectDecoder(source);
+  if (source === 'ft8') {
     scrollFtLogToEnd(ft8Log);
     scrollFtLogToEnd(ftOwnLog);
   }
 };
-for (const [group, sources] of Object.entries(viewGroups)) {
-  const menu = $(`decoder-${group}`);
-  menu.onchange = () => {
-    if (group === 'digital' && !menu.value) {
-      stopDigitalView();
-      digitalView = null;
-      const current = zoomSources.find(source => String(source) === $('zoom-output').dataset.view);
-      selectDecoder(viewGroups.digital.includes(current) ? 'zoom' : current ?? 'zoom');
-      return;
-    }
-    const source = sources.find(source => String(source) === menu.value);
-    if (source !== undefined) selectDecoder(source);
-  };
-}
+$('decoder-monitor').onchange = ({target}) => {
+  selectDecoder(monitorViews.find(source => String(source) === target.value));
+};
+$('decoder-digital').onchange = ({target}) => selectDecoder(target.value);
 // Keep local decoder controls and log scrolling independent of global Space PTT.
-for (const id of ['zoom-sources', 'decoder-clear', 'decoder-panel', 'mm-diagnostics', 'sstv-panel', 'rtty-panel', 'ft8-panel']) $(id).addEventListener('keydown', event => {
+for (const id of ['zoom-sources', 'decoder-monitor', 'decoder-digital', 'decoder-clear', 'decoder-panel', 'mm-diagnostics', 'sstv-panel', 'rtty-panel', 'ft8-panel', 'waterfall-tx-panel']) $(id).addEventListener('keydown', event => {
   if (event.code === 'Space' || event.key === ' ') event.stopPropagation();
 });
 for (const log of [ft8Log, ftOwnLog]) {
@@ -1310,7 +1318,7 @@ $('ft-end-qso').onclick = () => {
 };
 function canSendFtDraft() {
   return canControl() && state.ft8_enabled && !(state.flags & 6) && !state.loop?.mode &&
-    !ft8Pending && !ftModePending && state.ft8_tx?.phase === 'idle' && !sstvTxActive() && !rttyTxActive() &&
+    !ft8Pending && !ftModePending && state.ft8_tx?.phase === 'idle' && !sstvTxActive() && !rttyTxActive() && !waterfallTxActive() &&
     !wanted.has('2') && !wanted.has('tx2') && !!state.tx2?.frequency_hz;
 }
 function renderFtSlotClock() {
@@ -1515,7 +1523,7 @@ function renderSstvTxControls() {
   button.textContent = busy ? 'Stop' : 'Start';
   button.dataset.active = String(busy);
   button.disabled = busy ? sstvStopRequested || !operator || !isOpen() :
-    !canControl() || !available || sstvTx.image.hidden || !hasLevel || rttyTxActive() || ft8Pending ||
+    !canControl() || !available || sstvTx.image.hidden || !hasLevel || rttyTxActive() || waterfallTxActive() || ft8Pending ||
     (state.ft8_tx?.phase ?? 'idle') !== 'idle';
   button.title = busy ? t('SSTV-Sendung abbrechen', 'Stop SSTV transmission') :
     sstvTx.image.hidden ? t('Ein TX-Bild auswählen', 'Choose a TX image') :
@@ -1632,6 +1640,134 @@ rttyLevel.oninput = () => {
   if (rttyTx && !rttyTx.stopping) send({type: 'rtty_tx_level', tx_id: rttyTx.id, level: Number(rttyLevel.value)});
 };
 renderRttyLevel();
+function waterfallTxActive() {
+  return waterfallStartId !== null || (state.waterfall_tx?.phase ?? 'idle') !== 'idle';
+}
+
+function canStartWaterfallTx() {
+  return waterfallRows.length && canControl() && state.waterfall_tx &&
+    Number($('waterfall-tx-frequency').value.replace(',', '.')) === state.tx2?.frequency_hz / 1e6 &&
+    !(state.flags & 6) && !state.loop?.mode && !wanted.has('tx2') && !waterfallTxActive() &&
+    !sstvTxActive() && !rttyTxActive() && !ft8Pending && (state.ft8_tx?.phase ?? 'idle') === 'idle';
+}
+
+function renderWaterfallTxControls() {
+  const tx = state.waterfall_tx;
+  const busy = waterfallTxActive();
+  $('waterfall-tx-text').disabled = busy;
+  $('waterfall-tx-row').disabled = busy;
+  $('waterfall-tx-level').disabled = busy;
+  const frequencyInput = $('waterfall-tx-frequency');
+  const hz = wanted.get('tx2')?.hz ?? state.tx2?.frequency_hz;
+  frequencyInput.disabled = !canControl() || busy;
+  if (document.activeElement !== frequencyInput) frequencyInput.value = Number.isSafeInteger(hz) ? (hz / 1e6).toFixed(6) : '';
+  $('waterfall-tx-send').disabled = !canStartWaterfallTx();
+  $('waterfall-tx-stop').disabled = !operator || !isOpen() || !busy || waterfallStopId !== null;
+
+  const result = {
+    complete: t('Gesendet.', 'Sent.'),
+    stopped: t('Sendung gestoppt.', 'Transmission stopped.'),
+    retuned: t('Sendung durch TX2-Abstimmung beendet.', 'Transmission ended after retuning TX2.'),
+    unavailable: t('TX2 nicht verfügbar.', 'TX2 unavailable.'),
+    underrun: t('TX2-Audiopuffer leer. Sendung beendet.', 'TX2 audio buffer underrun. Transmission ended.'),
+    backend_reset: t('Backend neu gestartet. Sendung beendet.', 'Backend restarted. Transmission ended.'),
+  }[tx?.result];
+  const text = $('waterfall-tx-text').value;
+  const invalid = waterfallFont && text.trim() && !waterfallRows.length;
+  const status = waterfallError || (busy ? (tx?.phase === 'sending' ?
+    t('Sendet über TX2 …', 'Transmitting on TX2 …') : t('TX2 wird vorbereitet …', 'Preparing TX2 …')) :
+    invalid ? t('Erlaubt sind A–Z, 0–9, Leerzeichen und /-.?+_', 'Use A–Z, 0–9, spaces and /-.?+_') : result ?? '');
+  const node = $('waterfall-tx-status');
+  if (node.textContent !== status) node.textContent = status;
+}
+
+function renderWaterfallDraft() {
+  const row = $('waterfall-tx-row'), level = $('waterfall-tx-level');
+  const rowMs = Number(row.value);
+  waterfallRows = waterfallFont ? waterfallRaster($('waterfall-tx-text').value, waterfallFont) : [];
+  $('waterfall-tx-row-value').textContent = `${rowMs} ms`;
+  $('waterfall-tx-level-value').textContent = `${level.value} %`;
+  rangePaint(row); rangePaint(level);
+  const seconds = waterfallRows.length * rowMs / 1000;
+  $('waterfall-tx-duration').textContent = seconds ? `${seconds.toLocaleString(language, {maximumFractionDigits: 2})} s` : '';
+  drawWaterfallPreview($('waterfall-tx-preview'), waterfallRows, rowMs);
+  renderWaterfallTxControls();
+}
+
+async function loadWaterfallFont() {
+  if (waterfallFont || waterfallFontLoading) return;
+  waterfallFontLoading = true;
+  try {
+    const response = await fetch('./waterfall-font.json');
+    if (!response.ok) throw new Error('Failed to load waterfall font');
+    waterfallFont = await response.json();
+    waterfallError = '';
+  } catch {
+    waterfallError = t('Waterfall-Schrift konnte nicht geladen werden.', 'The waterfall font could not be loaded.');
+  } finally {
+    waterfallFontLoading = false;
+    renderWaterfallDraft();
+  }
+}
+
+function stopWaterfallTx() {
+  const id = waterfallStartId ?? state.waterfall_tx?.tx_id;
+  if (!operator || !waterfallTxActive() || waterfallStopId !== null || id === undefined) return;
+  if (send({type: 'waterfall_tx_stop', tx_id: id})) waterfallStopId = id;
+  renderWaterfallTxControls();
+}
+
+$('waterfall-tx-form').onsubmit = async event => {
+  event.preventDefault();
+  if (!canStartWaterfallTx()) return;
+  waterfallError = '';
+  const start = command('waterfall_tx_start', {
+    text: $('waterfall-tx-text').value,
+    row_ms: Number($('waterfall-tx-row').value),
+    level: Number($('waterfall-tx-level').value),
+    frequency_hz: state.tx2.frequency_hz,
+  });
+  waterfallStartId = start.id;
+  renderWaterfallTxControls();
+  try {
+    await start;
+  } catch (error) {
+    if (waterfallStartId === start.id) waterfallStartId = null;
+    if (waterfallStopId === start.id) waterfallStopId = null;
+    waterfallError = error.message;
+    renderWaterfallTxControls();
+  }
+};
+$('waterfall-tx-stop').onclick = stopWaterfallTx;
+$('waterfall-tx-frequency').addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  event.target.blur();
+});
+$('waterfall-tx-frequency').addEventListener('change', event => {
+  waterfallError = '';
+  try {
+    const hz = parseMHz(event.target.value);
+    if (hz !== state.tx2?.frequency_hz) setFrequency('tx', hz, 2);
+  } catch (error) {
+    waterfallError = error.message;
+  }
+  renderWaterfallTxControls();
+});
+$('waterfall-tx-frequency').addEventListener('input', renderWaterfallTxControls);
+$('waterfall-tx-frequency').addEventListener('blur', renderWaterfallTxControls);
+for (const field of ['text', 'row', 'level']) {
+  const input = $('waterfall-tx-' + field);
+  const saved = readPreference(input.id);
+  if (saved !== null) input.value = field === 'text' ? saved.slice(0, input.maxLength) : saved;
+  input.addEventListener('input', () => {
+    writePreference(input.id, input.value);
+    if (waterfallFont) waterfallError = '';
+    renderWaterfallDraft();
+  });
+}
+renderWaterfallDraft();
+
 const savedZoomView = zoomSources.find(source => String(source) === readPreference('zoomView'));
 selectDecoder(savedZoomView ?? (readPreference('decoderVisible') === 'true' ? decoderSource : 'zoom'));
 $('loop').onchange = () => { stopPtt(); checked('loop', {mode: Number($('loop').value)}).catch(report); };
@@ -1702,6 +1838,7 @@ $('language').onchange = () => {
   txVolumeChanged(false);
   sstv.render();
   views.forEach(view => view.setLanguage(language));
+  renderWaterfallDraft();
   selectReceiver(selected); renderFilter(); renderNoiseLevels();
   setFullbandAxis(views[0].axisMode); controls();
 };

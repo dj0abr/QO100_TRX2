@@ -608,24 +608,25 @@ legend { padding: 0 7px; color: var(--accent-text); font-size: 12px; }
 .rx2-panel .rx-secondary { border: 0; background: transparent; padding-bottom: 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .display.zoom-tile { display: grid; grid-template-rows: auto minmax(0, 1fr); }
-.zoom-heading { gap: 8px; }
+.display-heading.zoom-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; }
 .zoom-output { position: relative; min-width: 0; min-height: 0; height: 280px; overflow: hidden; }
 .zoom-plots { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(30px, .78fr) 26px minmax(40px, 1fr) 22px; min-width: 0; min-height: 0; }
 /* Preserve canvas dimensions and live waterfall history while a monitor covers it. */
 .zoom-plots[aria-hidden="true"] { visibility: hidden; pointer-events: none; }
 .zoom-plots .spectrum, .zoom-plots .waterfall { height: 100%; min-height: 0; }
 .decoder-panel { position: absolute; inset: 0; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--monitor-bg); }
-.decoder-sources { display: flex; flex: 1; align-items: center; flex-wrap: wrap; min-width: 0; gap: 4px 10px; font-size: 11px; }
-.decoder-group { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); white-space: nowrap; }
-.decoder-sources :is(button, select) { min-height: 23px; padding: 2px 5px; border: 1px solid var(--button-border); border-radius: 4px; color: var(--text-secondary); background: var(--input-bg); font: inherit; cursor: pointer; }
-.decoder-sources :is(button[aria-pressed="true"], select[data-active]) { border-color: var(--rx2-border); background: var(--rx2-bg); color: var(--rx2); }
-.decoder-sources #decoder-digital:has(option:checked[value]:not([value=""])) { color: var(--rx2); }
-.decoder-sources #decoder-digital[data-running] { border-color: var(--active-border); color: var(--active-text); }
+.decoder-sources { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 3px 13px; font-size: 11px; }
+.decoder-sources label { display: inline-flex; align-items: center; gap: 4px; min-height: 20px; color: var(--text-secondary); white-space: nowrap; cursor: pointer; }
+.decoder-sources label:has(input:checked) { color: var(--rx2); }
+.decoder-sources input { width: 13px; height: 13px; margin: 0; accent-color: var(--rx2); cursor: pointer; }
+.decoder-options { grid-column: 1 / -1; padding-top: 4px; border-top: 1px solid var(--line); }
+#decoder-active-mode { color: var(--rx2); }
+#decoder-digital-choice[data-running] #decoder-active-mode { color: var(--active-text); }
 #decoder-clear { flex-shrink: 0; padding: 0 3px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 10px; }
 .decoder-text { flex: 1; min-width: 0; min-height: 0; contain: strict; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 0 10px 4px; color: var(--text); font: 12px/1.5 var(--mono); scrollbar-width: thin; }
 .decoder-text:empty::before { content: "Warte auf Decoder-Text …"; color: var(--muted); }
 html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text …"; }
-#zoom-sources :is(button, select):focus-visible, #decoder-clear:focus-visible, .decoder-text:focus-visible { outline: 2px solid var(--rx2); outline-offset: -2px; }
+.decoder-sources input:focus-visible, #decoder-clear:focus-visible, .decoder-text:focus-visible { outline: 2px solid var(--rx2); outline-offset: -2px; }
 @media (min-width: 801px) { .zoom-output { height: 100%; } }
 @media (max-width: 560px) { .zoom-output { height: 255px; } }
 .mm-diagnostics { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 5px; padding: 6px 10px; overflow-y: auto; background: var(--monitor-bg); font-size: 10px; }
@@ -795,16 +796,39 @@ button.ft-decode-line:disabled { opacity: 1; }
 #ft8-status { margin: 0; }
 #ft8-status.sending { color: var(--error); font-weight: 700; }
 @media (min-width: 801px) {
-  .visuals:has(.zoom-output[data-view="ft8"]) #fullband { flex: .43; }
+  .visuals:has(.zoom-output:is([data-view="ft8"], [data-view="rtty"], [data-view="sstv"], [data-view="waterfall"])) #fullband { flex: .43; }
 }
 @media (max-width: 800px) {
-  .zoom-output[data-view="ft8"] { height: 435px; }
+  .zoom-output:is([data-view="ft8"], [data-view="rtty"], [data-view="sstv"], [data-view="waterfall"]) { height: 435px; }
 }
 @media (max-width: 440px) {
   .ft8-panel { padding-inline: 6px; }
   .ft8-message { flex-basis: 100%; }
   .ft8-panel .decoder-text { font-size: 10px; padding-inline: 2px; }
   .ft-waterfall-axis { padding-inline: 2px; font-size: 9px; }
+}
+.waterfall-tx-panel {
+  position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto; gap: 6px 12px; padding: 8px 10px;
+  background: var(--monitor-bg); color: var(--text-secondary); font-size: 11px;
+}
+#waterfall-tx-form { display: flex; flex-direction: column; gap: 6px; overflow: auto; }
+#waterfall-tx-form label { display: grid; gap: 3px; }
+#waterfall-tx-form input[type="text"] {
+  width: 100%; min-width: 0; min-height: 26px; padding: 3px 6px; border-radius: 5px;
+  border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text); font: 11px var(--mono);
+}
+#waterfall-tx-text { text-transform: uppercase; }
+.waterfall-tx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+#waterfall-tx-send:enabled { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent-text); }
+.waterfall-tx-preview { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 4px; min-width: 0; min-height: 0; }
+.waterfall-tx-preview-label { display: flex; justify-content: space-between; gap: 4px; }
+.waterfall-tx-scroll { overflow: auto; background: #121b2a; }
+#waterfall-tx-preview { display: block; width: 25%; margin-inline: auto; image-rendering: pixelated; }
+#waterfall-tx-status { grid-column: 1 / -1; margin: 0; overflow-wrap: anywhere; }
+#waterfall-tx-status:empty { display: none; }
+@media (max-width: 560px) {
+  .waterfall-tx-panel { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
 }
 .rtty-panel { position: absolute; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 6px; padding: 8px 10px; background: var(--monitor-bg); font-size: 11px; }
 .rtty-toolbar, .rtty-toolbar label { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }

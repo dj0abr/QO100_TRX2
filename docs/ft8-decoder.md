@@ -50,9 +50,11 @@ gleiche Nachricht im nächsten verfügbaren Sendeslot derselben Folge ein.
 Nach drei Sendungen pro Schritt und zwei weiteren Slots ohne passende Antwort
 endet die Automatik. Ein Frequenzwechsel,
 Verbindungsverlust oder der Wechsel zu SSTV oder RTTY beendet die Automatik.
-Beim Wechsel zu Zoom, Monitor oder Multimedia-Bake läuft der gewählte DigiMode
-im Hintergrund weiter. **Anzeigen** öffnet seine Kachel wieder. **Aus** beendet
-den DigiMode einschließlich einer laufenden oder geplanten Sendung.
+Beim Wechsel zu **RX1-/RX2-Zoom** oder **Monitor** läuft der gewählte DigiMode
+im Hintergrund weiter. Sein Name steht neben **DigiModes**. Ein Klick auf
+**DigiModes** öffnet seine Kachel wieder und scrollt beide FT4/8-Listen ans
+Ende. **DigiModes → Aus** beendet den DigiMode einschließlich einer laufenden
+oder geplanten Sendung.
 
 Ohne Häkchen an **Auto-QSO** bleibt die Antwort ein Entwurf. **CQ rufen**
 erstellt den eigenen CQ-Ruf und plant ihn mit einem Klick für den gewählten
