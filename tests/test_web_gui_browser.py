@@ -339,14 +339,16 @@ def main():
             _, _, _, _, _, epoch, _, _, dial_hz, _, revision, _, _, _, _, radio_session = HEADER.unpack_from(ft_socket.recv(4096))
             slot = int(time.time() // 15) * 15
 
-            def decode(message, decode_slot=slot, mode='FT8'):
+            def decode(message, decode_slot=slot, mode='FT8', message_type=None):
                 packet = dict(type='decode', mode=mode, session=radio_session, epoch=epoch, dial_hz=dial_hz,
                               mode_revision=revision, utc='120000', slot_utc=decode_slot, snr_db=-5, dt_s=.2,
                               frequency_hz=1500, message=message)
+                if message_type is not None:
+                    packet['message_type'] = message_type
                 ft_socket.sendto(json.dumps(packet).encode(), ('127.0.0.1', ft_text_port))
 
             def lines(log_id):
-                return execute('return [...document.getElementById(arguments[0]).children].map(n => n.textContent.split(" Hz  ")[1])', log_id)
+                return execute('return [...document.getElementById(arguments[0]).children].map(n => n.dataset.message ?? n.textContent.split(" Hz  ")[1])', log_id)
 
             decodes = ['CQ K1ABC FN42', 'DJ0ABR K1ABC -05', 'K1ABC DJ0ABR R-04',
                        'TEST DJ0ABR', 'CQ DJ0ABRA JN68', 'CQ K2ABC FN42', 'CQ DX K3ABC FN42']
@@ -354,15 +356,28 @@ def main():
                 decode(message)
             wait(lambda: lines('ft8-log') == decodes)
             assert lines('ft8-own-log') == decodes[1:4]
-            assert execute('return [...document.querySelectorAll("#ft8-log [data-new-cq]")].map(n => n.textContent.split(" Hz  ")[1])') == [decodes[0], decodes[4], decodes[-1]]
+            assert execute('return [...document.querySelectorAll("#ft8-log [data-new-cq]")].map(n => n.dataset.message ?? n.textContent.split(" Hz  ")[1])') == [decodes[0], decodes[4], decodes[-1]]
             assert execute("""const log = document.getElementById('ft8-log');
                 const color = index => getComputedStyle(log.children[index]).color;
                 return color(0) === 'rgb(255, 170, 161)' && color(5) !== color(0)
                     && !document.querySelector('#ft8-own-log [data-new-cq]');""")
+            assert execute("""const log = document.getElementById('ft8-log');
+                const sample = log.children[6];
+                const columns = [...sample.querySelector('.ft-message-body').children];
+                return columns.map(n => n.textContent.trim()).join('|') === 'CQ DX|K3ABC|FN42' &&
+                    log.children[2].querySelector('.ft-country').dataset.region === 'DE' &&
+                    sample.querySelector('.ft-country').dataset.region === 'US' &&
+                    sample.querySelector('.ft-country-flag').style.backgroundPosition !== '' &&
+                    !log.children[3].querySelector('.ft-message-body');""")
+            decode('CQ K1ABC FN42', message_type=0)
+            wait(lambda: lines('ft8-log') == decodes + [decodes[0]])
+            assert execute("""const last = document.getElementById('ft8-log').lastElementChild;
+                return last.tagName === 'DIV' && !last.querySelector('.ft-message-body, .ft-country') &&
+                    !last.hasAttribute('data-new-cq');""")
             click('#ft8-own-log button:first-child')
             assert execute('return document.getElementById("ft8-message").value').startswith('K1ABC DJ0ABR R')
             changed('#ft-own-call', 'K1ABC')
-            assert lines('ft8-own-log') == decodes[:3]
+            assert lines('ft8-own-log') == decodes[:3] + [decodes[0]]
             changed('#ft-own-call', 'DJ0ABR')
             for i in range(50):
                 decode(f'CQ K2ABC FN{i:02d}')

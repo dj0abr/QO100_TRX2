@@ -42,11 +42,11 @@ void TxChannel::reset(int64_t offset) {
     clear_dsp();
 }
 size_t TxChannel::level() const { return packets_.size()*audio_block+pending_.size()+size_t(std::max(0.,clock_buffered_)); }
-bool TxChannel::add(uint64_t index,const std::vector<int16_t>& samples) {
+bool TxChannel::add(uint64_t index,const std::vector<int16_t>& samples, size_t max_buffer) {
     if(samples.size()!=audio_block || index%audio_block || index>std::numeric_limits<uint64_t>::max()-audio_block ||
        (have_next_ && index<next_) || packets_.count(index)) return false;
     packets_.emplace(index,samples);
-    if(level()>capacity) {
+    if(level()>max_buffer) {
         // Recover to recent sound instead of building an unbounded TX delay.
         while(packets_.size()>target/audio_block) packets_.erase(packets_.begin());
         clear_dsp();have_next_=false;++overruns;

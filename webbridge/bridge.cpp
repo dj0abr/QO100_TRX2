@@ -1,4 +1,5 @@
 #include "bridge.hpp"
+#include "qo100/protocol.hpp"
 #include <charconv>
 #include <cmath>
 #include <iostream>
@@ -415,7 +416,8 @@ void Bridge::packet(Bytes p) {
     if(get(p,12,4)!=counters_[key]) return; // Reordered replies cannot roll state back.
     update_state(p);dirty_=true;
     auto found=pending_.find(key);
-    const bool final=!(type==18 && (get(p,48,4)&2)) && !(type==14 && get(p,54,2)==3);
+    const bool ptt_waiting=type==7 && stream==3 && get(p,54,2)==qo100::tx_ptt_waiting;
+    const bool final=!ptt_waiting && !(type==18 && (get(p,48,4)&2)) && !(type==14 && get(p,54,2)==3);
     if(type==18 && final) hardware_change_=false;
     if(found!=pending_.end() && found->second.reply==type && final) {
         const auto q=found->second;pending_.erase(found);
@@ -436,7 +438,7 @@ void Bridge::packet(Bytes p) {
             }
         }
     }
-    if(type==7 && stream==3 && get(p,54,2) && ptt_requested_) tx_off();
+    if(type==7 && stream==3 && !ptt_waiting && get(p,54,2) && ptt_requested_) tx_off();
     if(type==7 && stream==3 && !pending_.count(group(6,3)) && !get(p,48,4)) ptt_requested_=false;
     if(barrier_ && off_ack_ && normal_ack_ && initialized_) {barrier_=false;dirty_=true;}
     if(type==7 && stream==qo100::tx2_stream) {

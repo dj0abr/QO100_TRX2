@@ -235,7 +235,7 @@ struct Result {
     std::string message;
     int snr;
     float dt, frequency, sync, quality;
-    int ap;
+    int ap, messageType;
 };
 struct Results {
     std::vector<Result> values;
@@ -243,12 +243,12 @@ struct Results {
 };
 // Do not propagate C++ exceptions through Fortran stack frames.
 void receive(const char* message, int length, int snr, float dt, float freq,
-             float sync, float quality, int ap, void* context) noexcept {
+             float sync, float quality, int ap, int messageType, void* context) noexcept {
     auto& results = *static_cast<Results*>(context);
     try {
         if (!std::isfinite(dt) || !std::isfinite(freq) || !std::isfinite(sync) || !std::isfinite(quality))
             throw std::runtime_error("Non-finite decoder result");
-        results.values.push_back({std::string(message, length), snr, dt, freq, sync, quality, ap});
+        results.values.push_back({std::string(message, length), snr, dt, freq, sync, quality, ap, messageType});
     } catch (...) { results.failed = true; }
 }
 void print(const Options& o, const Audio& a, const Results& results) {
@@ -259,6 +259,7 @@ void print(const Options& o, const Audio& a, const Results& results) {
                 << ",\"snr_db\":" << r.snr << ",\"dt_s\":" << r.dt
                 << ",\"frequency_hz\":" << r.frequency << ",\"sync\":" << r.sync
                 << ",\"quality\":" << r.quality << ",\"ap\":" << r.ap
+                << ",\"message_type\":" << r.messageType
                 << ",\"message\":" << quoted(r.message) << "}\n";
         } else {
             std::cout << (o.utc.empty() ? "------" : o.utc) << ' ' << std::setw(3) << r.snr

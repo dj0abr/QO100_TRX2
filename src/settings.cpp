@@ -18,6 +18,7 @@ SettingsMap settings_values(const Config& c) {
         {"lnb_reference_hz",value(c.lnb_reference_hz)},{"rx_correction_hz",value(c.rx_correction_hz)},
         {"tx_correction_hz",value(c.tx_correction_hz)},{"pluto_tx_base_hz",value(c.pluto_tx_base_hz)},
         {"tx_attenuation_db",value(c.tx_attenuation_db)},
+        {"shelly_ptt_ip",c.shelly_ptt_ip},{"shelly_ptt_external_ft",value(c.shelly_ptt_external_ft)},
         {"initial_rx_hz",value(c.initial_rx_hz)},{"initial_rx2_hz",value(c.initial_rx2_hz)},
         {"rx3_frequency_hz",value(c.rx3_frequency_hz)},{"rx4_frequency_hz",value(c.rx4_frequency_hz)},
         {"rx5_frequency_hz",value(c.rx5_frequency_hz)},
@@ -40,7 +41,7 @@ SettingsMap parse_settings(const std::string& text) {
         const auto eq=line.find('=');
         if(eq==std::string::npos || !eq || eq>64 || line.size()-eq>200) throw std::runtime_error("Expected key=value");
         const auto key=line.substr(0,eq),v=line.substr(eq+1);
-        if(key.find_first_not_of("abcdefghijklmnopqrstuvwxyz_0123456789")!=std::string::npos || v.empty() ||
+        if(key.find_first_not_of("abcdefghijklmnopqrstuvwxyz_0123456789")!=std::string::npos || (v.empty() && key!="shelly_ptt_ip") ||
            v.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .:+-_")!=std::string::npos ||
            !result.emplace(key,v).second) throw std::runtime_error("Invalid or duplicate settings key: "+key);
     }

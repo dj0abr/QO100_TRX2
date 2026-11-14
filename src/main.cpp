@@ -7,6 +7,7 @@
 #include "qo100/dsp_workers.hpp"
 #include "qo100/tx_channel.hpp"
 #include "qo100/channels.hpp"
+#include "shelly_ptt.hpp"
 #include <arpa/inet.h>
 #include <algorithm>
 #include <array>
@@ -35,6 +36,10 @@ static_assert(std::atomic<bool>::is_always_lock_free);
 std::atomic<bool> running{true};
 void stop(int) { running.store(false,std::memory_order_relaxed); }
 using Clock = std::chrono::steady_clock;
+using namespace std::chrono_literals;
+constexpr auto ptt_lead = 250ms;
+constexpr auto ptt_release = 100ms;
+constexpr int external_audio_threshold = 32; // Ignore low-level idle noise in PCM16.
 class Socket {
 public:
     int fd = -1;
@@ -95,6 +100,7 @@ int main(int argc, char** argv) {
         action.sa_handler = stop;
         sigemptyset(&action.sa_mask);
         sigaction(SIGINT, &action, nullptr); sigaction(SIGTERM, &action, nullptr);
+        qo100::ShellyPtt shelly(c.shelly_ptt_ip);
         Socket gui(c.gui_bind, c.gui_port);
         std::unique_ptr<Socket> iq, tx_status;
         std::unique_ptr<qo100::PlutoProcess> pluto;
@@ -128,6 +134,8 @@ int main(int argc, char** argv) {
         uint16_t tx_command_status=0;
         auto last_tx_audio=Clock::now()-std::chrono::seconds(10),last_tx_control=last_tx_audio;
         auto last_tx_feedback=Clock::now(),last_tx_state=last_tx_audio;
+        Clock::time_point tx_ptt_deadline{}, relay_release_at{};
+        bool tx_reported_on = false;
         auto mute_tx=[&] { if(tx_enabled) { tx_enabled=false;++tx_epoch;echo_seen.clear();echo_next=0;tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz)); } };
         tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
         qo100::TxChannel tx2(int64_t(c.initial_tx2_hz)-int64_t(c.tx_center_hz),{},qo100::TxChannel::Profile::digital);
@@ -139,9 +147,12 @@ int main(int argc, char** argv) {
         auto digital_at=Clock::now()-std::chrono::seconds(10),rx2_last_use=Clock::now();
         uint16_t tx2_command_status=0;
         auto last_tx2_audio=last_tx_audio,last_tx2_state=last_tx_audio;
+        auto last_tx2_signal=last_tx_audio;
+        bool tx2_fast_ptt=false;
         auto reset_tx2=[&] {
             ++tx2_epoch;tx2.reset(int64_t(tx2_frequency)-int64_t(c.tx_center_hz));
-            last_tx2_audio=Clock::now()-std::chrono::seconds(10);
+            last_tx2_audio=last_tx2_signal=Clock::now()-10s;
+            tx2_fast_ptt=false;
         };
         uint32_t filter_request=0;
         uint16_t filter_status=0;
@@ -175,9 +186,18 @@ int main(int argc, char** argv) {
             if (!active()) return;
             if (sendto(gui.fd,packet.data(),packet.size(),0,reinterpret_cast<const sockaddr*>(&peer),sizeof(peer)) != static_cast<ssize_t>(packet.size())) ++send_errors;
         };
+        auto tx1_can_send=[&](Clock::time_point now) {
+            return tx_enabled && (loop_mode==TestLoop::audio || shelly.ready(now,ptt_lead));
+        };
+        auto tx2_wants_ptt=[&](Clock::time_point now) {
+            return now-last_tx2_signal < (tx2_fast_ptt ? 200ms : 650ms);
+        };
         auto send_tx_state=[&]() {
-            send_packet(qo100::tx_state_packet(tx_request,tx_frequency,tx_epoch,session_id,tx_command_status,
-                tx_enabled,tx.level(),pluto_fill,int32_t(std::lround(tx.ppm()))));
+            tx_reported_on=tx1_can_send(Clock::now());
+            const auto status=tx_command_status ? tx_command_status :
+                (tx_enabled && !tx_reported_on ? qo100::tx_ptt_waiting : 0);
+            send_packet(qo100::tx_state_packet(tx_request,tx_frequency,tx_epoch,session_id,status,
+                tx_reported_on,tx.level(),pluto_fill,int32_t(std::lround(tx.ppm()))));
             last_tx_state=Clock::now();
         };
         auto send_tx2_state=[&] {
@@ -222,17 +242,23 @@ int main(int argc, char** argv) {
         };
         auto start_tx=[&](unsigned blocks) {
             if(!blocks) return;
-            const bool recent=tx_enabled && active() && loop_mode!=TestLoop::audio && !loop_pending
-                && Clock::now()-last_tx_audio<std::chrono::milliseconds(200);
+            const auto now=Clock::now();
+            const bool recent=tx1_can_send(now) && active() && loop_mode!=TestLoop::audio && !loop_pending
+                && now-last_tx_audio<200ms;
+            const bool managed_ptt=!c.shelly_ptt_ip.empty();
+            const auto digital_timeout=managed_ptt && !tx2_fast_ptt ? 650ms : 200ms;
             const bool digital_recent=tx2_used && active() && hardware_online && !loop_pending && loop_mode==TestLoop::normal &&
-                Clock::now()-last_tx2_audio<std::chrono::milliseconds(200);
+                now-last_tx2_audio<digital_timeout && (!managed_ptt || tx2_wants_ptt(now));
+            const bool digital_ready=shelly.ready(now,tx2_fast_ptt ? 0ms : ptt_lead);
             const auto first_id=tx_block_id;
             const bool pack_iq=bool(tx_status);
             pending_tx_blocks=blocks;
-            tx_worker.start([&,recent,digital_recent,first_id,pack_iq,blocks] {
+            tx_worker.start([&,recent,digital_recent,digital_ready,first_id,pack_iq,blocks] {
                 for(unsigned block=0;block<blocks;++block) {
                     auto samples=tx.render_active(recent);
-                    auto digital=tx2.render_active(digital_recent);
+                    // Keep the first TX2 samples queued while the relay is pulling in.
+                    auto digital=digital_recent && !digital_ready ? std::vector<std::complex<float>>{} :
+                        tx2.render_active(digital_recent);
                     if(samples.empty())samples=std::move(digital);
                     else if(!digital.empty())for(size_t i=0;i<samples.size();++i)samples[i]+=digital[i];
                     float peak=1.f;
@@ -349,6 +375,14 @@ int main(int argc, char** argv) {
             if(receivers[i].dsp) receivers[i].dsp->retune(int64_t(rx_frequency(i))-int64_t(c.rx_center_hz));
         };
         auto apply_runtime=[&](const qo100::Config& old,bool reset_all) {
+            if(old.shelly_ptt_ip!=c.shelly_ptt_ip || old.shelly_ptt_external_ft!=c.shelly_ptt_external_ft) {
+                mute_tx();
+                shelly.configure(c.shelly_ptt_ip);
+                relay_release_at={};
+                reset_tx2();
+                send_tx_state();
+                send_tx2_state();
+            }
             for(size_t i=0;i<receivers.size();++i) {
                 const auto hz=std::array<uint64_t,5>{c.initial_rx_hz,c.initial_rx2_hz,c.rx3_frequency_hz,c.rx4_frequency_hz,c.rx5_frequency_hz}[i];
                 const bool changed=hz!=receivers[i].frequency;
@@ -606,6 +640,7 @@ int main(int argc, char** argv) {
                                 if(control.frequency!=tx_frequency || control.enabled!=tx_enabled) {
                                     const bool retuned=control.frequency!=tx_frequency;
                                     tx_frequency=control.frequency;tx_enabled=control.enabled;++tx_epoch;echo_seen.clear();echo_next=0;
+                                    if(tx_enabled) tx_ptt_deadline=Clock::now()+1s;
                                     if(retuned) {c.initial_tx_hz=tx_frequency;settings.changed();}
                                     tx.reset(int64_t(tx_frequency)-int64_t(c.tx_center_hz));
                                     if(retuned && loop_mode==TestLoop::rf && !loop_pending) {retune_rx(0);send_rx_state(0);}
@@ -620,7 +655,25 @@ int main(int argc, char** argv) {
                             if(audio.stream==qo100::tx2_stream) {
                                 if(!tx2_used || !hardware_online || loop_pending || loop_mode!=TestLoop::normal || audio.session!=session_id ||
                                     audio.epoch!=tx2_epoch || audio.frequency!=tx2_frequency) continue;
-                                if(tx2.add(audio.index,audio.samples)) last_tx2_audio=Clock::now();
+                                const bool managed_ptt=!c.shelly_ptt_ip.empty();
+                                const bool signal=audio.source!=qo100::Tx2AudioSource::external ||
+                                    std::any_of(audio.samples.begin(),audio.samples.end(),[](int16_t sample) {
+                                        return std::abs(int(sample)) >= external_audio_threshold;
+                                    });
+                                const auto now=Clock::now();
+                                if(managed_ptt && !signal && !tx2_wants_ptt(now)) continue;
+                                const bool fast=audio.source==qo100::Tx2AudioSource::ft ||
+                                    (audio.source==qo100::Tx2AudioSource::external && c.shelly_ptt_external_ft);
+                                // Reserve room for the lead and one HTTP timeout at 20 ms per block.
+                                const auto capacity=qo100::TxChannel::capacity +
+                                    (managed_ptt && !fast ? qo100::TxChannel::audio_block * 25 : 0);
+                                if(tx2.add(audio.index,audio.samples,capacity)) {
+                                    last_tx2_audio=now;
+                                    if(signal) {
+                                        last_tx2_signal=now;
+                                        tx2_fast_ptt=fast;
+                                    }
+                                }
                                 continue;
                             }
                             if(!tx_enabled || loop_pending || audio.session!=session_id || audio.epoch!=tx_epoch || audio.frequency!=tx_frequency) continue;
@@ -631,7 +684,7 @@ int main(int argc, char** argv) {
                                 while(!echo_seen.empty() && echo_next-*echo_seen.begin()>64*240) echo_seen.erase(echo_seen.begin());
                                 qo100::FrameInfo f{tx_epoch,stamp(),audio.index,tx_frequency,12000,0,session_id,4};
                                 send_packet(qo100::audio_packet(f,audio.samples));
-                            } else if(tx.add(audio.index,audio.samples)) last_tx_audio=Clock::now();
+                            } else if(tx1_can_send(Clock::now()) && tx.add(audio.index,audio.samples)) last_tx_audio=Clock::now();
                             continue;
                         }
                         uint32_t stream_id=0, request=0,tune_session=0; uint64_t frequency=0;
@@ -675,6 +728,19 @@ int main(int argc, char** argv) {
                 mute_tx();send_tx_state();
             }
             if(!active() && !pending_settings) change_loop(TestLoop::normal);
+            const auto ptt_now=Clock::now();
+            if(tx_enabled && !tx1_can_send(ptt_now) && ptt_now>=tx_ptt_deadline) {
+                mute_tx();
+                tx_command_status=qo100::tx_ptt_failed;
+                send_tx_state();
+            }
+            const bool can_key=active() && hardware_online && !loop_pending && !pending_settings && loop_mode!=TestLoop::audio;
+            const bool want_relay=can_key && (tx_enabled ||
+                (tx2_used && loop_mode==TestLoop::normal && tx2_wants_ptt(ptt_now)));
+            if(!can_key) relay_release_at={};
+            else if(want_relay) relay_release_at=ptt_now+ptt_release;
+            shelly.request(can_key && (want_relay || ptt_now<relay_release_at));
+            if(tx_reported_on!=tx1_can_send(ptt_now)) send_tx_state();
             if(tx_status && (fds[2].revents&POLLIN)) {
                 bool update=false;
                 for(int budget=0;budget<128;++budget) {
@@ -778,6 +844,7 @@ int main(int argc, char** argv) {
                 last_samples = spectrum.samples(); last_stats = Clock::now();
             }
         }
+        shelly.request(false);
         settings.flush();
         std::cout << "Stopping; IQ samples=" << spectrum.samples() << "; spectrum frames sent=" << frames_sent << '\n';
         return 0;

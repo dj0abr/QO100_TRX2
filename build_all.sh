@@ -52,7 +52,7 @@ if ((install_deps)); then
     packages=(build-essential cmake pkg-config gfortran git ca-certificates
         python3 python3-numpy python3-scipy
         libiio-dev libad9361-dev libiio-utils libsamplerate0-dev libfftw3-dev
-        libboost-dev nlohmann-json3-dev libpulse-dev pulseaudio-utils
+        libboost-dev nlohmann-json3-dev libpulse-dev pulseaudio-utils libcurl4-openssl-dev
         libasound2-plugins dbus-user-session)
     # The client utilities do not install a sound server on minimal Debian.
     # Preserve an existing PulseAudio/PipeWire setup; add PulseAudio only if neither exists.

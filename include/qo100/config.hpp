@@ -12,6 +12,8 @@ constexpr uint16_t pluto_iq_port = 40809;
 constexpr uint16_t pluto_status_port = 40810;
 struct Config {
     std::string pluto_connection = "network", pluto_ip = "192.168.10.25";
+    std::string shelly_ptt_ip;
+    bool shelly_ptt_external_ft = false;
     std::string pluto_uri = "ip:192.168.10.25";
     uint32_t pluto_sample_rate = 1200000;
     uint64_t rx_center_hz = 10489750000ULL;

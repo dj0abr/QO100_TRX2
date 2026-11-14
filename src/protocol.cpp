@@ -106,10 +106,13 @@ bool parse_tx_control(const uint8_t* p,size_t n,TxControl& c) {
     c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),get(p,32,8),get(p,54,2)!=0,uint32_t(get(p,8,4))};return true;
 }
 bool parse_tx_audio(const uint8_t* p,size_t n,TxAudio& a) {
-    if(!tx_header(p,n,tx_audio_type,true) || n!=544 || get(p,40,4)!=12000 || get(p,44,8) ||
+    if(!tx_header(p,n,tx_audio_type,true) || n!=544 || get(p,40,4)!=12000 || get(p,48,4) ||
        get(p,52,2)!=240 || get(p,54,2)!=2 || get(p,56,4)!=240) return false;
     a.epoch=get(p,12,4);a.session=get(p,60,4);a.index=get(p,24,8);a.frequency=get(p,32,8);
     a.stream=get(p,8,4);
+    const auto source=get(p,44,4);
+    if(source>uint32_t(Tx2AudioSource::ft) || (source && a.stream!=tx2_stream)) return false;
+    a.source=static_cast<Tx2AudioSource>(source);
     a.samples.resize(240);
     for(size_t i=0;i<240;++i) { const int value=get(p,64+2*i,2);a.samples[i]=value>=32768?value-65536:value; }
     return true;

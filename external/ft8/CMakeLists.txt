@@ -13,16 +13,13 @@ find_path(FFTW_FORTRAN_INCLUDE_DIR fftw3.f03 HINTS ${FFTW_INCLUDE_DIRS} REQUIRED
 find_package(Boost REQUIRED)
 
 include(vendor/wsjtx/sources.cmake)
-# The decoder imports these GUI IPC names but never uses them. Keep vendor
-# sources byte-identical, and remove only that import in the generated copy.
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS vendor/wsjtx/lib/ft8_decode.f90)
-file(READ vendor/wsjtx/lib/ft8_decode.f90 DECODER_SOURCE)
-string(REPLACE "    use shmem, only: shmem_lock, shmem_unlock\n" "" DECODER_SOURCE "${DECODER_SOURCE}")
+# Keep WSJT-X sources byte-identical. The generated FT8 module drops an unused
+# GUI IPC import. Both decoders preserve the on-air message type for JSON output.
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/generated/ft8_decode.f90 "${DECODER_SOURCE}")
+include(src/decoder_sources.cmake)
 
 add_library(ft8_core STATIC ${WSJTX_SOURCES}
-  vendor/wsjtx/lib/ft4_decode.f90
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/ft4_decode.f90
   vendor/wsjtx/lib/ft4/ft4_baseline.f90
   vendor/wsjtx/lib/ft4/ft4_downsample.f90
   vendor/wsjtx/lib/ft4/gen_ft4wave.f90

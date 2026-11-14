@@ -30,7 +30,30 @@ export function ftGrid(value) {
   return /^[A-R]{2}\d{2}(?:[A-X]{2})?$/.test(locator) ? locator.slice(0, 4) : '';
 }
 
+// Structured FT4/FT8 messages use call fields, which may contain a resolved hash
+// or a portable suffix. Older decoders only provide the message text.
+const displayCall = /^(?=[A-Z0-9/]*[A-Z])(?=[A-Z0-9/]*\d)[A-Z0-9]+(?:\/[A-Z0-9]+)*$/;
+const isDisplayCall = value => value === '<...>' || displayCall.test(value.replace(/^<([^<>]+)>$/, '$1'));
+const displayExchange = /^(?:R )?(?:[A-R]{2}\d{2}(?:[A-X]{2})?|R?[+-]\d{2}|RRR|RR73|73)$/;
+
+export function splitFtMessage(text, messageType) {
+  if (messageType === 0) return null;
+  const [first, ...words] = text.trim().split(/\s+/);
+  let destination = first;
+  if (first === 'CQ' && /^(?:[A-Z]{1,4}|\d{3})$/.test(words[0] ?? ''))
+    destination += ' ' + words.shift();
+  const [source, ...remainder] = words;
+  const exchange = remainder.join(' ');
+  if (!['CQ', 'DE', 'QRZ'].includes(first) && !isDisplayCall(first)) return null;
+  if (!source || !isDisplayCall(source)) return null;
+  const contest = [3, 4, 24, 40].includes(messageType);
+  if (exchange && !contest && !displayExchange.test(exchange)) return null;
+  if (!exchange && (messageType === undefined || messageType === -1) && first !== 'CQ') return null;
+  return {destination, source, exchange};
+}
+
 export function parseFtContact(packet) {
+  if (packet.message_type === 0) return null;
   const {message, mode, slot_utc: slot, snr_db: snr, frequency_hz: audioHz} = packet;
   const slotIndex = slot / ftPeriod(mode);
   if (typeof slot !== 'number' || !Number.isSafeInteger(slotIndex) || slot <= 0 ||

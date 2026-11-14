@@ -48,6 +48,12 @@ int main() {
             {{"pluto_ip","999.0.0.1"}},{{"rx_correction_hz","-9223372036854775808"}},{{"lnb_reference_hz","30000000"}},
             {{"ptt","1"}},{{"pluto_rx_hz","1"}},{{"gui_audio_gain","nan"}}}) rejects([&]{qo100::patch_settings(base,patch);});
         rejects([&]{qo100::parse_settings("gui_audio_gain=4\ngui_audio_gain=5\n");});
+        rejects([&]{qo100::patch_settings(base,{{"shelly_ptt_ip","192.168.1.256"}});});
+        auto shelly=qo100::patch_settings(next,{{"shelly_ptt_ip","192.168.10.41"},{"shelly_ptt_external_ft","1"}});
+        require(shelly.shelly_ptt_external_ft && shelly.shelly_ptt_ip=="192.168.10.41","Shelly settings lost");
+        const auto shelly_disabled=qo100::patch_settings(shelly,qo100::parse_settings("shelly_ptt_ip=\n"));
+        require(shelly_disabled.shelly_ptt_ip.empty(),"Could not disable Shelly PTT");
+        next=shelly;
         const auto migrated=qo100::patch_settings(base,{{"rx1_filter_bandwidth_hz","501"},{"rx1_filter_center_hz","700"}});
         require(migrated.rx1_filter.low_hz()==449.5 && migrated.rx1_filter.high_hz()==950.5,"Legacy filter changed");
         next=qo100::patch_settings(next,{{"rx1_filter_low_hz","301"},{"rx1_filter_high_hz","2700"}});

@@ -56,7 +56,7 @@ void Bridge::publish_ft8(const std::string& text) {
         decode.value("mode_revision", 0u) != ft_mode_revision_ ||
         decode.value("mode", "") != ft_mode_name(ft_mode_))
         return;
-    if (ft_logbook_) {
+    if (ft_logbook_ && decode.value("message_type", -1) != 0) {
         const auto message = decode.value("message", "");
         std::smatch match;
         if (std::regex_search(message, match, cq)) {

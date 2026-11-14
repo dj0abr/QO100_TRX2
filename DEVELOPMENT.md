@@ -471,9 +471,10 @@ die bestätigte TX-Frequenz, Paketanzahl, FIFO-Füllstände und Taktkorrektur.
 
 Der eingebundene Treiber besitzt keinen PTT-Steuerbefehl. Seine Erwähnung
 von GPO0/GPO1 betrifft eine externe Schaltung und ist keine Software-Schnittstelle.
-Die GUI-Taste ist deshalb eine **Software-PTT für die Audiodaten**, keine
-Steuerung einer externen Endstufe. Der Hardware-Datenstrom läuft mit Nullsamples
-weiter, solange kein freigegebenes Audio vorliegt.
+Die GUI-Taste steuert die Freigabe der Audiodaten. Bei konfiguriertem Shelly
+schaltet das Backend zusätzlich die [externe Hardware-PTT](docs/webbridge.md#hardware-ptt-mit-shelly).
+Der Pluto-Datenstrom läuft mit Nullsamples weiter, solange kein freigegebenes
+Audio vorliegt.
 
 Die Default-Soundkarte wird nur während PTT als Mono-Eingang mit 48 kHz geöffnet.
 Ein Sinc-Tiefpass reduziert auf 12 kHz. UDP enthält 240 PCM16-Samples je 20 ms,

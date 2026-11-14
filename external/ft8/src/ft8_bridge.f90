@@ -8,10 +8,10 @@ module ft8_bridge
   public :: ft8_decode_slot, ft4_decode_slot
 
   abstract interface
-    subroutine result_callback(message, length, snr, dt, freq, sync, quality, ap, context) bind(C)
+    subroutine result_callback(message, length, snr, dt, freq, sync, quality, ap, message_type, context) bind(C)
       import c_char, c_int, c_float, c_ptr
       character(c_char), intent(in) :: message(*)
-      integer(c_int), value :: length, snr, ap
+      integer(c_int), value :: length, snr, ap, message_type
       real(c_float), value :: dt, freq, sync, quality
       type(c_ptr), value :: context
     end subroutine
@@ -84,25 +84,25 @@ contains
     nullify(sink)
   end subroutine
 
-  subroutine receive4(this, sync, snr, dt, freq, decoded, nap, qual)
+  subroutine receive4(this, sync, snr, dt, freq, decoded, nap, qual, message_type)
     class(ft4_decoder), intent(inout) :: this
     real, intent(in) :: sync, dt, freq, qual
-    integer, intent(in) :: snr, nap
+    integer, intent(in) :: snr, nap, message_type
     character(len=37), intent(in) :: decoded
-    call forward(sync, snr, dt, freq, decoded, nap, qual)
+    call forward(sync, snr, dt, freq, decoded, nap, qual, message_type)
   end subroutine
 
-  subroutine receive(this, sync, snr, dt, freq, decoded, nap, qual)
+  subroutine receive(this, sync, snr, dt, freq, decoded, nap, qual, message_type)
     class(ft8_decoder), intent(inout) :: this
     real, intent(in) :: sync, dt, freq, qual
-    integer, intent(in) :: snr, nap
+    integer, intent(in) :: snr, nap, message_type
     character(len=37), intent(in) :: decoded
-    call forward(sync, snr, dt, freq, decoded, nap, qual)
+    call forward(sync, snr, dt, freq, decoded, nap, qual, message_type)
   end subroutine
 
-  subroutine forward(sync, snr, dt, freq, decoded, nap, qual)
+  subroutine forward(sync, snr, dt, freq, decoded, nap, qual, message_type)
     real, intent(in) :: sync, dt, freq, qual
-    integer, intent(in) :: snr, nap
+    integer, intent(in) :: snr, nap, message_type
     character(len=37), intent(in) :: decoded
     character(c_char) :: message(37)
     integer :: i, n
@@ -110,6 +110,7 @@ contains
     do i = 1, n
       message(i) = decoded(i:i)
     enddo
-    call sink(message,int(n,c_int),int(snr,c_int),dt,freq,sync,qual,int(nap,c_int),sink_context)
+    call sink(message,int(n,c_int),int(snr,c_int),dt,freq,sync,qual,int(nap,c_int), &
+      int(message_type,c_int),sink_context)
   end subroutine
 end module

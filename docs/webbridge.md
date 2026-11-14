@@ -328,6 +328,19 @@ nur RX verstellt. Horizontal auf einer Frequenzanzeige wischen stimmt diesen Kan
 **25-Hz-Schritten** fein ab; rechts erhöht, links verringert die Frequenz.
 Vertikales Wischen scrollt die Seite. Die QSO-Leiste bleibt am unteren Rand erreichbar.
 
+### Hardware-PTT mit Shelly
+
+Unter **Setup → Hardware-PTT** die IPv4-Adresse des Shelly eintragen und
+speichern. Ein leeres Feld deaktiviert die Relaissteuerung. Der Shelly muss
+vom Backend aus per HTTP erreichbar sein. Das Backend bedient Relais 0 mit
+`Switch.Set` und hält es angezogen, solange TX1 oder TX2 sendet.
+
+TX1 und die eingebauten Modi RTTY, SSTV und Waterfall-Text geben das
+Sendesignal 250 ms nach der Relaisbestätigung frei. Die eingebauten Modi
+FT4 und FT8 verwenden ihr Slot-Timing ohne diese Wartezeit. Externe Programme
+lösen die PTT per TX2-Audio aus. Bei WSJT-X oder einem anderen externen
+FT4/FT8-Programm im selben Setup **Externe TX2-Betriebsart → FT4/FT8** wählen.
+
 ### Audio, PTT und Einstellungen
 
 **Audio / Mikrofon** aktiviert bei RX1 die Wiedergabe und fragt beim Bediener die

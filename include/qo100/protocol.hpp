@@ -9,6 +9,7 @@ constexpr size_t header_size = 64, max_datagram = 1200;
 constexpr uint8_t protocol_version = 1, subscribe_type = 1, spectrum_type = 2;
 constexpr uint8_t tune_type = 3, state_type = 4, audio_type = 5;
 constexpr uint8_t tx_control_type = 6, tx_state_type = 7, tx_audio_type = 8;
+constexpr uint16_t tx_ptt_waiting = 3, tx_ptt_failed = 4;
 constexpr uint8_t filter_control_type = 9, filter_state_type = 10;
 constexpr uint8_t compressor_control_type = 11, compressor_state_type = 12;
 constexpr uint8_t loop_control_type = 13, loop_state_type = 14;
@@ -43,7 +44,8 @@ bool parse_filter_control(const uint8_t*, size_t, FilterControl&);
 std::vector<uint8_t> filter_state_packet(uint32_t request, double bandwidth, double center,
     uint32_t epoch, uint32_t session, uint16_t status, bool edges=false);
 struct TxControl { uint32_t request, session; uint64_t frequency; bool enabled; uint32_t stream=3; };
-struct TxAudio { uint32_t epoch, session; uint64_t index, frequency; std::vector<int16_t> samples; uint32_t stream=3; };
+enum class Tx2AudioSource : uint32_t { external=0, internal=1, ft=2 };
+struct TxAudio { uint32_t epoch, session; uint64_t index, frequency; std::vector<int16_t> samples; uint32_t stream=3; Tx2AudioSource source=Tx2AudioSource::external; };
 bool parse_tx_control(const uint8_t*, size_t, TxControl&);
 bool parse_tx_audio(const uint8_t*, size_t, TxAudio&);
 std::vector<uint8_t> tx_state_packet(uint32_t request, uint64_t frequency, uint32_t epoch,

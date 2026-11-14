@@ -750,6 +750,33 @@ html[lang="en"] #ft8-own-log:empty::before { content: "No matching messages yet"
 .ft-waterfall-axis span:first-child { text-align: left; }
 .ft-waterfall-axis span:last-child { text-align: right; }
 .ft-decode-line { display: block; width: 100%; padding: 0 3px; border: 0; border-radius: 3px; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: inherit; background: transparent; }
+.ft8-panel .ft-log-pane .decoder-text { container: ft-log / inline-size; }
+.ft-decode-fields {
+  display: grid;
+  grid-template-columns: 33ch 35ch minmax(0, 1fr);
+  column-gap: .5ch;
+  align-items: baseline;
+}
+.ft-decode-info { white-space: pre; }
+.ft-message-body {
+  display: grid;
+  grid-template-columns: 13ch 13ch 9ch;
+  align-items: baseline;
+}
+.ft-country { display: flex; align-items: baseline; gap: .55ch; min-width: 0; white-space: normal; }
+.ft-country-flag { flex: none; width: 18px; height: 18px; align-self: flex-start; background-image: url('./dxcc-flags.png'); background-repeat: no-repeat; }
+.ft-country-name { min-width: 0; overflow-wrap: normal; }
+@container ft-log (width < 77ch) {
+  .ft-decode-fields { grid-template-columns: 33ch minmax(35ch, 1fr); }
+  .ft-country { grid-column: 2; }
+  .ft-decode-fields:has(.ft-country) { padding-bottom: 2px; }
+}
+@container ft-log (width < 69ch) {
+  .ft-decode-fields { grid-template-columns: minmax(0, 1fr); }
+  .ft-decode-info { white-space: pre-wrap; }
+  .ft-message-body { grid-template-columns: minmax(0, 13fr) minmax(0, 13fr) minmax(0, 9fr); max-width: 35ch; }
+  .ft-country { grid-column: 1; }
+}
 button.ft-decode-line:enabled { color: var(--rx2); cursor: pointer; }
 button.ft-decode-line:enabled:hover, button.ft-decode-line:focus-visible { background: var(--panel-raised); }
 button.ft-decode-line:disabled { opacity: 1; }

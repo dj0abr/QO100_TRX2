@@ -103,6 +103,8 @@ Sample-Indizes erkennen Verlust, Duplikate und Reihenfolge. Für die Soundkarte:
 | **7 TX_STATE** ← | 3 | `id=Request`, `index=TX-Epoche`, `frequency=bestätigt`, `rate=12000`, `format=0 OK / 1 Frequenz ungültig / 2 wartet`; `first=PTT`, `size=Audio-FIFO-Samples`, `count=Pluto-FIFO-Blöcke`, `total=vorzeichenbehaftete int32 Taktkorrektur in ppm` |
 | **8 TX_AUDIO** → | 3 | Wie AUDIO, aber `id=bestätigte TX-Epoche`, `timestamp=0`, `frequency=bestätigter TX-Träger`, `session=aktuell`; genau 240 PCM16-Samples, `index=0,240,480,…` |
 
+Mit konfiguriertem Shelly meldet TX1 während der Relaisbestätigung und des
+250-ms-Vorlaufs vorübergehend Status 3. Status 4 meldet einen PTT-Fehler.
 PTT nur nach Benutzeraktion einschalten. **Erst nach passendem OK mit `first=1` Audio senden**, in 20-ms-Blöcken; Index bei neuer TX-Epoche wieder 0. `TX_CONTROL` mindestens alle **500 ms** wiederholen, auch während Audio fließt. Nach **1,5 s** ohne gültiges Control fällt PTT ab; erneutes Einschalten benötigt eine **neue Request-ID**.
 Keine Audiopakete seit 200 ms → Stille; kurze Paketlücken werden ebenfalls mit Stille gefüllt. RX und TX sind unabhängig. Hardwareänderungen erzwingen PTT aus.
 TX-USB ist im Backend fest auf **100–3000 Hz** begrenzt (nominelle Filtergrenzen,
@@ -194,7 +196,10 @@ RX5-Audio bleibt 12 kHz/PCM16/240 Samples, ohne zusätzlichen Zoom oder Browser-
 ## TX2 und gemeinsame IQ-Ausgabe
 
 TX2 verwendet `TX_CONTROL`/`TX_STATE`/`TX_AUDIO` mit Stream **7**. Frequenz-,
-Session-, Epochen-, PCM- und Sampleindexfelder entsprechen TX1. Bei TX2 bedeutet
+Session-, Epochen-, PCM- und Sampleindexfelder entsprechen TX1. In TX2-`TX_AUDIO`
+kennzeichnet Offset 44 (4 Byte) die Quelle für die Hardware-PTT: 0 externes
+Audio, 1 eingebauter DigiMode mit Vorlauf, 2 eingebautes FT4/FT8 ohne Vorlauf.
+Bei TX2 bedeutet
 `TX_STATE.first` (Offset 48) **Audioweg bereit**, unabhängig von einer PTT.
 `TX_CONTROL.format=0` stimmt TX2 ab; `format=1` fordert bei einem Adapterneustart
 zusätzlich eine neue Audio-Epoche an. Wiederholte Request-IDs lösen keinen weiteren

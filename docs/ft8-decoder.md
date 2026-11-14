@@ -16,6 +16,12 @@ aktiv ist, sammelt der Decoder UTC-synchrones Audio. Kurze Audiolücken bis 100 
 ersetzt, insgesamt höchstens 200 ms pro Slot. Damit bleibt die Position der
 FT8-Symbole im Slot erhalten. RX3 läuft parallel als Festfrequenzmonitor.
 
+In beiden Empfangslisten stehen Zielrufzeichen oder CQ, Senderufzeichen und
+QTH-Locator, Rapport oder Abschluss in ausgerichteten Spalten. Bei bekanntem
+Senderufzeichen ergänzt die Weboberfläche das Land und eine Flagge. Die
+Zuordnung verwendet eine lokale DXCC-Liste mit Präfixen und Sonderrufzeichen.
+Der Tooltip zeigt die DXCC-Entität. Freitext erscheint als durchgehende Zeile.
+
 Zum Senden RX2 und TX2 abstimmen. Das Feld **Audio (Hz)** gibt den Abstand des
 untersten Sendetons vom eingestellten USB-Träger an. Eine Nachricht,
 Audiofrequenz, Pegel und Slotfolge auswählen und **Einmal senden** drücken.

@@ -90,6 +90,7 @@ def main():
         feed_ft8(0, early_end)
         result = owner.wait(lambda p: isinstance(p, dict) and p.get('type') == 'ft8_decode', timeout=15)
         assert result['message'] == message and result['slot_utc'] == slot and result['mode'] == 'FT8', result
+        assert result['message_type'] == 8, result
         assert result['dial_hz'] == state['rx']['2']['frequency_hz'] and abs(result['frequency_hz'] - 1500) < 1
         feed_ft8(early_end, 180000)
         wait(lambda: '"samples":180000' in (root / 'rx2.log').read_text(), timeout=15)
@@ -144,7 +145,8 @@ def main():
         assert 8100 < max(samples) < 8200, 'Wrong transmit gain'
         raw.write_bytes(bytes(12000) + struct.pack(f'<{len(samples)}h', *samples))
         output = subprocess.check_output([core, '--format', 's16le', raw], text=True, timeout=8)
-        assert any(json.loads(line).get('message') == free_text for line in output.splitlines()), output
+        assert any((row.get('message'), row.get('message_type')) == (free_text, 0)
+                   for row in map(json.loads, output.splitlines())), output
         assert request(viewer, 'ft_mode', 6, mode='FT4')['code'] == 'read_only'
         assert request(owner, 'ft_mode', 7, mode='FT4')['status'] == 0
         owner.state(lambda s: s.get('ft_mode') == 'FT4')
@@ -167,6 +169,7 @@ def main():
                                 and p.get('mode') == 'FT4' and p['message'] == 'KB0VHA KA1YQC R 539 MA',
                                 timeout=15)
         assert ft4_result['slot_utc'] == ft4_slot and ft4_result['utc'].endswith('.5'), ft4_result
+        assert ft4_result['message_type'] == 24, ft4_result
 
         next_slot = int(time.time() // 7.5) + 1
         target = next_slot * 7.5
@@ -185,7 +188,8 @@ def main():
         samples = [sample for p in ft4_packets for sample in struct.unpack('!240h', p[64:])]
         raw.write_bytes((bytes(12000) + struct.pack(f'<{len(samples)}h', *samples)).ljust(72576 * 2, bytes(1)))
         output = subprocess.check_output([core, '--mode', 'FT4', '--format', 's16le', raw], text=True, timeout=8)
-        assert any(json.loads(line).get('message') == free_text for line in output.splitlines()), output
+        assert any((row.get('message'), row.get('message_type')) == (free_text, 0)
+                   for row in map(json.loads, output.splitlines())), output
         assert request(owner, 'ft_mode', 10, mode='FT8')['status'] == 0
         owner.state(lambda s: s.get('ft_mode') == 'FT8' and s['ft8_tx'].get('phase') == 'idle')
         # Past the acceptance deadline, keep parity and use the next eligible slot.

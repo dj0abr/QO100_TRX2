@@ -18,7 +18,8 @@ public:
     TxChannel(const TxChannel&) = delete;
     TxChannel& operator=(const TxChannel&) = delete;
     void reset(int64_t offset);
-    bool add(uint64_t index, const std::vector<int16_t>& samples);
+    // TX2 may buffer additional PCM while its hardware PTT is settling.
+    bool add(uint64_t index, const std::vector<int16_t>& samples, size_t max_buffer = capacity);
     std::vector<std::complex<float>> render(bool audio_recent);
     // Empty means known-silent IQ; caller still advances the hardware block clock.
     std::vector<std::complex<float>> render_active(bool audio_recent);

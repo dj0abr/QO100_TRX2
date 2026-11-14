@@ -63,8 +63,9 @@ add_library(qo100_core src/dsp_workers.cpp src/dsp.cpp src/config.cpp src/spectr
 target_include_directories(qo100_core PUBLIC include)
 target_link_libraries(qo100_core PUBLIC Threads::Threads qo100_liquid qo100_speex PkgConfig::FFTW PkgConfig::SAMPLERATE)
 target_compile_options(qo100_core PRIVATE -Wall -Wextra -Wpedantic)
-add_executable(qo100_backend src/main.cpp src/pluto_process.cpp)
-target_link_libraries(qo100_backend PRIVATE qo100_core Threads::Threads)
+pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
+add_executable(qo100_backend src/main.cpp src/pluto_process.cpp src/shelly_ptt.cpp)
+target_link_libraries(qo100_backend PRIVATE qo100_core Threads::Threads PkgConfig::CURL)
 target_compile_options(qo100_backend PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_definitions(qo100_backend PRIVATE
     QO100_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/backend.conf")

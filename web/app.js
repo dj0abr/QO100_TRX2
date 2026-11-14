@@ -8,7 +8,8 @@ import {SstvTxView} from './sstv-tx.js';
 import {RttyPresets, RttyView} from './rtty.js';
 import {Rx2Waterfall} from './rx2-waterfall.js';
 import {drawWaterfallPreview, waterfallRaster} from './waterfall-tx.js';
-import {canStartFtAuto, ftCall, ftGrid, ftPeriod, ftReply, nextFtAutoStep, parseFtContact} from './ft-qso.js';
+import {canStartFtAuto, ftCall, ftGrid, ftPeriod, ftReply, nextFtAutoStep, parseFtContact, splitFtMessage} from './ft-qso.js';
+import {countryFlagPosition, dxccForCall} from './dxcc.js';
 import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
 
 const $ = id => document.getElementById(id);
@@ -480,6 +481,7 @@ function startPtt() {
   const intent = ++pttIntent;
   command('tx', {frequency_hz: state.tx.frequency_hz, ptt: true}).then(answer => {
     if (intent !== pttIntent || !pttHeld) return;
+    if (answer.status === 4) throw fail(t('Der Shelly hat die Hardware-PTT nicht bestätigt.', 'Shelly did not confirm hardware PTT.'));
     if (answer.status !== 0) throw fail(`Sendefreigabe abgewiesen (Status ${answer.status}).`);
     pttAcked = true; send({type: 'state'});
   }).catch(error => { if (intent === pttIntent) { stopPtt(); report(error); } });
@@ -1014,6 +1016,53 @@ function appendFtOwnLine(entry, own) {
   line.removeAttribute('data-cq-call');
   appendFtLine(ftOwnLog, {...entry, line});
 }
+const ftRegionNames = {
+  de: new Intl.DisplayNames('de', {type: 'region', fallback: 'none'}),
+  en: new Intl.DisplayNames('en', {type: 'region', fallback: 'none'}),
+};
+function updateFtCountry(node) {
+  const {region, entity} = node.dataset;
+  node.querySelector('.ft-country-name').textContent = (region && ftRegionNames[language].of(region)) || entity;
+}
+function ftDecodeFields(line, metadata, text, fields) {
+  if (!fields) {
+    line.textContent = metadata + text;
+    return;
+  }
+  line.classList.add('ft-decode-fields');
+  line.dataset.message = text;
+  const info = document.createElement('span');
+  info.className = 'ft-decode-info';
+  info.textContent = metadata;
+  const body = document.createElement('span');
+  body.className = 'ft-message-body';
+  for (const [value, trailing] of [[fields.destination, ' '], [fields.source, fields.exchange ? ' ' : ''], [fields.exchange, '']]) {
+    const column = document.createElement('span');
+    column.textContent = value + trailing;
+    body.append(column);
+  }
+  line.append(info, body);
+  const location = dxccForCall(fields.source);
+  if (!location) return;
+  const country = document.createElement('span');
+  country.className = 'ft-country';
+  country.dataset.region = location.code;
+  country.dataset.entity = location.entity;
+  country.title = location.entity;
+  const position = countryFlagPosition(location.code);
+  if (position) {
+    const flag = document.createElement('span');
+    flag.className = 'ft-country-flag';
+    flag.setAttribute('aria-hidden', 'true');
+    flag.style.backgroundPosition = position;
+    country.append(flag);
+  }
+  const name = document.createElement('span');
+  name.className = 'ft-country-name';
+  country.append(name);
+  updateFtCountry(country);
+  line.append(country);
+}
 function appendFt8(message) {
   const {utc, snr_db, dt_s, frequency_hz, message: text} = message;
   if (typeof utc !== 'string' || typeof text !== 'string' ||
@@ -1021,7 +1070,8 @@ function appendFt8(message) {
   const contact = parseFtContact(message);
   const line = document.createElement(contact ? 'button' : 'div');
   line.className = 'ft-decode-line';
-  line.textContent = `${utc} ${String(snr_db).padStart(3)} dB ${dt_s.toFixed(2).padStart(5)} s ${frequency_hz.toFixed(0).padStart(4)} Hz  ${text}`;
+  const metadata = `${utc} ${String(snr_db).padStart(3)} dB ${dt_s.toFixed(2).padStart(5)} s ${frequency_hz.toFixed(0).padStart(4)} Hz  `;
+  ftDecodeFields(line, metadata, text, splitFtMessage(text, message.message_type));
   if (contact) {
     line.type = 'button';
     line.disabled = $('ft-cq').disabled || !canChooseFtContact(contact);
@@ -1835,6 +1885,7 @@ $('theme').onchange = () => window.QO100Theme.set($('theme').checked ? 'light' :
 $('language').value = languagePreference();
 $('language').onchange = () => {
   setLanguagePreference($('language').value);
+  document.querySelectorAll('.ft-country').forEach(updateFtCountry);
   txVolumeChanged(false);
   sstv.render();
   views.forEach(view => view.setLanguage(language));

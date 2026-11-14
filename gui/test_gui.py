@@ -247,7 +247,7 @@ class Receiver:
                     with self.tx_lock:
                         if (len(packet) == 64 and fields[3] == 64 and fields[4] == 3 and
                             fields[5] == self.tx_command[0] and fields[15] == self.tx_session):
-                            self.tx_error = {0:"",1:"TX frequency outside capture window",2:"Pluto wartet / Umschaltung läuft"}.get(fields[13],"TX error")
+                            self.tx_error = {0:"",1:"TX frequency outside capture window",2:"Pluto wartet / Umschaltung läuft",3:"Hardware-PTT wartet",4:"Shelly-PTT nicht bestätigt"}.get(fields[13],"TX error")
                             identity = (fields[15], fields[7])
                             if identity != self.tx_identity:
                                 self.tx_index = 0

@@ -118,6 +118,8 @@ void set_config_value(Config& c,const std::string& k,const std::string& v) {
         }
         else if (k=="pluto_connection") c.pluto_connection=v;
         else if (k=="pluto_ip") c.pluto_ip=v;
+        else if (k=="shelly_ptt_ip") c.shelly_ptt_ip=v;
+        else if (k=="shelly_ptt_external_ft") c.shelly_ptt_external_ft=enabled(v);
         else if (k=="lnb_reference_hz") c.lnb_reference_hz=integer(v);
         else if (k=="rx_correction_hz") c.rx_correction_hz=signed_integer(v);
         else if (k=="tx_correction_hz") c.tx_correction_hz=signed_integer(v);
@@ -140,6 +142,8 @@ void Config::validate() const {
     if (inet_pton(AF_INET, gui_bind.c_str(), &addr) != 1) throw std::runtime_error("gui_bind must be an IPv4 address");
     if(pluto_connection!="network" && pluto_connection!="usb") throw std::runtime_error("pluto_connection must be network or usb");
     if(inet_pton(AF_INET,pluto_ip.c_str(),&addr)!=1) throw std::runtime_error("pluto_ip must be an IPv4 address");
+    if(!shelly_ptt_ip.empty() && inet_pton(AF_INET,shelly_ptt_ip.c_str(),&addr)!=1)
+        throw std::runtime_error("Shelly PTT requires an IPv4 address or an empty field");
     if(!std::isfinite(gui_audio_gain) || gui_audio_gain<0 || gui_audio_gain>20 ||
        !std::isfinite(gui_display_floor) || gui_display_floor < -160 || gui_display_floor > -40 ||
        gui_wheel_step_hz<1 || gui_wheel_step_hz>1000 || gui_nr_strength<1 || gui_nr_strength>100)
@@ -188,7 +192,7 @@ Config load_config(const std::filesystem::path& path) {
         const auto eq = line.find('=');
         if (eq == std::string::npos) throw std::runtime_error("Missing '=' at config line " + std::to_string(line_no));
         const auto k = trim(line.substr(0, eq)), v = trim(line.substr(eq + 1));
-        if (v.empty() || seen[k]) throw std::runtime_error("Empty or duplicate config key: " + k);
+        if ((v.empty() && k!="shelly_ptt_ip") || seen[k]) throw std::runtime_error("Empty or duplicate config key: " + k);
         seen[k] = true;
         set_config_value(c,k,v);
     }

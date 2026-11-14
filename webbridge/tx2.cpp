@@ -1,4 +1,5 @@
 #include "bridge.hpp"
+#include "qo100/protocol.hpp"
 
 #include <cmath>
 
@@ -175,6 +176,8 @@ void Bridge::send_tx2_audio(Tx2Job& job, const audio::Pcm& pcm) {
     put(packet, 24, job.sample_index, 8);
     put(packet, 32, job.frequency, 8);
     put(packet, 40, audio::sample_rate, 4);
+    if (!state_["settings"].value("shelly_ptt_ip", std::string{}).empty())
+        put(packet, 44, uint32_t(job.mode == Tx2Mode::ft8 ? qo100::Tx2AudioSource::ft : qo100::Tx2AudioSource::internal), 4);
     put(packet, 52, pcm.size(), 2);
     put(packet, 54, 2, 2);
     put(packet, 56, pcm.size(), 4);
@@ -272,7 +275,9 @@ void Bridge::step_tx2() {
     send_tx2_audio(job, block->pcm);
     if (block->last) {
         job.phase = Tx2Job::Phase::draining;
-        schedule_tx2(now + Milliseconds(220));
+        const bool delayed = job.mode != Tx2Mode::ft8 &&
+            !state_["settings"].value("shelly_ptt_ip", std::string{}).empty();
+        schedule_tx2(now + (delayed ? Milliseconds(720) : Milliseconds(220)));
     } else {
         job.next_audio += audio_period;
         schedule_tx2(job.next_audio);
