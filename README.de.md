@@ -46,11 +46,11 @@ sudo apt update
 sudo apt install -y git ca-certificates
 git clone https://github.com/dj0abr/QO100_TRX2.git
 cd QO100_TRX2
-./build_all.sh --install-deps
+./build_all.sh
 ```
 
 Das Skript installiert die benötigten Pakete und baut alle Programme. Auf einem SBC werden fehlende Bibliotheken automatisch für dessen Prozessor gebaut.
-Für spätere Builds genügt `./build_all.sh`.
+Die Paketinstallation läuft bei jedem Aufruf.
 
 Auch die ADI-Bibliotheken **libiio** und **libad9361** werden über die Debian-Pakete
 `libiio-dev` und `libad9361-dev` automatisch installiert; der mitgelieferte Pluto-Treiber
@@ -74,7 +74,7 @@ RX1/TX1 im Browser und die drei Monitoringdecoder benötigen keine Soundkarte in
 ### Pluto über Ethernet
 
 Auch bei Ethernet werden **libiio und libad9361** auf dem Rechner mit dem Backend
-benötigt. `./build_all.sh --install-deps` erledigt das vollständig. libiio verbindet
+benötigt. `./build_all.sh` erledigt das vollständig. libiio verbindet
 sich über `ip:PLUTO-IP` mit dem IIO-Dienst der Pluto-Firmware; in der Debian-VM ist
 dafür kein zusätzlicher Pluto-Kernel-Treiber und keine USB-Durchreichung erforderlich.
 Die Pluto-IP muss aus der VM erreichbar sein.
@@ -119,6 +119,36 @@ Die Bedienoberfläche lässt sich auch manuell im Browser öffnen:
 **Mikrofon und Audiowiedergabe benötigen einen sicheren Browser-Kontext:** HTTPS,
 `localhost` oder die unten beschriebene Browser-Ausnahme für das Heimnetz.
 Das Terminal offen lassen. **Strg+C** beendet alle Programme.
+
+### Automatisch beim Booten starten
+
+Auf einem Debian-Rechner ohne lokalen Browser kann systemd den Backend-Verbund
+beim Booten starten. Der Dienst startet auch den Webadapter und die
+eingeschalteten Decoder. Die virtuelle Audioschnittstelle für externe
+DigiMode-Programme wie WSJT-X und fldigi bleibt im Dienst deaktiviert.
+Die eingebauten WebGUI-DigiModes sind verfügbar.
+
+Das Projekt zuerst mit `./build_all.sh` bauen und einen manuell laufenden
+`start_all.sh`-Verbund beenden. Im Projektverzeichnis als normaler Benutzer
+ausführen:
+
+```sh
+./install_service.sh
+```
+
+Das Skript verwendet den aufrufenden Benutzer und den Pfad des Checkouts,
+richtet den Autostart ein und startet den Dienst. Der Name nach `@` ist der
+Linux-Benutzer, zum Beispiel `kurt`.
+
+```sh
+systemctl status qo100-trx2@kurt.service
+journalctl -u qo100-trx2@kurt.service -b
+```
+
+Die WebGUI auf einem anderen Rechner unter `http://<Server-IP>:8080/`
+oder über den HTTPS-Reverse-Proxy öffnen. Nach einem Neubau lädt
+`sudo systemctl restart qo100-trx2@kurt.service` die neuen Programme.
+Die einzelnen Programmlogs stehen unter `build/run/`.
 
 ### Audio von einem anderen Gerät im Heimnetz
 

@@ -1,0 +1,19 @@
+[Unit]
+Description=QO100_TRX2 transceiver (%I)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=%I
+WorkingDirectory=/home/%I/QO100_TRX2
+ExecStart=/bin/bash ./start_all.sh --no-digital-audio
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10s
+# The supervisor stops its children and gives the backend time to release PTT.
+KillMode=mixed
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

@@ -3,7 +3,7 @@
 `./build_all.sh` baut auch `qo100_digital_audio`. Zusätzliche Build-Abhängigkeit:
 `libpulse-dev`; zur Laufzeit `pulseaudio-utils` und ein erreichbarer PulseAudio-
 Server (oder ein PipeWire-Server mit PulseAudio-Kompatibilität).
-`./build_all.sh --install-deps` installiert die benötigten Pakete.
+`./build_all.sh` installiert die benötigten Pakete.
 
 Auf einem Minimalsystem ergänzt das Skript auch den PulseAudio-Server, falls weder
 PulseAudio noch `pipewire-pulse` installiert ist. `pulseaudio-utils` allein enthält

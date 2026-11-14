@@ -254,7 +254,9 @@
               </header>
               <div class="rtty-fields">
                 <label for="rtty-rx-text" data-en="RX text">RX-Text</label>
-                <textarea id="rtty-rx-text" readonly spellcheck="false"></textarea>
+                <textarea id="rtty-rx-text" readonly spellcheck="false"
+                  title="Rufzeichen doppelklicken, um es als anderes Rufzeichen zu übernehmen"
+                  data-en-title="Double-click a callsign to use it as the other station's callsign"></textarea>
                 <label for="rtty-tx-text" data-en="TX text">TX-Text</label>
                 <textarea id="rtty-tx-text" readonly spellcheck="false" autocomplete="off" autocapitalize="off"
                   aria-describedby="rtty-error"></textarea>
@@ -272,8 +274,8 @@
                   </div>
                   <div class="rtty-waterfall">
                     <canvas id="rtty-waterfall" width="800" height="40" tabindex="0" aria-keyshortcuts="ArrowUp ArrowDown"
-                      aria-label="RTTY-Wasserfall. RX2 mit Mausrad oder Pfeiltasten in 10-Hz-Schritten abstimmen."
-                      data-en-aria-label="RTTY waterfall. Tune RX2 in 10 Hz steps with the mouse wheel or arrow keys."
+                      aria-label="RTTY-Wasserfall. RX2 mit Mausrad, Pfeiltasten oder horizontalem Wischen in 10-Hz-Schritten abstimmen."
+                      data-en-aria-label="RTTY waterfall. Tune RX2 in 10 Hz steps with the mouse wheel, arrow keys or a horizontal swipe."
                       title="RX2 ±10 Hz pro Mausradschritt" data-en-title="RX2 ±10 Hz per mouse wheel step"></canvas>
                     <div class="rtty-tone"><span></span></div>
                     <div class="rtty-tone"><span></span></div>
@@ -326,7 +328,7 @@
                   <canvas id="sstv-image" class="sstv-picture" width="320" height="256" aria-label="Empfangenes SSTV-Bild" data-en-aria-label="Received SSTV image"></canvas>
                   <div class="sstv-waterfall">
                     <canvas id="sstv-waterfall" width="342" height="48" tabindex="0" aria-keyshortcuts="ArrowUp ArrowDown"
-                      aria-label="RX2-Audio-Wasserfall, Feinabstimmung mit Mausrad oder Pfeiltasten" data-en-aria-label="RX2 audio waterfall, fine tune with mouse wheel or arrow keys"
+                      aria-label="RX2-Audio-Wasserfall, Feinabstimmung mit Mausrad, Pfeiltasten oder horizontalem Wischen" data-en-aria-label="RX2 audio waterfall, fine tune with the mouse wheel, arrow keys or a horizontal swipe"
                       title="RX2 ±10 Hz per Mausrad · Sync 1200 Hz · Bild 1500–2300 Hz" data-en-title="RX2 ±10 Hz with mouse wheel · Sync 1200 Hz · Image 1500–2300 Hz"></canvas>
                     <div class="sstv-picture-band" aria-hidden="true"></div>
                     <div class="sstv-sync-reference" aria-hidden="true"></div>

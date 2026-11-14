@@ -4,4 +4,6 @@ QO100_TRX2 is a browser-operated software transceiver for the QO-100 narrowband 
 
 **[Project wiki](https://github.com/dj0abr/QO100_TRX2/wiki/Home)** · [Wiki auf Deutsch](https://github.com/dj0abr/QO100_TRX2/wiki/Deutsch)
 
+[Start the backend at boot with systemd](README.de.md#automatisch-beim-booten-starten) (German)
+
 ![QO100_TRX2 WebGUI](docs/WebGUI.png)

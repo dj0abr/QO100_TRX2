@@ -164,7 +164,9 @@ TX2-Audiopuffer. Der Sendeauftrag fordert ausschließlich TX2 an.
 
 ### RTTY über RX2 und TX2
 
-Die RTTY-Ansicht zeigt den auf RX2 empfangenen Text. **Start** startet
+Die RTTY-Ansicht zeigt den auf RX2 empfangenen Text. Ein Doppelklick auf ein
+Rufzeichen im RX-Text übernimmt es als **Anderes Rufzeichen** für die
+RTTY-Textvorlagen. **Start** startet
 die Sendung über TX2 und setzt den Fokus in das TX-Feld. Nach einem kurzen Mark-Vorlauf
 sendet TX2 bei leerer Warteschlange fortlaufend das ITA2-Umschaltzeichen LTRS
 (RTTY-Diddles). So sind in den Tipp-Pausen Mark und Space im Wasserfall
@@ -330,8 +332,10 @@ Programme. Die Lautstärke im Browser verändert den externen Audioweg nicht.
 
 Mobil bestimmt ein Umschalter für beide Paare, ob Tippen RX und TX gemeinsam oder
 nur RX verstellt. Horizontal auf einer Frequenzanzeige wischen stimmt diesen Kanal in
-**25-Hz-Schritten** fein ab; rechts erhöht, links verringert die Frequenz.
-Vertikales Wischen scrollt die Seite. Die QSO-Leiste bleibt am unteren Rand erreichbar.
+**25-Hz-Schritten** fein ab. Horizontal im Wasserfall wischen stimmt nur den
+Empfänger ab: **250 Hz** pro Schritt im Fullband, **25 Hz** im Zoom und
+**10 Hz** für RX2 im SSTV- und RTTY-Audiowasserfall. Rechts erhöht, links
+verringert die Frequenz. Vertikales Wischen scrollt die Seite. Die QSO-Leiste bleibt am unteren Rand erreichbar.
 
 ### Hardware-PTT mit Shelly
 

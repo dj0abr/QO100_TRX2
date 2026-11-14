@@ -92,6 +92,17 @@ export class RttyView {
   show(visible) {
     this.panel.hidden = !visible;
   }
+  selectedCallsign() {
+    const {value, selectionStart, selectionEnd} = this.rx;
+    if (!/^[A-Z0-9]+(?:\/[A-Z0-9]+)*$/i.test(value.slice(selectionStart, selectionEnd))) return '';
+    // A native double-click may select only one part of a portable call.
+    let start = selectionStart, end = selectionEnd;
+    while (start > 0 && /[A-Z0-9/]/i.test(value[start - 1])) start--;
+    while (end < value.length && /[A-Z0-9/]/i.test(value[end])) end++;
+    const call = value.slice(start, end).toUpperCase();
+    if (call.length < 3 || call.length > 24 || !/\d[A-Z]/.test(call)) return '';
+    return /^[A-Z0-9]+(?:\/[A-Z0-9]+)*$/.test(call) ? call : '';
+  }
   resetRx() { this.afterCr = false; }
   clearRx() { this.rx.value = ''; this.resetRx(); }
 

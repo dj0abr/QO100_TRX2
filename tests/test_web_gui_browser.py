@@ -184,12 +184,12 @@ def main():
                 return count;
             })''')
             assert all(count>100 for count in retained),retained
-        def swipe(selector, distance=72):
+        def swipe(selector, distance=72, vertical=0):
             bounds=execute('const r=document.querySelector(arguments[0]).getBoundingClientRect();return {x:r.x+r.width*.35,y:r.y+r.height*.5}',selector)
             x,y=bounds['x'],bounds['y']
             cdp('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':x,'y':y}]})
             for i in range(1,7):
-                cdp('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':x+distance*i/6,'y':y}]})
+                cdp('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':x+distance*i/6,'y':y+vertical*i/6}]})
             cdp('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
         def save_screenshot(path):
             path.parent.mkdir(parents=True,exist_ok=True)
@@ -724,10 +724,18 @@ def main():
             assert execute("""const c=document.querySelector('.rtty-bottom').getBoundingClientRect(),
                 w=document.querySelector('.rtty-waterfall').getBoundingClientRect();
                 return w.left>=c.left+c.width/2 && Math.abs(w.width-(c.width-8)/2)<1;""")
+            execute('''const rx = document.getElementById('rtty-rx-text');
+                rx.value = '(dk1xyz/p) CQ';
+                rx.setSelectionRange(1, 7); // Browsers may select only the part before the slash.
+                rx.dispatchEvent(new MouseEvent('dblclick', {bubbles:true}));
+                rx.setSelectionRange(11, 13);
+                rx.dispatchEvent(new MouseEvent('dblclick', {bubbles:true}));
+                rx.value = '';''')
             click('#rtty-preset-edit')
             assert execute('return document.querySelectorAll("#rtty-preset-editor textarea").length===5')
+            assert execute('return document.getElementById("rtty-other-call").value') == 'DK1XYZ/P'
+            assert execute('return JSON.parse(localStorage.getItem("qo100.rttyPresets")).fields[1]') == 'DK1XYZ/P'
             changed('#rtty-own-call','dl0abc')
-            changed('#rtty-other-call','dk1xyz')
             changed('#rtty-preset-text-2','$ DE&%§X')
             click('#rtty-preset-editor .primary-button')
             changed('#rtty-preset-slot',2)
@@ -735,9 +743,10 @@ def main():
             observer.messages.clear()
             click('#rtty-preset-send')
             sending=snapshot(lambda s:s['rtty_tx']['phase']=='sending')
-            wait(lambda:execute('return document.getElementById("rtty-tx-text").value')=='DK1XYZ DE\nDL0ABC')
+            wait(lambda:execute('return document.getElementById("rtty-tx-text").value')=='DK1XYZ/P DE\nDL0ABC')
             select_view('3')
-            snapshot(lambda s:s['rtty_tx'].get('result')=='complete' and s['rtty_tx']['tx_id']==sending['rtty_tx']['tx_id'])
+            observer.state(lambda s:s['rtty_tx'].get('result')=='complete' and
+                           s['rtty_tx']['tx_id']==sending['rtty_tx']['tx_id'], timeout=10)
             select_view('rtty')
             wait(lambda:execute('return document.getElementById("rtty-tx-toggle").textContent==="Start" && !document.getElementById("rtty-tx-toggle").disabled'))
             observer.messages.clear()
@@ -1316,6 +1325,21 @@ def main():
             after=expect_frequency(2,mobile_rx2)
             snapshot(lambda s:s.get('tx2',{}).get('frequency_hz')==before_tx+150+mobile_rx2-(target+150))
             wait(zoom_follows_rx)
+            wait(lambda: hz('rx2') == mobile_rx2)
+            swipe_tx = hz('tx')
+            for selector, distance, delta in (('#wide', 72, 1500), ('#zoom', -72, -150)):
+                execute('document.querySelector(arguments[0]).scrollIntoView({block:"center"})', selector)
+                swipe(selector, distance)
+                mobile_rx2 += delta
+                after = expect_frequency(2, mobile_rx2)
+                assert after['tx2']['frequency_hz'] == swipe_tx
+                wait(lambda: hz('rx2') == mobile_rx2)
+
+            execute('document.getElementById("wide").scrollIntoView({block:"center"})')
+            scroll = execute('return scrollY')
+            swipe('#wide', distance=0, vertical=-72)
+            wait(lambda: execute('return scrollY') > scroll)
+            assert hz('rx2') == mobile_rx2 and hz('tx') == swipe_tx
             save_screenshot(capture.with_name(capture.stem+'-rx2-zoom-mobile.png'))
             click('#frequency1');click('#touch-rx');before_tx=hz('tx')
             ratio=plot('#wide-spectrum',.54,touch=True);target=round(int(initial['settings']['rx_center_hz'])+(ratio-.5)*600000)

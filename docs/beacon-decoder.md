@@ -1,6 +1,6 @@
 # PSK-Bake über RX4
 
-Bauen: `./build_all.sh --install-deps`. Der produktive PSK-Decoder ist ein
+Bauen: `./build_all.sh`. Der produktive PSK-Decoder ist ein
 natives C++-Programm; NumPy/SciPy werden für diesen Empfangsprozess nicht benötigt.
 Dann den bisherigen Stack beenden und starten:
 

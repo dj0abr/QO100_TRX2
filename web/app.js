@@ -223,7 +223,7 @@ function selectReceiver(channel) {
   $('touch-rx').classList.toggle('chosen', !together);
   $('touch-rx').setAttribute('aria-pressed', String(!together));
   $('wide-help').textContent = t(`Links: RX${channel} + TX${channel} · Rechts: nur RX${channel} · Strg + Rad: beide · Shift + Rad: TX${channel}`, `Left: RX${channel} + TX${channel} · Right: RX${channel} only · Ctrl + Wheel: both · Shift + Wheel: TX${channel}`);
-  $('touch-help').textContent = t(`Tippen: ${together ? `RX${channel} + TX${channel}` : `nur RX${channel}`}`, `Tap: ${together ? `RX${channel} + TX${channel}` : `RX${channel} only`}`);
+  $('touch-help').textContent = t(`Tippen: ${together ? `RX${channel} + TX${channel}` : `nur RX${channel}`} · Wischen: RX ±250 Hz`, `Tap: ${together ? `RX${channel} + TX${channel}` : `RX${channel} only`} · Swipe: RX ±250 Hz`);
   $('tx-label').textContent = `TX${channel}`;
   $('rx1-filter-controls').hidden = channel === 2; $('rx2-filter-note').hidden = channel === 1;
   $('voice-compressor-control').hidden = channel === 2; $('digital-audio-control').hidden = channel === 1;
@@ -329,7 +329,7 @@ function renderZoomLabels() {
   $('zoom-choice-label').textContent = `${rx}-Zoom`;
   $('zoom-filter').textContent = selected === 1 ? `USB · ${((high - low) / 1000).toFixed(1)} kHz` : 'RX2 · USB';
   $('filter-caption').textContent = selected === 1 ? `RX1 · Filter ${low}–${high} Hz` : 'RX2 · USB';
-  $('zoom-mobile-caption').textContent = `${rx}-Zoom · 60 kHz`;
+  $('zoom-mobile-caption').textContent = `${rx}-Zoom · 60 kHz · ${t('Wischen', 'Swipe')} ±25 Hz`;
   const view = views[1];
   view.empty.textContent = t(`Warte auf ${rx}-Zoom …`, `Waiting for ${rx} zoom …`);
   view.spectrum.setAttribute('aria-label', t(`${rx}-Zoom-Spektrum, zum Abstimmen anklicken`, `${rx} zoom spectrum, click to tune`));
@@ -708,6 +708,34 @@ function setMenuOpen(name, open) {
   }
 }
 
+function bindPlotTouch(node, fineAdjust, finishTap) {
+  let gesture;
+  node.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'mouse' || !event.isPrimary) return;
+    gesture = {id: event.pointerId, x: event.clientX, y: event.clientY, axis: null, steps: 0};
+    node.setPointerCapture(event.pointerId);
+  });
+  node.addEventListener('pointermove', event => {
+    if (gesture?.id !== event.pointerId) return;
+    const dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
+    if (!gesture.axis && Math.max(Math.abs(dx), Math.abs(dy)) >= 12)
+      gesture.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    if (gesture.axis !== 'x' || !fineAdjust) return;
+    const steps = Math.trunc(dx / 12), delta = steps - gesture.steps;
+    gesture.steps = steps;
+    if (delta) fineAdjust(delta);
+  });
+  node.addEventListener('pointerup', event => {
+    if (gesture?.id !== event.pointerId) return;
+    const tap = !gesture.axis && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < 10;
+    gesture = null;
+    finishTap?.(event, tap);
+  });
+  const cancel = event => { if (gesture?.id === event.pointerId) gesture = null; };
+  node.addEventListener('pointercancel', cancel);
+  node.addEventListener('lostpointercapture', cancel);
+}
+
 function bindPlots(view, step) {
   for (const canvas of [...view.element.querySelectorAll('[data-tune]'), view.axis]) {
     canvas.addEventListener('pointermove', event => {
@@ -719,7 +747,7 @@ function bindPlots(view, step) {
     });
   }
   for (const canvas of view.element.querySelectorAll('[data-tune]')) {
-    let touch, touchEndedAt = -Infinity;
+    let touchEndedAt = -Infinity;
     canvas.addEventListener('click', event => {
       if (event.pointerType === 'touch' || event.pointerType === 'pen' || performance.now() - touchEndedAt < 500 || performance.now() - menuDismissedAt < 400) return;
       const hz = view.frequencyAt(event); if (hz !== null) tune(hz, true);
@@ -738,11 +766,10 @@ function bindPlots(view, step) {
         if (targets.tx !== undefined) setFrequency('tx', targets.tx);
       } catch (error) { report(error); }
     }, {passive: false});
-    canvas.addEventListener('pointerdown', event => { if (event.pointerType !== 'mouse') touch = {id: event.pointerId, x: event.clientX, y: event.clientY}; });
-    canvas.addEventListener('pointercancel', () => { touch = null; });
-    canvas.addEventListener('pointerup', event => {
-      if (!touch || touch.id !== event.pointerId) return;
-      const tap = Math.hypot(event.clientX - touch.x, event.clientY - touch.y) < 10; touch = null;
+    const adjust = canvas.hasAttribute('data-waterfall') ? delta => {
+      if (view.geometry) fineTune(selected, delta * step);
+    } : null;
+    bindPlotTouch(canvas, adjust, (event, tap) => {
       touchEndedAt = performance.now();
       if (tap && touchEndedAt - menuDismissedAt >= 400) { const hz = view.frequencyAt(event); if (hz !== null) tune(hz, together); }
     });
@@ -1593,6 +1620,9 @@ $('ft8-stop').onclick = () => {
 
 const rx2TuneStep = 10;
 for (const canvas of [$('sstv-waterfall'), $('rtty-waterfall')]) {
+  bindPlotTouch(canvas, delta => {
+    if (canFineTuneRx2()) fineTune(2, delta * rx2TuneStep);
+  });
   canvas.addEventListener('wheel', event => {
     if (!canFineTuneRx2() || event.ctrlKey || event.metaKey) return;
     const delta = wheelTurns(event) * rx2TuneStep;
@@ -1726,6 +1756,12 @@ function saveRttyPresets() {
   writePreference('rttyPresets', rttyPresets.serialize());
   renderRttyTxControls();
 }
+rtty.rx.addEventListener('dblclick', () => {
+  const call = rtty.selectedCallsign();
+  if (!call) return;
+  $('rtty-other-call').value = call;
+  saveRttyPresets();
+});
 rttyPresets.dialog.addEventListener('close', saveRttyPresets);
 rttyPresets.select.addEventListener('change', saveRttyPresets);
 $('rtty-tx-toggle').onclick = () => {

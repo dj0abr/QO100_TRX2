@@ -12,7 +12,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class DependencyInstallTest(unittest.TestCase):
-    def run_script(self, installed='', custom_server='', install=True):
+    def run_script(self, installed='', custom_server='', args=()):
         with tempfile.TemporaryDirectory(prefix='qo100-deps-') as temp:
             root=Path(temp);project=root/'project';project.mkdir();tools=root/'tools';tools.mkdir()
             shutil.copy2(ROOT/'build_all.sh',project/'build_all.sh')
@@ -30,7 +30,7 @@ class DependencyInstallTest(unittest.TestCase):
             if custom_server:scripts[custom_server]='#!/bin/sh\nexit 0\n'
             for name,body in scripts.items():p=tools/name;p.write_text(body);p.chmod(0o755)
             env={**os.environ,'PATH':str(tools),'QO100_TEST_APT_LOG':str(log),'QO100_TEST_INSTALLED':installed}
-            result=subprocess.run(['/bin/bash',str(project/'build_all.sh'),*(['--install-deps'] if install else [])],
+            result=subprocess.run(['/bin/bash',str(project/'build_all.sh'),*args],
                 env=env,text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr+result.stdout)
             calls=[json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -40,7 +40,7 @@ class DependencyInstallTest(unittest.TestCase):
         calls=self.run_script();self.assertEqual(calls[0],['update'])
         packages=calls[1]
         for package in ('pulseaudio','pulseaudio-utils','libasound2-plugins','dbus-user-session',
-                        'libiio-dev','libad9361-dev','libiio-utils','python3-numpy','python3-scipy'):
+                        'libiio-dev','libad9361-dev','libiio-utils','libcurl4-openssl-dev','python3-numpy','python3-scipy'):
             self.assertIn(package,packages)
 
     def test_existing_pipewire_is_preserved(self):
@@ -52,8 +52,11 @@ class DependencyInstallTest(unittest.TestCase):
     def test_custom_sound_server_is_preserved(self):
         self.assertNotIn('pulseaudio',self.run_script(custom_server='pipewire-pulse')[1])
 
-    def test_regular_build_never_installs_packages(self):
-        self.assertEqual(self.run_script(install=False),[])
+    def test_legacy_flag_uses_the_same_package_installation(self):
+        self.assertEqual(self.run_script(args=('--install-deps',)), self.run_script())
+
+    def test_help_does_not_install_packages(self):
+        self.assertEqual(self.run_script(args=('--help',)), [])
 
 
 if __name__=='__main__':unittest.main()

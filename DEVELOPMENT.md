@@ -17,8 +17,8 @@ Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
 ./start_all.sh
 ```
 
-Das erste Skript baut Backend, Pluto-Treiber, WebSocket-Adapter und beide
-FT8-Programme. Es konfiguriert den Webadapter auch dann mit, wenn er zuvor im
+Das erste Skript installiert bei jedem Aufruf die benötigten Debian-Pakete und
+baut Backend, Pluto-Treiber, WebSocket-Adapter und beide FT8-Programme. Es konfiguriert den Webadapter auch dann mit, wenn er zuvor im
 Build abgeschaltet war. Standardmäßig werden höchstens vier parallele
 Build-Jobs verwendet; optional z. B. `CMAKE_BUILD_PARALLEL_LEVEL=2 ./build_all.sh`.
 Die benötigten Entwicklungspakete stehen unter **Bauen**.

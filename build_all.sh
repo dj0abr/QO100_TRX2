@@ -5,13 +5,13 @@ project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
     echo "Usage: ./build_all.sh [--install-deps]"
-    echo "  --install-deps  Install required Debian/Ubuntu packages using apt-get."
+    echo "Installs the required Debian/Ubuntu packages with apt-get, then builds the transceiver."
+    echo "  --install-deps  Accepted for compatibility. Installation is enabled by default."
     echo "Optional: CMAKE_BUILD_PARALLEL_LEVEL=2 ./build_all.sh"
 }
-install_deps=0
 while (($#)); do
     case "$1" in
-        --install-deps) install_deps=1 ;;
+        --install-deps) ;;
         --help) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
     esac
@@ -36,46 +36,44 @@ case "$(uname -m)" in
     *) echo "Use a 64-bit x86 or ARM Linux OS (including on Raspberry Pi/Odroid)." >&2; exit 1 ;;
 esac
 
-if ((install_deps)); then
-    if ! command -v apt-get >/dev/null; then
-        echo "--install-deps requires a Debian/Ubuntu-based system with apt-get." >&2
+if ! command -v apt-get >/dev/null; then
+    echo "This build script requires a Debian/Ubuntu-based system with apt-get." >&2
+    exit 1
+fi
+apt_command=(apt-get)
+if ((EUID != 0)); then
+    if ! command -v sudo >/dev/null; then
+        echo "Install sudo or ask your administrator to install the build packages." >&2
         exit 1
     fi
-    apt_command=(apt-get)
-    if ((EUID != 0)); then
-        if ! command -v sudo >/dev/null; then
-            echo "Install sudo or ask your administrator to install the build packages." >&2
-            exit 1
-        fi
-        apt_command=(sudo apt-get)
-    fi
-    packages=(build-essential cmake pkg-config gfortran git ca-certificates
-        python3 python3-numpy python3-scipy
-        libiio-dev libad9361-dev libiio-utils libsamplerate0-dev libfftw3-dev
-        libboost-dev nlohmann-json3-dev libpulse-dev pulseaudio-utils libcurl4-openssl-dev
-        libasound2-plugins dbus-user-session)
-    # The client utilities do not install a sound server on minimal Debian.
-    # Preserve an existing PulseAudio/PipeWire setup; add PulseAudio only if neither exists.
-    package_installed() {
-        [[ $(dpkg-query -W -f='${Status}' "$1" 2>/dev/null) == 'install ok installed' ]]
-    }
-    if ! package_installed pulseaudio && ! package_installed pipewire-pulse && \
-       ! command -v pulseaudio >/dev/null && ! command -v pipewire-pulse >/dev/null; then
-        packages+=(pulseaudio)
-    fi
-    "${apt_command[@]}" update
-    "${apt_command[@]}" install -y --no-install-recommends "${packages[@]}"
+    apt_command=(sudo apt-get)
 fi
+packages=(build-essential cmake pkg-config gfortran git ca-certificates
+    python3 python3-numpy python3-scipy
+    libiio-dev libad9361-dev libiio-utils libsamplerate0-dev libfftw3-dev
+    libboost-dev nlohmann-json3-dev libpulse-dev pulseaudio-utils libcurl4-openssl-dev
+    libasound2-plugins dbus-user-session)
+# The client utilities do not install a sound server on minimal Debian.
+# Preserve an existing PulseAudio/PipeWire setup; add PulseAudio only if neither exists.
+package_installed() {
+    [[ $(dpkg-query -W -f='${Status}' "$1" 2>/dev/null) == 'install ok installed' ]]
+}
+if ! package_installed pulseaudio && ! package_installed pipewire-pulse && \
+   ! command -v pulseaudio >/dev/null && ! command -v pipewire-pulse >/dev/null; then
+    packages+=(pulseaudio)
+fi
+"${apt_command[@]}" update
+"${apt_command[@]}" install -y --no-install-recommends "${packages[@]}"
 
 for program in cmake python3 pkg-config cc c++ gfortran make; do
     if ! command -v "$program" >/dev/null; then
-        echo "Missing $program. Run ./build_all.sh --install-deps first." >&2
+        echo "Missing $program. Check the package installation above." >&2
         exit 1
     fi
 done
 python_bin=/usr/bin/python3
 if [[ ! -x "$python_bin" ]] || ! "$python_bin" -c 'import numpy, scipy, sqlite3, zlib'; then
-    echo "Missing system Python modules. Run ./build_all.sh --install-deps first." >&2
+    echo "Missing system Python modules. Check the package installation above." >&2
     exit 1
 fi
 
