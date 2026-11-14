@@ -123,10 +123,13 @@ def main():
         owner.state(lambda s: s['tx2'].get('epoch', state['tx2']['epoch']) != state['tx2']['epoch'])
         assert not tx_packets(), 'Cancelled slot emitted PCM'
 
-        next_slot = int(time.time() + 3) // 15 + 1
+        # A command received just after the UTC boundary can still send the full waveform.
+        next_slot = int(time.time()) // 15 + 1
+        target = next_slot * 15
+        time.sleep(max(0, target + .040 - time.time()))
         free_text = 'TEST DJ0ABR'
         answer = arm(owner, 5, next_slot % 2, free_text)
-        assert answer['status'] == 0 and answer['slot_utc'] % 30 == (next_slot % 2) * 15, answer
+        assert answer['status'] == 0 and answer['slot_utc'] == target, answer
         dispatch = answer['slot_utc'] + .420
         assert not tx_packets()
         wait(tx_packets, timeout=max(2, dispatch - time.time() + 2))
@@ -165,8 +168,11 @@ def main():
                                 timeout=15)
         assert ft4_result['slot_utc'] == ft4_slot and ft4_result['utc'].endswith('.5'), ft4_result
 
-        answer = request(owner, 'ft8_tx_start', 8, parity=1, message=free_text, audio_hz=1500, mode='FT4')
-        assert answer['status'] == 0 and answer['slot_utc'] % 15 == 7.5, answer
+        next_slot = int(time.time() // 7.5) + 1
+        target = next_slot * 7.5
+        time.sleep(max(0, target + .040 - time.time()))
+        answer = request(owner, 'ft8_tx_start', 8, parity=next_slot % 2, message=free_text, audio_hz=1500, mode='FT4')
+        assert answer['status'] == 0 and answer['slot_utc'] == target, answer
         dispatch = answer['slot_utc'] + .420
         before = len(packets)
         wait(lambda: len(tx_packets()) > before, timeout=max(2, dispatch - time.time() + 2))
@@ -182,7 +188,16 @@ def main():
         assert any(json.loads(line).get('message') == free_text for line in output.splitlines()), output
         assert request(owner, 'ft_mode', 10, mode='FT8')['status'] == 0
         owner.state(lambda s: s.get('ft_mode') == 'FT8' and s['ft8_tx'].get('phase') == 'idle')
-        print('RX2 FT8 and FT4 decode, RX3 FT8 monitor, and TX2 waveform round-trips in both modes passed')
+        # Past the acceptance deadline, keep parity and use the next eligible slot.
+        next_slot = int(time.time()) // 15 + 1
+        target = next_slot * 15
+        time.sleep(max(0, target + .300 - time.time()))
+        answer = arm(owner, 11, next_slot % 2, free_text)
+        assert answer['status'] == 0 and answer['slot_utc'] == target + 30, answer
+        owner.send({'type': 'ft8_tx_stop'})
+        owner.state(lambda s: s['ft8_tx'].get('result') == 'stopped')
+        assert len(tx_packets()) == before + len(ft4_packets)
+        print('RX2 FT8 and FT4 decode, RX3 FT8 monitor, late TX2 waveform round-trips and slot fallback passed')
 
 
 if __name__ == '__main__':

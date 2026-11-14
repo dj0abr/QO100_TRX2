@@ -92,7 +92,11 @@ deaktivieren die Funktion.
 Für den Sendestart ist die UTC-Systemuhr des Rechners maßgeblich. Die Webbridge
 beginnt mit der PCM-Übergabe bei Slotbeginn plus 500 ms abzüglich
 `ft8_tx_lead_ms`. Die voreingestellten 80 ms sind ein Schätzwert für DSP und
-Pluto-Puffer. Für den Abgleich am Gerät den tatsächlichen HF-Start messen und
+Pluto-Puffer. TX2 beginnt bis zu eine Sekunde vor der PCM-Übergabe mit der
+Vorbereitung. Ein später Sendeauftrag kann denselben Slot noch nutzen,
+wenn bis zur Übergabe mindestens 200 ms bleiben. Beim Standardvorlauf
+liegt diese Annahmefrist 220 ms nach der Slotgrenze. Das Signal wird
+vollständig gesendet. Für den Abgleich am Gerät den tatsächlichen HF-Start messen und
 bei einem zu späten Signal den Vorlauf um die gemessene Abweichung erhöhen.
 Der Integrationstest prüft den UTC-Start der PCM-Übergabe und die Dekodierbarkeit
 des erzeugten Signals mit dem synthetischen Backend.

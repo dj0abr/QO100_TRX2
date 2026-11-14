@@ -127,7 +127,8 @@ void Bridge::start_tx2(Tx2Mode mode, Tx2Source source, uint64_t frequency, unsig
     tx2_state(mode, ft8 ? "scheduled" : "preparing");
     next_activity_ = {};
     update_digital_activity();
-    schedule_tx2(ft8 ? ft8->dispatch_at - Ft8Tx::preparation : Clock::now());
+    const auto now = Clock::now();
+    schedule_tx2(ft8 ? std::max(now, ft8->dispatch_at - Ft8Tx::preparation) : now);
 }
 
 void Bridge::reset_tx2_audio(uint64_t frequency) {

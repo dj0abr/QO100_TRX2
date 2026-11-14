@@ -143,9 +143,10 @@ void Bridge::begin_ft8_tx(uint64_t client, uint32_t id, uint64_t frequency, unsi
     const auto lead = milliseconds(config_.ft8_tx_lead_ms);
     const auto signal_offset = milliseconds(500) - lead;
     const auto slot_ms = ft_slot_ms(ft_mode_);
-    auto slot = duration_cast<milliseconds>((utc + Ft8Tx::preparation).time_since_epoch()).count() / slot_ms;
+    const auto earliest_dispatch = utc + Ft8Tx::minimum_preparation;
+    auto slot = duration_cast<milliseconds>((earliest_dispatch - signal_offset).time_since_epoch()).count() / slot_ms;
     const auto dispatch = [&](int64_t index) { return Utc::time_point(milliseconds(index * slot_ms)) + signal_offset; };
-    if (dispatch(slot) < utc + Ft8Tx::preparation) ++slot;
+    if (dispatch(slot) < earliest_dispatch) ++slot;
     if (slot % 2 != parity) ++slot;
 
     const auto dispatch_utc = dispatch(slot);

@@ -82,6 +82,7 @@ class Bridge {
     };
     struct Ft8Tx {
         static constexpr auto preparation = std::chrono::seconds(1);
+        static constexpr auto minimum_preparation = std::chrono::milliseconds(200);
         std::vector<int16_t> pcm;
         double slot_utc;
         std::chrono::system_clock::time_point dispatch_utc;
