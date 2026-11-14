@@ -66,8 +66,8 @@ def main():
             return subprocess.Popen([str(backend), '--config', str(config), '--source', 'synthetic'], stdout=logs[0], stderr=logs[0])
         logbook = root / 'ft4-ft8.adi'
         now = datetime.now(timezone.utc)
-        recent = now - timedelta(hours=23, minutes=55)
-        old = now - timedelta(hours=24, minutes=5)
+        recent = now - timedelta(hours=71, minutes=55)
+        old = now - timedelta(hours=72, minutes=5)
         logbook.write_text(
             "Existing ADIF log\n<ADIF_VER:5>3.1.8 <EOH>\n"
             f"<call:5>k2abc <MODE:4>MFSK <SUBMODE:3>FT4 <QSO_DATE:8>{recent:%Y%m%d} <TIME_ON:4>{recent:%H%M} <EOR>\n"

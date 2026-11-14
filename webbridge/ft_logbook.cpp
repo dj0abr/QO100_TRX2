@@ -99,7 +99,7 @@ FtLogbook::FtLogbook(std::filesystem::path path) : path_(std::move(path)) {
 
 bool FtLogbook::worked_recently(const std::string& call, std::time_t now) const {
     const auto entry = latest_.find(call);
-    return entry != latest_.end() && entry->second <= now && now - entry->second <= 24 * 60 * 60;
+    return entry != latest_.end() && entry->second <= now && now - entry->second <= 3 * 24 * 60 * 60;
 }
 
 void FtLogbook::save(const FtQsoRecord& qso) {

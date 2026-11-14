@@ -80,7 +80,7 @@ Locatoren sowie Sende- und Empfangsfrequenz für QO-100. Ein leerer Pfad
 schaltet Logbuch und CQ-Markierung aus.
 
 In der oberen Empfangsliste erscheint ein CQ-Ruf rot, wenn das Rufzeichen
-der Gegenstation in den vergangenen 24 Stunden im Logbuch fehlt. FT4 und FT8
+der Gegenstation in den vergangenen 72 Stunden im Logbuch fehlt. FT4 und FT8
 werden dabei gemeinsam betrachtet. Die untere Liste zeigt weiterhin die
 Nachrichten mit dem eigenen Rufzeichen.
 
