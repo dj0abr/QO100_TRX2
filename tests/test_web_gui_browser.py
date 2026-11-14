@@ -698,6 +698,9 @@ def main():
             save_screenshot(capture.with_name(capture.stem+'-rx2-zoom.png'))
             toggle_decoder()
             select_view('rtty')
+            rtty_pair = execute('return JSON.parse(localStorage.getItem("qo100.digitalFrequencies.rtty"))')
+            rx2, tx2 = rtty_pair['rx'], rtty_pair['tx']
+            snapshot(lambda s: s['rx']['2']['frequency_hz'] == rx2 and s['tx2']['frequency_hz'] == tx2)
             wait(lambda:execute("""const c=document.getElementById('rtty-waterfall');
                 return c.getContext('2d').getImageData(c.width/2,0,1,1).data[3]===255;"""))
             assert execute("""const rx=document.getElementById('rtty-rx-text').getBoundingClientRect(),
@@ -765,6 +768,9 @@ def main():
             snapshot(both_sending)
             select_view('sstv', keyboard=True)
             snapshot(lambda s:s['tx']['ptt'] and s['rtty_tx'].get('result')=='stopped' and s['rtty_tx']['tx_id']==tx_id and s['tx2']['epoch']!=tx_epoch)
+            sstv_pair = execute('return JSON.parse(localStorage.getItem("qo100.digitalFrequencies.sstv"))')
+            rx2 = sstv_pair['rx']
+            snapshot(lambda s: s['rx']['2']['frequency_hz'] == rx2 and s['tx2']['frequency_hz'] == sstv_pair['tx'])
             call('DELETE',f'/session/{session}/actions')
             expect_ptt(False)
             click('#audio')
@@ -1382,6 +1388,58 @@ def main():
             restarted=snapshot(lambda s:s.get('ready') and s.get('session') not in (0,old_session))
             assert not restarted['tx']['ptt']
             wait(lambda:execute('return !document.getElementById("copy-rx-tx").disabled'))
+            # Each local DigiMode remembers its own confirmed RX2/TX2 frequencies.
+            def digital_pair(s):
+                return s['rx']['2']['frequency_hz'], s['tx2']['frequency_hz']
+
+            def expect_digital_pair(pair):
+                try:
+                    return snapshot(lambda s: s.get('ready') and '2' in s['rx'] and
+                                    'frequency_hz' in s['tx2'] and digital_pair(s) == pair)
+                except AssertionError as error:
+                    raise AssertionError(f'Expected RX2/TX2 {pair}, latest {digital_pair(snapshot())}') from error
+
+            def stored_pair(mode):
+                pair = execute('return JSON.parse(localStorage.getItem("qo100.digitalFrequencies." + arguments[0]))', mode)
+                return (pair['rx'], pair['tx']) if pair else None
+
+            click('#frequency2')
+            voice = snapshot()
+            presets = {}
+            for i, mode in enumerate(('sstv', 'rtty', 'ft8', 'waterfall'), 1):
+                select_view(mode)
+                wait(lambda: stored_pair(mode) is not None)
+                rx_hz, tx_hz = stored_pair(mode)
+                expect_digital_pair((rx_hz, tx_hz))
+                select_view('zoom')  # The DigiMode keeps running in the background.
+                rx_target, tx_target = rx_hz - i * 100, tx_hz - i * 125
+                execute('document.getElementById("frequency2").dispatchEvent(new MouseEvent("dblclick",{bubbles:true}))')
+                changed('#frequency-input', f'{rx_target / 1e6:.6f}')
+                execute('document.getElementById("frequency-form").requestSubmit()')
+                expect_digital_pair((rx_target, tx_hz - i * 100))
+                wait(lambda: stored_pair(mode) == (rx_target, tx_hz - i * 100))
+                click('#frequencytx')
+                changed('#frequency-input', f'{tx_target / 1e6:.6f}')
+                execute('document.getElementById("frequency-form").requestSubmit()')
+                presets[mode] = (rx_target, tx_target)
+                tuned = expect_digital_pair(presets[mode])
+                wait(lambda: stored_pair(mode) == presets[mode])
+                assert tuned['rx']['1'] == voice['rx']['1'] and tuned['tx']['frequency_hz'] == voice['tx']['frequency_hz']
+
+            assert len(set(presets.values())) == 4, presets
+            for mode, pair in presets.items():
+                select_view(mode)
+                expect_digital_pair(pair)
+
+            # Reload into a saved view while the backend is tuned to a different pair.
+            execute('localStorage.setItem("qo100.zoomView", "rtty")')
+            call('POST',f'/session/{session}/url',{'url':url})
+            wait(lambda: execute('return document.getElementById("role").textContent')=='Bediener')
+            expect_digital_pair(presets['rtty'])
+            assert execute('return !document.getElementById("rtty-panel").hidden')
+            select_view('')
+            select_view('3')
+
             # Viewers can select a receiver and listen but never control the backend.
             owner=call('GET',f'/session/{session}/window')
             viewer=call('POST',f'/session/{session}/window/new',{'type':'tab'})['handle']

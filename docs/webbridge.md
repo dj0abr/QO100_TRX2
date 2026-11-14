@@ -61,6 +61,11 @@ Der gewählte DigiMode bleibt beim Wechsel zu Zoom oder Monitor aktiv.
 Genau eine Ansicht nutzt den gesamten Inhalt der Kachel, einschließlich des sonst
 für Zoom-Spektrum, Frequenzachse und Wasserfall verwendeten Platzes.
 Alle Textströme werden immer empfangen, mit getrennten Puffern und Lesepositionen.
+Die WebGUI speichert das zuletzt eingestellte RX2/TX2-Frequenzpaar für SSTV, RTTY,
+FT4/8 und Waterfall-Text jeweils im Browser. Beim Wechsel zu einem Modus stimmt
+die WebGUI beide Frequenzen auf dessen gespeicherte Werte ab. Beim ersten
+Aufruf eines Modus übernimmt sie das aktuelle Frequenzpaar.
+
 Die Zoom-Canvases behalten im Hintergrund ihre Größe und ihren laufenden Wasserfall;
 beim Zurückschalten wird keine veraltete Historie nachgespielt.
 Die Auswahl wird als `qo100.zoomView` in diesem Browser gespeichert; bisherige

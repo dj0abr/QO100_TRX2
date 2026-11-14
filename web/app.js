@@ -177,9 +177,18 @@ function setFrequency(channel, hz, pair = selected) {
   validateFrequency(hz, Number(state.settings?.[tx ? 'tx_center_hz' : 'rx_center_hz']), tx ? 'TX' : `RX${channel}`);
   if (tx && pair === 1) stopPtt();
   const promise = command(tx ? 'tx' : 'tune', tx ? {frequency_hz: hz, ptt: false, channel: pair} : {stream: Number(channel), frequency_hz: hz});
+  const mode = digitalView;
+  const digitalChannel = key === '2' ? 'rx' : key === 'tx2' ? 'tx' : null;
   wanted.set(key, {hz, id: promise.id}); renderFrequencies();
-  promise.then(answer => { if (answer.status !== 0) throw fail(`Frequenz wurde nicht übernommen (Status ${answer.status}).`); }).catch(error => {
-    if (wanted.get(key)?.id === promise.id) { wanted.delete(key); renderFrequencies(); renderFt8Controls(); renderWaterfallTxControls(); report(error); }
+  promise.then(answer => {
+    if (answer.status !== 0) throw fail(`Frequenz wurde nicht übernommen (Status ${answer.status}).`);
+    if (mode && digitalChannel && digitalPairs[mode]?.[digitalChannel] !== hz)
+      saveDigitalPair(mode, {...digitalPairs[mode], [digitalChannel]: hz});
+  }).catch(error => {
+    if (wanted.get(key)?.id === promise.id) {
+      wanted.delete(key); applyDigitalPair();
+      renderFrequencies(); renderFt8Controls(); renderWaterfallTxControls(); report(error);
+    }
   });
 }
 function tune(hz, coupled = false) {
@@ -344,6 +353,7 @@ function update(next) {
   if (next.session !== session) {
     ftAutoCq.checked = false;
     stopPtt(); resetRttyTx(); session = next.session; wanted.clear(); guiLoaded = false;
+    restoreDigitalPair = true;
     loopGeneration = null; cutoff = 0n; clearTimers(); frames.reset(); views.forEach(view => view.clear()); radio.reset(); sstv.reset(); rtty.resetRx(); rtty.waterfall.clear();
   }
   if (next.loop?.generation !== undefined && next.loop.generation !== loopGeneration) {
@@ -398,6 +408,7 @@ function syncRx2Subscription() {
 function controls() {
   syncRx2Subscription();
   subscribeDigitalView();
+  applyDigitalPair();
   const writable = canControl();
   for (const element of document.querySelectorAll('[data-control]')) element.disabled = !writable;
   for (const canvas of [$('sstv-waterfall'), $('rtty-waterfall')])
@@ -842,7 +853,37 @@ const digitalReceivers = ['sstv', 'rtty', 'ft8'];
 const digitalModes = [...digitalReceivers, 'waterfall'];
 const digitalLabels = {sstv: 'SSTV', rtty: 'RTTY', ft8: 'FT4/8', waterfall: 'Waterfall-Text'};
 const zoomSources = ['zoom', ...monitorViews, 'off', ...digitalModes];
-let digitalView = null, subscribedDigitalView;
+let digitalView = null, subscribedDigitalView, restoreDigitalPair = false;
+const digitalPairs = Object.fromEntries(digitalModes.map(mode => {
+  try {
+    const pair = JSON.parse(readPreference(`digitalFrequencies.${mode}`));
+    return [mode, pair && Number.isSafeInteger(pair.rx) && Number.isSafeInteger(pair.tx) ? pair : null];
+  } catch { return [mode, null]; }
+}));
+function saveDigitalPair(mode, pair) {
+  digitalPairs[mode] = pair;
+  writePreference(`digitalFrequencies.${mode}`, JSON.stringify(pair));
+}
+function applyDigitalPair() {
+  if (!restoreDigitalPair || !digitalView || !canControl() || wanted.has('2') || wanted.has('tx2')) return;
+  const rx = state.rx?.['2']?.frequency_hz, tx = state.tx2?.frequency_hz;
+  if (!Number.isSafeInteger(rx) || !Number.isSafeInteger(tx)) return;
+  restoreDigitalPair = false;
+  const pair = digitalPairs[digitalView];
+  if (!pair) {
+    saveDigitalPair(digitalView, {rx, tx});
+    return;
+  }
+  try {
+    validateFrequency(pair.rx, Number(state.settings?.rx_center_hz), 'RX2');
+    validateFrequency(pair.tx, Number(state.settings?.tx_center_hz), 'TX2');
+  } catch {
+    saveDigitalPair(digitalView, {rx, tx});
+    return;
+  }
+  if (rx !== pair.rx) setFrequency(2, pair.rx);
+  if (tx !== pair.tx) setFrequency('tx', pair.tx, 2);
+}
 function subscribeDigitalView() {
   if (!isOpen()) return;
   const mode = digitalView;
@@ -894,6 +935,7 @@ function selectDecoder(source) {
   if (group === 'digital' && nextDigital !== digitalView) {
     stopDigitalView();
     digitalView = nextDigital;
+    restoreDigitalPair = true;
   }
   if (group === 'monitor') {
     monitorView = source;
@@ -1594,7 +1636,7 @@ function renderSstvTxControls() {
   button.textContent = busy ? 'Stop' : 'Start';
   button.dataset.active = String(busy);
   button.disabled = busy ? sstvStopRequested || !operator || !isOpen() :
-    !canControl() || !available || sstvTx.image.hidden || !hasLevel || rttyTxActive() || waterfallTxActive() || ft8Pending ||
+    !canControl() || !available || wanted.has('tx2') || sstvTx.image.hidden || !hasLevel || rttyTxActive() || waterfallTxActive() || ft8Pending ||
     (state.ft8_tx?.phase ?? 'idle') !== 'idle';
   button.title = busy ? t('SSTV-Sendung abbrechen', 'Stop SSTV transmission') :
     sstvTx.image.hidden ? t('Ein TX-Bild auswählen', 'Choose a TX image') :
