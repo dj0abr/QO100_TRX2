@@ -6,6 +6,17 @@ QO-100 Software-Transceiver mit einem ADALM-Pluto und einem Einplatinenrechner (
 Läuft auch auf Desktop-PCs mit einem Linux auf Debian-Basis.
 Das Projekt ist ein voll funktionsfähiger Software-Transceiver für QO-100, der im Webbrowser bedient wird.
 
+## Betriebsarten
+
+**SSB-Sprechfunk** über RX1/TX1.
+
+Parallel dazu kannst du auf RX2/TX2 jeweils einen dieser vollständig integrierten DigiModes nutzen. Dafür sind keine externen Zusatzprogramme nötig.
+
+- SSTV
+- RTTY
+- FT4 / FT8
+- Waterfall-Text
+
 ![QO100_TRX2 WebGUI](docs/WebGUI.png)
 
 ## Systemübersicht
@@ -13,7 +24,7 @@ Das Projekt ist ein voll funktionsfähiger Software-Transceiver für QO-100, der
 ![Blockschaltbild des QO100 Multichannel Web Transceivers](docs/blockschaltbild.png)
 
 Ein einzelner Pluto versorgt fünf parallel arbeitende Empfangskanäle und zwei Sendezweige.
-**RX1/TX1** dienen dem Sprachfunk im Browser, **RX2/TX2** verbinden externe Digitalprogramme wie WSJT-X oder fldigi über virtuelle Audiogeräte.
+**RX1/TX1** dienen dem SSB-Sprechfunk im Browser. **RX2/TX2** stehen für die integrierten DigiModes zur Verfügung und können über virtuelle Audiogeräte auch externe Programme wie WSJT-X oder fldigi anbinden.
 **RX3** überwacht FT8 und **RX4** die PSK-Bake auf festen, im Setup einstellbaren Frequenzen; beide Decoder laufen unabhängig vom normalen Funkbetrieb und liefern ihre Texte an das WebGUI.
 **RX5** empfängt zusätzlich die Multimedia-Bake und stellt DX-Cluster, CW-Skimmer und Bulletins im WebGUI bereit.
 Die beiden Sendezweige werden zu einem gemeinsamen IQ-Signal für den Pluto zusammengeführt.
