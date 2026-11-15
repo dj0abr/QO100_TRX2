@@ -146,9 +146,9 @@ def main():
                 call('POST',f'/session/{session}/actions',{'actions':[{'type':'pointer','id':'mouse','parameters':{'pointerType':'mouse'},'actions':[
                     {'type':'pointerMove','x':x,'y':y,'duration':0},{'type':'pointerDown','button':button},{'type':'pause','duration':press_ms},{'type':'pointerUp','button':button}]}]})
             return (x-bounds['x'])/bounds['width']
-        def wheel(selector, shift=False, ctrl=False):
+        def wheel(selector, shift=False, ctrl=False, *, down=False):
             if selector in ('#zoom','#zoom-spectrum'): show_zoom()
-            execute('document.querySelector(arguments[0]).dispatchEvent(new WheelEvent("wheel",{deltaY:-100,shiftKey:arguments[1],ctrlKey:arguments[2],bubbles:true,cancelable:true}))',selector,shift,ctrl)
+            execute('document.querySelector(arguments[0]).dispatchEvent(new WheelEvent("wheel",{deltaY:arguments[3],shiftKey:arguments[1],ctrlKey:arguments[2],bubbles:true,cancelable:true}))',selector,shift,ctrl,100 if down else -100)
         def key(action, value=' '):
             call('POST',f'/session/{session}/actions',{'actions':[{'type':'key','id':'keyboard','actions':[{'type':action,'value':value}]}]})
         def ptt_hold(actions):
@@ -427,16 +427,21 @@ def main():
                 decode(f'DJ0ABR DL1ABC R-{i%50:02d}', message_type=8)
             wait(lambda: all(len(lines(log)) == 50 for log in ft_logs))
             wait(lambda: all(ft_log_at_end(log) for log in ft_logs))
-            for text in ('DJ0ABR M1DST R-06', 'DJ0ABR DL1ABC R-07', 'DJ0ABR M1DST R-08'):
+            for text, country, wraps in (
+                ('DJ0ABR E71ABC R-06', 'Bosnien und Herzegowina', True),
+                ('DJ0ABR M1DST R-07', 'UK', False),
+                ('DJ0ABR E71ABC R-08', 'Bosnien und Herzegowina', True),
+            ):
                 decode(text, message_type=8)
                 wait(lambda: all(lines(log)[-1] == text for log in ft_logs))
-                if 'M1DST' in text:
-                    assert execute('''return ['ft8-log', 'ft8-own-log'].every(id => {
-                        const name = document.getElementById(id).lastElementChild.querySelector('.ft-country-name');
-                        const range = document.createRange();
-                        range.selectNodeContents(name);
-                        return name.textContent === 'Vereinigtes Königreich' && range.getClientRects().length === 2;
-                    });''')
+                assert execute('''const [country, wraps] = arguments;
+                    return ['ft8-log', 'ft8-own-log'].every(id => {
+                    const name = document.getElementById(id).lastElementChild.querySelector('.ft-country-name');
+                    const range = document.createRange();
+                    range.selectNodeContents(name);
+                    const count = range.getClientRects().length;
+                    return name.textContent === country && (wraps ? count > 1 : count === 1);
+                });''', country, wraps)
                 wait(lambda: all(ft_log_at_end(log) for log in ft_logs))
             execute('window.__ftWrapStyle.remove();')
             # A smaller receive area must keep both lists pinned to the end.
@@ -456,6 +461,16 @@ def main():
             execute('document.querySelector(arguments[0]).style.height = "";', receive)
             click('#decoder-clear')
             assert lines('ft8-log') == lines('ft8-own-log') == []
+            for message, message_type, reply in (
+                ('CQ K2ABC', 8, 'K2ABC DJ0ABR JN68'),
+                ('CQ DQ30GDXF', 32, '<DQ30GDXF> DJ0ABR JN68'),
+            ):
+                decode(message, message_type=message_type)
+                wait(lambda: lines('ft8-log')[-1:] == [message])
+                click('#ft8-log button:last-child')
+                assert execute('return document.getElementById("ft8-message").value') == reply
+            click('#ft-end-qso')
+            click('#decoder-clear')
             observer=Client(http_port);observer.role('viewer')
             observer.send({'type':'audio_subscription','stream':2,'enabled':False})
             # The CQ button prepares and schedules one transmission without a second click.
@@ -640,15 +655,15 @@ def main():
             # Right-click only RX1; wheel and Shift use the display's step size.
             ratio=plot('#wide',.44,button=2);target=round(int(initial['settings']['rx_center_hz'])+(ratio-.5)*600000)
             after=expect_frequency(1,target);assert after['tx']['frequency_hz']==tx;rx=target
-            history=mark_history();wheel('#wide');expect_frequency(1,rx+250);rx+=250;expect_history(history)
+            history=mark_history();wheel('#wide',down=True);expect_frequency(1,rx+250);rx+=250;expect_history(history)
             wait(lambda:hz('rx1')==rx)
-            history=mark_history();wheel('#zoom');expect_frequency(1,rx+25);rx+=25;expect_history(history)
+            history=mark_history();wheel('#zoom',down=True);expect_frequency(1,rx+25);rx+=25;expect_history(history)
             wheel('#wide-spectrum',True);snapshot(lambda s:s.get('tx',{}).get('frequency_hz')==tx+250);tx+=250
             wheel('#zoom-spectrum',True);snapshot(lambda s:s.get('tx',{}).get('frequency_hz')==tx+25);tx+=25
             # Ctrl preserves the split at both display resolutions and retains history.
             for selector,step in [('#wide',250),('#zoom-spectrum',25)]:
                 wait(lambda:hz('rx1')==rx and hz('tx')==tx)
-                history=mark_history();wheel(selector,ctrl=True)
+                history=mark_history();wheel(selector,ctrl=True,down=selector=='#wide')
                 after=snapshot(lambda s:s.get('rx',{}).get('1',{}).get('frequency_hz')==rx+step and s.get('tx',{}).get('frequency_hz')==tx+step)
                 assert after['tx']['frequency_hz']-after['rx']['1']['frequency_hz']==tx-rx
                 rx+=step;tx+=step;expect_history(history)
@@ -661,7 +676,7 @@ def main():
             tx2+=rx2-old_rx2
             after=expect_frequency(2,rx2);assert after['rx']['1']['frequency_hz']==rx and after['tx']['frequency_hz']==tx
             snapshot(lambda s:s.get('tx2',{}).get('frequency_hz')==tx2)
-            wheel('#wide');expect_frequency(2,rx2+250);rx2+=250
+            wheel('#wide',down=True);expect_frequency(2,rx2+250);rx2+=250
             wait(lambda:hz('rx2')==rx2 and hz('tx')==tx2)
             wheel('#wide-spectrum',ctrl=True)
             after=snapshot(lambda s:s.get('rx',{}).get('2',{}).get('frequency_hz')==rx2+250 and s.get('tx2',{}).get('frequency_hz')==tx2+250)
@@ -679,14 +694,14 @@ def main():
                 assert after['rx']['1']['frequency_hz']==rx and after['tx']['frequency_hz']==tx
                 snapshot(lambda s:s.get('tx2',{}).get('frequency_hz')==tx2)
                 wait(lambda:hz('rx2')==rx2)
-            history=mark_history();wheel('#zoom');rx2+=25
+            history=mark_history();wheel('#zoom',down=True);rx2+=25
             after=expect_frequency(2,rx2);assert after['rx']['1']['frequency_hz']==rx and after['tx']['frequency_hz']==tx
             expect_history(history)
             wheel('#zoom-spectrum',True);tx2+=25
             after=snapshot(lambda s:s.get('tx2',{}).get('frequency_hz')==tx2)
             assert after['rx']['1']['frequency_hz']==rx and after['rx']['2']['frequency_hz']==rx2
             wait(lambda:hz('rx2')==rx2 and hz('tx')==tx2)
-            history=mark_history();wheel('#zoom',ctrl=True);rx2+=25;tx2+=25
+            history=mark_history();wheel('#zoom',ctrl=True,down=True);rx2+=25;tx2+=25
             after=snapshot(lambda s:s.get('rx',{}).get('2',{}).get('frequency_hz')==rx2 and s.get('tx2',{}).get('frequency_hz')==tx2)
             assert after['rx']['1']['frequency_hz']==rx
             expect_history(history)
@@ -711,7 +726,7 @@ def main():
             execute("""const c=document.getElementById('rtty-waterfall'), ctx=c.getContext('2d');
                 ctx.fillStyle='#ff00ff';ctx.fillRect(400,4,2,10);""")
             observer.messages.clear()
-            wheel('#rtty-waterfall', shift=True)
+            wheel('#rtty-waterfall',shift=True,down=True)
             after=expect_frequency(2,rx2+10)
             assert after['tx2']['frequency_hz']==tx2 and after['rx']['1']['frequency_hz']==rx
             wait(lambda:execute("""const c=document.getElementById('rtty-waterfall'),
@@ -844,7 +859,7 @@ def main():
             wait(lambda:rx2_demand() is False)
             click('#audio')
             click('#copy-rx-tx');snapshot(lambda s:s.get('tx',{}).get('frequency_hz')==rx-8089500000);tx=rx-8089500000
-            wheel('#wide',True);snapshot(lambda s:s.get('tx',{}).get('frequency_hz')==tx+250);tx+=250
+            wheel('#wide',shift=True,down=True);snapshot(lambda s:s.get('tx',{}).get('frequency_hz')==tx+250);tx+=250
             click('#copy-tx-rx');expect_frequency(1,tx+8089500000)
             # Automatic ranges use independent noise estimates and two shared 1-dB offset controls.
             click('#waterfall-toggle')
@@ -1127,7 +1142,7 @@ def main():
             time.sleep(.6);audio_measurement()
             zoom_frames=execute('return Number(document.getElementById("zoom-display").dataset.frames)')
             for selector,step in [('#zoom',25),('#wide',250)]*6:
-                wheel(selector);rx+=step;expect_frequency(1,rx);time.sleep(.06)
+                wheel(selector,down=True);rx+=step;expect_frequency(1,rx);time.sleep(.06)
             continuity=audio_measurement()
             assert continuity['total']>10000 and continuity['longest_ms']==0,continuity
             assert execute('return Number(document.getElementById("zoom-display").dataset.frames)')>zoom_frames+5

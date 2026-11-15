@@ -756,7 +756,8 @@ function bindPlots(view, step) {
     canvas.addEventListener('wheel', event => {
       if (!canControl() || !view.geometry) return;
       event.preventDefault();
-      const delta = wheelTurns(event) * step;
+      const direction = canvas.hasAttribute('data-waterfall') ? -1 : 1;
+      const delta = direction * wheelTurns(event) * step;
       if (!delta) return;
       try {
         const targets = wheelTargets({selected, rx: frequency(selected), tx: frequency('tx'), delta,
@@ -1109,7 +1110,8 @@ const ftRegionNames = {
 };
 function updateFtCountry(node) {
   const {region, entity} = node.dataset;
-  node.querySelector('.ft-country-name').textContent = (region && ftRegionNames[language].of(region)) || entity;
+  const name = region === 'GB' ? 'UK' : (region && ftRegionNames[language].of(region)) || entity;
+  node.querySelector('.ft-country-name').textContent = name;
 }
 function ftDecodeFields(line, metadata, text, fields) {
   if (!fields) {
@@ -1483,7 +1485,7 @@ function renderFt8Controls() {
   const active = !!tx && tx.phase !== 'idle';
   const writable = canControl() && state.ft8_enabled && !(state.flags & 6) && !state.loop?.mode;
   const busy = ft8Pending || ftModePending || active || sstvTxActive() || rttyTxActive();
-  $('ft8-frequency').disabled = !writable || busy || !!ftAutoQso || wanted.has('2') || wanted.has('tx2');
+  $('ft8-default-qrg').disabled = !writable || busy || !!ftAutoQso || wanted.has('2') || wanted.has('tx2');
   const mode = state.ft_mode ?? 'FT8';
   const modeSelect = $('ft-mode');
   if (!ftModePending) modeSelect.value = mode;
@@ -1523,8 +1525,8 @@ function renderFt8Status(tx) {
     result[tx?.result] ?? (state.ready && !state.ft8_enabled ? t('FT4/8 an RX2 ist deaktiviert.', 'RX2 FT4/8 is disabled.') : ''));
   if (status.textContent !== text) status.textContent = text;
 }
-$('ft8-frequency').onclick = () => {
-  if ($('ft8-frequency').disabled) return;
+$('ft8-default-qrg').onclick = event => {
+  if (event.currentTarget.disabled) return;
   try {
     const tx = ftStandardRxHz - DOWNLINK_UPLINK_HZ;
     validateFrequency(ftStandardRxHz, Number(state.settings.rx_center_hz), 'RX2');
@@ -1625,7 +1627,7 @@ for (const canvas of [$('sstv-waterfall'), $('rtty-waterfall')]) {
   });
   canvas.addEventListener('wheel', event => {
     if (!canFineTuneRx2() || event.ctrlKey || event.metaKey) return;
-    const delta = wheelTurns(event) * rx2TuneStep;
+    const delta = -wheelTurns(event) * rx2TuneStep;
     if (!delta) return;
     event.preventDefault();
     fineTune(2, delta);

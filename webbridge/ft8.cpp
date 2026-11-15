@@ -11,6 +11,7 @@ namespace {
 using namespace std::chrono;
 using Utc = system_clock;
 const std::regex callsign(R"((?:[A-Z]|[A-Z][A-Z0-9]|[0-9][A-Z])[0-9][A-Z]{1,3})");
+const std::regex contact_call(R"((?=[A-Z0-9/]{3,11}$)(?=.*[A-Z])(?=.*[0-9])[A-Z0-9]+(?:/[A-Z0-9]+)*)");
 const std::regex grid(R"([A-R]{2}[0-9]{2}([A-X]{2})?)");
 const std::regex report(R"([+-][0-9]{2})");
 const std::regex cq(R"(^CQ +(?:[A-Z]{1,4} +|[0-9]{3} +)?<?([A-Z0-9/]*[0-9][A-Z0-9/]*)>?(?: |$))");
@@ -86,7 +87,7 @@ void Bridge::save_ft_qso(uint64_t client, const Json& id, const Json& data) {
         data.at("tx_hz").get<uint64_t>(), data.at("rx_hz").get<uint64_t>()
     };
     const auto now = std::time(nullptr);
-    if (!std::regex_match(qso.call, callsign) || !std::regex_match(qso.own_call, callsign) ||
+    if (!std::regex_match(qso.call, contact_call) || !std::regex_match(qso.own_call, callsign) ||
         qso.call == qso.own_call || !std::regex_match(qso.own_grid, grid) ||
         (!qso.grid.empty() && !std::regex_match(qso.grid, grid)) ||
         !std::regex_match(qso.sent_report, report) || !std::regex_match(qso.received_report, report) ||

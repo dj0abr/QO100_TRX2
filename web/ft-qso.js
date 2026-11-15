@@ -36,6 +36,11 @@ const displayCall = /^(?=[A-Z0-9/]*[A-Z])(?=[A-Z0-9/]*\d)[A-Z0-9]+(?:\/[A-Z0-9]+
 const isDisplayCall = value => value === '<...>' || displayCall.test(value.replace(/^<([^<>]+)>$/, '$1'));
 const displayExchange = /^(?:R )?(?:[A-R]{2}\d{2}(?:[A-X]{2})?|R?[+-]\d{2}|RRR|RR73|73)$/;
 
+function contactCall(value = '') {
+  const call = value.replace(/^<([^<>]+)>$/, '$1');
+  return call.length >= 3 && call.length <= 11 && displayCall.test(call) ? call : '';
+}
+
 export function splitFtMessage(text, messageType) {
   if (messageType === 0) return null;
   const [first, ...words] = text.trim().split(/\s+/);
@@ -62,12 +67,15 @@ export function parseFtContact(packet) {
   const result = {slot, parity: 1 - (slotIndex % 2), snr, audioHz};
   if (words[0] === 'CQ') {
     const directed = /^(?:[A-Z]{1,4}|\d{3})$/.test(words[1] ?? '');
-    const [peer, locator, ...rest] = words.slice(directed ? 2 : 1);
-    if (!peer || !ftCall(peer) || rest.length || (locator && !grid.test(locator))) return null;
-    return {...result, peer, kind: 'cq', locator};
+    const [source, exchange] = words.slice(directed ? 2 : 1);
+    const peer = contactCall(source);
+    if (!peer) return null;
+    const locator = ftGrid(exchange ?? '');
+    return {...result, peer, kind: 'cq', locator: locator && locator !== 'RR73' ? locator : undefined};
   }
-  const [recipient, peer, exchange, ...rest] = words;
-  if (!recipient || !peer || !ftCall(recipient) || !ftCall(peer) || !exchange || rest.length) return null;
+  const [destination, source, exchange, ...rest] = words;
+  const recipient = contactCall(destination), peer = contactCall(source);
+  if (!recipient || !peer || !exchange || rest.length) return null;
   if (!grid.test(exchange) && !report.test(exchange) && !ackReport.test(exchange) &&
       !['RRR', 'RR73', '73'].includes(exchange)) return null;
   return {...result, recipient, peer, kind: exchange};
@@ -85,5 +93,7 @@ export function ftReply(received, ownCall, locator) {
   else if (ackReport.test(kind)) [step, reply] = ['ack', 'RR73'];
   else if (kind === '73') [step, reply] = ['complete', ''];
   else [step, reply] = ['signoff', '73'];
-  return {peer, slot, parity, audioHz, step, received, text: reply ? `${peer} ${ownCall} ${reply}` : ''};
+  // With a locator or a report, a nonstandard call goes in angle brackets.
+  const destination = ftCall(peer.replace(/\/[PR]$/, '')) ? peer : `<${peer}>`;
+  return {peer, slot, parity, audioHz, step, received, text: reply ? `${destination} ${ownCall} ${reply}` : ''};
 }

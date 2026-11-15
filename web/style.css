@@ -685,19 +685,8 @@ html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text
 #ft-slot-progress::-webkit-progress-bar { background: var(--track); }
 #ft-slot-progress::-webkit-progress-value { background: var(--rx2); border-radius: 5px; }
 #ft-slot-progress::-moz-progress-bar { background: var(--rx2); border-radius: 5px; }
-.ft-frequency {
-  max-width: 100%;
-  padding: 4px 7px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: var(--frequency-bg);
-  color: var(--text-strong);
-  text-align: left;
-  font: 600 11px var(--mono);
-}
-.ft-frequency:disabled { opacity: .85; }
-.ft-frequency:enabled { cursor: pointer; }
-.ft-frequency:enabled:hover { border-color: var(--rx2-border); color: var(--rx2); }
+.ft-frequency { color: var(--text-strong); font: 600 11px var(--mono); }
+.ft-slot-header .small-button { padding: 4px 7px; }
 .ft-receive { display: grid; grid-template-columns: minmax(0, 1fr) minmax(94px, 31%); min-height: 0; gap: 8px; }
 .ft-logs { display: grid; grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); gap: 6px; min-width: 0; min-height: 0; }
 .ft8-panel .decoder-text { padding: 5px 6px; }
