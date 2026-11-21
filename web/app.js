@@ -830,6 +830,12 @@ for (const [id, kind] of [['audio-input', 'audioinput'], ['audio-output', 'audio
   } catch (error) { notify(radio.error || error.message, true); }
 };
 $('setup').onclick = openSetup;
+for (const button of document.querySelectorAll('[data-setting-default]')) button.onclick = () => {
+  if (!canControl()) return;
+  const field = document.querySelector(`[data-setting="${button.dataset.settingDefault}"]`);
+  field.value = button.dataset.defaultValue;
+  field.focus();
+};
 for (const button of document.querySelectorAll('[data-close]')) button.onclick = () => $(button.dataset.close).close();
 for (const name of ['filter', 'waterfall']) $(`${name}-toggle`).onclick = () => setMenuOpen(name, $(`${name}-content`).hidden);
 const compactLayout = matchMedia('(max-width: 800px)');

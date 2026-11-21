@@ -560,6 +560,10 @@ legend { padding: 0 7px; color: var(--accent-text); font-size: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .form-grid label, .frequency-dialog label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: var(--text-secondary); }
 .form-grid input, .form-grid select, .frequency-dialog input { width: 100%; border: 1px solid var(--input-border); border-radius: 4px; background: var(--input-bg); color: var(--text); padding: 9px 10px; font-size: 13px; }
+.frequency-setting { display: grid; gap: 7px; }
+.setting-input-actions { display: flex; gap: 8px; }
+.setting-input-actions input { flex: 1; min-width: 0; }
+.setting-input-actions button { flex: 0 0 auto; }
 .form-action { display: flex; align-items: flex-start; flex-direction: column; gap: 9px; font-size: 11px; color: var(--text-secondary); }
 .field-help { color: var(--text-secondary); font-size: 11px; line-height: 1.7; margin-bottom: 0; }
 .option-label { display: flex; align-items: flex-start; gap: 9px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; cursor: pointer; }

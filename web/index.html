@@ -488,9 +488,18 @@
           <label data-en="Shelly IPv4 address">Shelly IPv4-Adresse<input type="text" data-setting="shelly_ptt_ip" placeholder="192.168.10.41" maxlength="15" autocomplete="off" data-control></label>
         </div><p class="field-help" data-en="Leave the IP address empty to disable relay control. External TX2 audio and built-in FT4/FT8 use no additional lead time.">Bei leerer IP-Adresse ist die Relaissteuerung aus. Externes TX2-Audio und die eingebauten FT4/FT8-Modi verwenden keinen zusätzlichen Vorlauf.</p></fieldset>
         <fieldset><legend data-en="Monitoring receivers">Monitoring-Empfänger</legend><div class="form-grid">
-          <label>RX3 · FT8 (Hz)<input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx3_frequency_hz" data-control></label>
-          <label>RX4 · PSK (Hz)<input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx4_frequency_hz" data-control></label>
-          <label><span data-en="RX5 · MM beacon (Hz)">RX5 · MM-Bake (Hz)</span><input type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx5_frequency_hz" data-control></label>
+          <div class="frequency-setting">
+            <label for="setup-rx3-frequency">RX3 · FT8 (Hz)</label>
+            <div class="setting-input-actions"><input id="setup-rx3-frequency" type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx3_frequency_hz" data-control><button type="button" class="small-button" data-setting-default="rx3_frequency_hz" data-default-value="10489540000" aria-label="RX3 auf Default zurücksetzen" data-en-aria-label="Reset RX3 to default" data-control>Default</button></div>
+          </div>
+          <div class="frequency-setting">
+            <label for="setup-rx4-frequency">RX4 · PSK (Hz)</label>
+            <div class="setting-input-actions"><input id="setup-rx4-frequency" type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx4_frequency_hz" data-control><button type="button" class="small-button" data-setting-default="rx4_frequency_hz" data-default-value="10489748821" aria-label="RX4 auf Default zurücksetzen" data-en-aria-label="Reset RX4 to default" data-control>Default</button></div>
+          </div>
+          <div class="frequency-setting">
+            <label for="setup-rx5-frequency"><span data-en="RX5 · MM beacon (Hz)">RX5 · MM-Bake (Hz)</span></label>
+            <div class="setting-input-actions"><input id="setup-rx5-frequency" type="number" min="10489475000" max="10490025000" step="1" required data-setting="rx5_frequency_hz" data-control><button type="button" class="small-button" data-setting-default="rx5_frequency_hz" data-default-value="10489993000" aria-label="RX5 auf Default zurücksetzen" data-en-aria-label="Reset RX5 to default" data-control>Default</button></div>
+          </div>
         </div><p class="field-help" data-en="USB carrier frequencies in whole Hz. All three receivers decode continuously. Save changes below.">USB-Trägerfrequenzen in ganzen Hz. Alle drei Empfänger dekodieren laufend. Änderungen unten speichern.</p></fieldset>
         <fieldset><legend data-en="Pluto and frequency correction">Pluto und Frequenzkorrektur</legend><div class="form-grid">
           <label data-en="Pluto connection">Pluto-Verbindung<select data-setting="pluto_connection" data-control><option value="usb">USB</option><option value="network" data-en="Network">Netzwerk</option></select></label>
