@@ -11,6 +11,8 @@
   --rx1: #55d9ee;
   --rx2: #e8bd68;
   --tx: #fa8f82;
+  --memory-history: #ff606a;
+  --memory-saved: #4ba4ff;
   --control-text: #ffffff;
   --heading-bg: #17222c;
   --text-strong: #dce8ef;
@@ -90,6 +92,8 @@
 }
 
 :root[data-theme="light"] {
+  --memory-history: #c42d45;
+  --memory-saved: #075eb5;
   color-scheme: light;
   --bg: #edf2f7;
   --panel: #ffffff;
@@ -261,6 +265,27 @@
     .wheel-step { padding-left: 12px; border-left: 1px solid var(--line-soft); }
     .wheel-step b { color: var(--text-secondary); font-family: var(--mono); font-weight: 500; }
     .plot-body { position: relative; }
+    .frequency-memory-strip { position: relative; height: 16px; min-width: 0; background: var(--heading-bg); border-bottom: 1px solid var(--line); }
+    #frequency-memory-save { margin-left: auto; padding: 3px 7px; min-height: 22px; white-space: nowrap; font-size: 10px; }
+    .frequency-memory-marker { position: absolute; top: 0; bottom: 0; transform: translateX(-50%); width: 18px; padding: 0; border: 0; border-radius: 2px; background: transparent; cursor: pointer; }
+    .frequency-memory-marker:hover, .frequency-memory-marker:focus-visible { background: var(--axis-hover); outline: 1px solid var(--text-secondary); }
+    .frequency-memory-marker[aria-disabled="true"] { cursor: default; }
+    .frequency-memory-tick { position: absolute; top: 2px; bottom: 1px; width: 2px; background: currentColor; color: var(--memory-history); pointer-events: none; }
+    .frequency-memory-tick::before { content: ''; position: absolute; top: 0; left: -3px; border-top: 5px solid currentColor; border-left: 4px solid transparent; border-right: 4px solid transparent; }
+    .frequency-memory-tick.memories { color: var(--memory-saved); }
+    .frequency-memory-tick.memories::before { top: 0; left: -1px; width: 6px; height: 5px; border: 0; background: currentColor; }
+    .frequency-memory-marker.current { box-shadow: inset 0 0 0 1px var(--text); }
+    .frequency-memory-marker > span { position: absolute; top: 0; left: 50%; padding: 0 2px; border-radius: 2px; background: var(--heading-bg); color: var(--text); font: bold 9px/12px var(--mono); pointer-events: none; }
+    .frequency-memory-picker { position: fixed; margin: 0; padding: 8px; width: max-content; max-width: min(560px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--panel-raised); color: var(--text); box-shadow: 0 5px 20px #0006; }
+    .frequency-memory-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 6px; font-size: 12px; }
+    .frequency-memory-picker button, .frequency-memory-notice button { border: 1px solid var(--button-border); border-radius: 3px; background: var(--button-bg); color: var(--control-text); padding: 6px 8px; font-size: 11px; text-align: left; }
+    #frequency-memory-list { display: grid; gap: 5px; }
+    #frequency-memory-list button { font-family: var(--mono); overflow-wrap: anywhere; }
+    #frequency-memory-list button[data-kind="history"] { border-left: 3px solid var(--memory-history); }
+    #frequency-memory-list button[data-kind="memories"], #frequency-memory-list button[data-replace] { border-left: 3px solid var(--memory-saved); }
+    .frequency-memory-choice { display: flex; gap: 5px; }
+    .frequency-memory-choice > :first-child { flex: 1; }
+    .frequency-memory-notice { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 24px); border: 1px solid var(--line-soft); border-radius: 5px; padding: 8px 12px; background: var(--panel-raised); color: var(--text); box-shadow: 0 4px 16px #0006; font-size: 12px; }
     .spectrum { display: block; width: 100%; height: clamp(88px, 10.8vh, 130px); }
     .plot-label { position: absolute; left: 9px; font: 8px var(--mono); color: #698193; pointer-events: none; }
     .plot-label.top { top: 8px; }
@@ -322,6 +347,7 @@
       .workspace { height: auto; min-height: 0; grid-template-rows: minmax(0, 1fr); }
       .visuals { min-height: 0; gap: 12px; }
       .display { display: grid; grid-template-rows: 35px minmax(30px, .78fr) 26px minmax(40px, 1fr) 22px; flex: 1; min-height: 0; }
+      #fullband { grid-template-rows: 35px 16px minmax(30px, .78fr) 26px minmax(40px, 1fr) 22px; }
       .display-heading { min-height: 0; padding-top: 6px; padding-bottom: 6px; }
       .plot-body { min-height: 0; }
       .spectrum, .waterfall { height: 100%; min-height: 0; }
@@ -1018,6 +1044,7 @@ button.ft-decode-line:disabled { opacity: 1; }
     grid-template-rows: var(--compact-heading) var(--compact-spectrum) var(--compact-axis) minmax(60px, 1fr) var(--compact-footer);
   }
   .display-heading { min-height: var(--compact-heading); padding: 3px 10px; }
+  #fullband { grid-template-rows: var(--compact-heading) 16px var(--compact-spectrum) var(--compact-axis) minmax(60px, 1fr) var(--compact-footer); min-height: calc(var(--compact-display-min) + 16px); }
   .frequency-axis { height: var(--compact-axis); }
   .display-footer { padding: 2px 10px; }
   .zoom-plots { grid-template-rows: var(--compact-spectrum) var(--compact-axis) minmax(60px, 1fr) var(--compact-footer); }

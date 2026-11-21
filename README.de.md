@@ -230,6 +230,47 @@ Rechts neben der Downlink-Anzeige steht die Downlink-Frequenz unter dem Mauszeig
 
 ![Empfangs- und Sendefrequenzen](docs/frequency.png)
 
+### Frequenzverlauf und Memories
+
+Die schmale Leiste über dem Fullband-Spektrum zeigt **rote Dreiecke für Fullband-Ziele**
+und **blaue Fähnchen für Memories** an der jeweiligen RX-Frequenz. RX1/TX1 und RX2/TX2
+haben jeweils drei rote und drei blaue Speicherplätze sowie eine eigene aktive Auswahl.
+
+- **Klick oder Tippen im Fullband-Spektrum bzw. -Wasserfall:** Das neu eingestellte
+  RX/TX-Paar wird rot gespeichert und dieser Platz wird aktiv. Das gilt auch beim
+  Rechtsklick zum reinen RX-Abstimmen. Ein weiterer Fullband-Klick legt das nächste
+  Ziel ab. Sind drei rote Plätze belegt, entfällt das älteste Ziel; ein identisches
+  Paar wird wiederverwendet.
+- **Speichern RX1/RX2:** Das aktuelle Paar in einem freien blauen Platz ablegen und
+  diesen aktivieren. Ein weiterer Speichervorgang verwendet den nächsten freien Platz,
+  auch bei identischer Ausgangsfrequenz: Die nächste Zoom-Änderung betrifft nur den neuen
+  Platz. Sind alle drei Plätze belegt, lässt sich der zu ersetzende Memory gezielt auswählen.
+- **Feinabstimmung im Zoom:** Klick, Rechtsklick, Mausrad oder Wischen im Zoom-Spektrum
+  bzw. -Wasserfall aktualisieren immer das zuletzt aktive rote oder blaue Paar.
+  Das gilt für RX allein, TX allein (Shift + Mausrad) und beide (Strg + Mausrad).
+  Andere Speicher bleiben erhalten; es wird kein zusätzlicher Platz belegt.
+  Die Änderung wird erst nach Bestätigung durch das Backend gespeichert.
+- **Linksklick auf eine Markierung:** Beide gespeicherten Frequenzen einschließlich
+  TX-Versatz exakt wiederherstellen und diesen Platz für die nächste Feinabstimmung
+  aktivieren. Beim Abruf entsteht kein zusätzlicher roter Eintrag. Während einer
+  Sendung ist der Abruf gesperrt.
+- **Rechtsklick auf eine Markierung:** Den Eintrag löschen. Wird der aktive Platz
+  gelöscht, bearbeitet der Zoom keinen Speicher mehr, bis wieder ein Platz aktiviert
+  wird. Löschen und Ersetzen lassen sich acht Sekunden lang über **Rückgängig**
+  zurücknehmen, solange keine weitere Speicheränderung erfolgt.
+
+Die **helle Umrandung** kennzeichnet den für die Zoom-Feinabstimmung aktiven Platz.
+Beim Darüberfahren werden RX, TX und die aktive Auswahl angezeigt. Liegen mehrere
+Markierungen dicht beieinander, öffnet ein Klick eine Auswahl mit Abruf- und
+Löschmöglichkeit. Auch bei identischen Frequenzen bleiben rote und blaue Plätze
+getrennt auswählbar. Mausrad und Wischen im Fullband ändern keine gespeicherten Werte.
+
+Die Leiste folgt der RX1/RX2-Auswahl. Frequenzpaare und aktive Auswahl bleiben in diesem
+Browser nach Neuladen erhalten; beim Laden werden keine Frequenzen automatisch abgerufen.
+Bereits vorhandene Frequenzspeicher bleiben beim Update erhalten. Ohne gespeicherte
+aktive Auswahl muss zuerst ein Platz durch Fullband-Klick, Speichern oder Abruf
+aktiviert werden, bevor der Zoom einen Speicher verändert.
+
 ### Menü Wasserfall
 
 Farbe, Spektrumglättung (**Moving Average**) und Anzeigepegel wählen. Größere Mittelungswerte ergeben ein ruhigeres Spektrum, kleinere reagieren schneller. **Untergrenze/Obergrenze** so einstellen, dass der Wasserfall gut erkennbar ist.

@@ -235,6 +235,167 @@ def main():
             wait(lambda:execute('return document.getElementById("role").textContent')=='Bediener')
             wait(lambda:execute('return !document.getElementById("copy-rx-tx").disabled'))
             wait(lambda:execute('return Number(document.getElementById("fullband").dataset.frames)>1 && Number(document.getElementById("zoom-display").dataset.frames)>1'))
+            # The latest fullband/save/recall action chooses the slot edited by all zoom gestures.
+            def memory_data():
+                return execute('return JSON.parse(localStorage.getItem("qo100.frequencyMemories"))')
+            def memory_bank(channel=1):
+                return memory_data()['receivers'][str(channel)]
+            def memory_active(channel=1):
+                return memory_data()['active'][str(channel)]
+            def frequency_pair(channel=1):
+                return {'rx': hz('rx'+str(channel)), 'tx': hz('tx')}
+            def stored_active(channel=1):
+                active=memory_active(channel)
+                return memory_bank(channel)[active['kind']][active['index']] if active else None
+            def memory_settled():
+                wait(lambda:execute('return !document.getElementById("frequency-memory-save").disabled && !document.querySelector(".frequency-value .pending, .tx-value.pending")'))
+            def set_tx(frequency):
+                click('#frequencytx');changed('#frequency-input',f'{frequency/1e6:.6f}')
+                execute('document.getElementById("frequency-form").requestSubmit()')
+                wait(lambda:hz('tx')==frequency);memory_settled()
+            def set_rx(channel,frequency):
+                execute('document.getElementById(arguments[0]).dispatchEvent(new MouseEvent("dblclick",{bubbles:true}))','frequency'+str(channel))
+                changed('#frequency-input',f'{frequency/1e6:.6f}')
+                execute('document.getElementById("frequency-form").requestSubmit()')
+                wait(lambda:hz('rx'+str(channel))==frequency);memory_settled()
+            def zoom_edit(kind,action,channel=1):
+                wait(zoom_follows_rx)
+                before=memory_bank(channel);active=memory_active(channel)
+                assert active['kind']==kind
+                action();memory_settled()
+                assert memory_active(channel)==active, 'Zoom must keep editing the same color and slot'
+                assert stored_active(channel)==frequency_pair(channel), 'The active slot must retain both exact final frequencies'
+                after=memory_bank(channel)
+                other='memories' if kind=='history' else 'history'
+                assert after[other]==before[other], 'Zoom changed the other memory color'
+                assert len(after['history'])==len(before['history'])
+                if kind=='memories':
+                    assert all(after['memories'][i]==before['memories'][i] for i in range(3) if i!=active['index']), 'Zoom changed another blue slot'
+            def marker(pair):
+                return f'#frequency-memory-strip button[data-rx="{pair["rx"]}"][data-tx="{pair["tx"]}"]'
+            original_pair=frequency_pair()
+            set_tx(original_pair['tx']+750)
+            click('#frequency-memory-save')
+            assert memory_active()=={'kind':'memories','index':0}
+            execute('''window.__memoryKeyEvents=0;
+                window.__memoryKeyProbe=()=>window.__memoryKeyEvents++;
+                document.addEventListener('keydown',window.__memoryKeyProbe);
+                document.querySelector('#frequency-memory-strip button').focus();''')
+            key('keyDown');key('keyUp')
+            memory_settled()
+            assert execute('return window.__memoryKeyEvents')==0
+            execute('document.removeEventListener("keydown",window.__memoryKeyProbe)')
+            zoom_edit('memories',lambda:wheel('#zoom'))
+            before=frequency_pair();zoom_edit('memories',lambda:wheel('#zoom-spectrum',shift=True))
+            assert hz('rx1')==before['rx'] and hz('tx')==before['tx']+25
+            before=frequency_pair();zoom_edit('memories',lambda:wheel('#zoom',ctrl=True))
+            assert hz('rx1')==before['rx']-25 and hz('tx')==before['tx']-25
+            zoom_edit('memories',lambda:plot('#zoom',.54))
+            before=hz('tx');zoom_edit('memories',lambda:plot('#zoom-spectrum',.53,button=2))
+            assert hz('tx')==before
+            memory_a=frequency_pair()
+            assert memory_bank()['memories']==[memory_a,None,None]
+            plot('#wide',.35);memory_settled()
+            assert memory_active()=={'kind':'history','index':0}
+            assert memory_bank()['history']==[frequency_pair()], 'Fullband must save the destination rather than the outgoing pair'
+            zoom_edit('history',lambda:wheel('#zoom'))
+            zoom_edit('history',lambda:wheel('#zoom-spectrum',shift=True))
+            zoom_edit('history',lambda:wheel('#zoom-spectrum',ctrl=True))
+            zoom_edit('history',lambda:plot('#zoom-spectrum',.56))
+            zoom_edit('history',lambda:plot('#zoom',.54,button=2))
+            zoom_edit('history',lambda:execute('for(let i=0;i<12;i++)document.getElementById("zoom").dispatchEvent(new WheelEvent("wheel",{deltaY:100,bubbles:true,cancelable:true}))'))
+            refined_red=frequency_pair()
+            assert memory_bank()['memories']==[memory_a,None,None]
+            before_history=memory_bank()['history']
+            wheel('#wide');memory_settled();wheel('#wide-spectrum');memory_settled()
+            assert memory_bank()['history']==before_history, 'Fullband wheel tuning does not edit or allocate a slot'
+            plot('#wide-spectrum',.58);memory_settled()
+            assert memory_bank()['history']==[frequency_pair(),refined_red]
+            before_tx=hz('tx');plot('#wide-spectrum',.62,button=2);memory_settled()
+            assert memory_bank()['history'][0]==frequency_pair() and hz('tx')==before_tx
+            plot('#wide-spectrum',.60,touch=True);memory_settled()
+            assert memory_bank()['history'][0]==frequency_pair()
+            before_history=memory_bank()['history'];before_invalid=frequency_pair()
+            plot('#wide',.99);memory_settled()
+            assert frequency_pair()==before_invalid and memory_bank()['history']==before_history
+            memory_b=frequency_pair()
+            plot('#wide',.65);memory_settled()
+            assert memory_bank()['history'][0]==frequency_pair() and memory_bank()['history'][1]==memory_b
+            before_history=memory_bank()['history']
+            click(marker(memory_a));memory_settled()
+            assert frequency_pair()==memory_a and memory_bank()['history']==before_history
+            assert memory_active()=={'kind':'memories','index':0}, 'Recall must activate the selected blue slot'
+            zoom_edit('memories',lambda:wheel('#zoom',shift=True));memory_a=frequency_pair()
+            click(marker(memory_b));memory_settled()
+            assert frequency_pair()==memory_b and memory_active()['kind']=='history'
+            click('#frequency-memory-save')
+            assert memory_active()=={'kind':'memories','index':1}
+            zoom_edit('memories',lambda:wheel('#zoom-spectrum',ctrl=True))
+            plot('#wide',.72);memory_settled();click('#frequency-memory-save')
+            protected=memory_bank()['memories']
+            assert len([p for p in protected if p])==3
+            click('#frequency-memory-save')
+            assert memory_active()=={'kind':'memories','index':2}
+            assert execute('return document.getElementById("frequency-memory-picker").matches(":popover-open")')
+            click('#frequency-memory-close')
+            plot('#wide',.85);memory_settled();memory_d=frequency_pair()
+            assert memory_bank()['memories']==protected
+            click('#frequency-memory-save')
+            assert execute('return document.getElementById("frequency-memory-picker").matches(":popover-open")')
+            assert memory_active()['kind']=='history', 'Opening replacement choices must not change the active slot'
+            click('#frequency-memory-list button[data-replace="1"]')
+            assert memory_bank()['memories']==[protected[0],memory_d,protected[2]] and memory_active()=={'kind':'memories','index':1}
+            click('#frequency-memory-undo')
+            assert memory_bank()['memories']==protected and memory_active()['kind']=='history'
+            execute('document.querySelector(arguments[0]).dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,cancelable:true}))',marker(memory_a))
+            assert memory_bank()['memories']==[None,protected[1],protected[2]]
+            click('#frequency-memory-undo');assert memory_bank()['memories']==protected
+            save_screenshot(capture.with_name(capture.stem+'-frequency-memories.png'))
+            rx1_bank=memory_bank();rx1_active=memory_active()
+            click('#frequency2');memory_settled()
+            assert memory_bank(2)=={'history':[],'memories':[None,None,None]}
+            rx2_original=frequency_pair(2);click('#frequency-memory-save')
+            zoom_edit('memories',lambda:wheel('#zoom',shift=True),2)
+            rx2_blue=frequency_pair(2)
+            click('#frequency-memory-save')
+            assert memory_active(2)=={'kind':'memories','index':1}
+            zoom_edit('memories',lambda:wheel('#zoom',shift=True),2)
+            assert memory_bank(2)['memories'][0]==rx2_blue, 'Save creates a new blue slot for subsequent zoom edits'
+            assert execute('return document.querySelectorAll("#frequency-memory-strip button").length')==1
+            click('#frequency-memory-strip button')
+            assert execute('return document.querySelectorAll("#frequency-memory-list [data-recall]").length')==2
+            click('#frequency-memory-list [data-recall][data-index="0"]');memory_settled()
+            assert frequency_pair(2)==rx2_blue and memory_active(2)=={'kind':'memories','index':0}
+            plot('#wide',.42);memory_settled()
+            zoom_edit('history',lambda:wheel('#zoom',ctrl=True),2)
+            assert memory_bank()==rx1_bank and memory_active()==rx1_active, 'RX2 zoom must leave both RX1 banks and its selection intact'
+            set_rx(2,rx2_original['rx']);set_tx(rx2_original['tx'])
+            click('#frequency1');memory_settled()
+            assert memory_active()==rx1_active
+            set_rx(1,original_pair['rx']);set_tx(original_pair['tx'])
+            persisted=execute('return localStorage.getItem("qo100.frequencyMemories")')
+            call('POST',f'/session/{session}/url',{'url':url})
+            wait(lambda:execute('return document.getElementById("role").textContent')=='Bediener')
+            memory_settled()
+            assert execute('return localStorage.getItem("qo100.frequencyMemories")')==persisted
+            assert frequency_pair()==original_pair, 'Reloading must not tune the radio to the persisted active slot'
+            assert memory_bank()['memories']==protected and memory_active()==rx1_active
+            for width,height in [(1440,720),(1024,768),(390,844)]:
+                cdp('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':width<801})
+                assert execute('''const strip=document.getElementById('frequency-memory-strip').getBoundingClientRect(),
+                    spectrum=document.getElementById('wide-spectrum').getBoundingClientRect(),
+                    wide=document.getElementById('wide').getBoundingClientRect();
+                    return document.documentElement.scrollWidth<=innerWidth && strip.height===16 && Math.abs(strip.bottom-spectrum.top)<1 && Math.abs(strip.left-spectrum.left)<1 && Math.abs(strip.width-spectrum.width)<1 && wide.height>=40;'''), (width,height)
+            cdp('Emulation.setDeviceMetricsOverride',{'width':1440,'height':1000,'deviceScaleFactor':1,'mobile':False})
+            print('Frequency-memory browser checks passed: red/blue zoom editing, slot switching, exact RX/TX, burst wheel, recall, replacement, RX1/RX2 and persistence', flush=True)
+            # Drop audio queued under earlier RX2 tuning epochs before decoder protocol checks.
+            ft_socket.setblocking(False)
+            try:
+                while ft_socket.recv(4096): pass
+            except BlockingIOError:
+                pass
+            finally:
+                ft_socket.settimeout(5)
             decoder_probe='<b>abc</b> äöü\n'
             decoder_socket.sendto(decoder_probe.encode('utf-8'), ('127.0.0.1', decoder_text_port))
             wait(lambda:execute('return document.getElementById("decoder-text").textContent')==decoder_probe)

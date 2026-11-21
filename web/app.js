@@ -11,6 +11,7 @@ import {drawWaterfallPreview, waterfallRaster} from './waterfall-tx.js';
 import {canStartFtAuto, ftCall, ftGrid, ftPeriod, ftReply, nextFtAutoStep, parseFtContact, splitFtMessage} from './ft-qso.js';
 import {countryFlagPosition, dxccForCall} from './dxcc.js';
 import {text as t, language, applyLanguage, setLanguagePreference, languagePreference} from './language.js';
+import {FrequencyMemoryView} from './frequency-memory-view.js';
 
 const $ = id => document.getElementById(id);
 let socket, operator = false, state = {}, selected = 1, together = true, request = 0;
@@ -21,11 +22,13 @@ let filterBusy = 0;
 let menuDismissedAt = -Infinity;
 let cursor = null, cursorFrame = 0;
 let txMonitorPrevious = 0;
+let frequencyMemoryView = null, frequencyNavigationBusy = 0, frequencyTuningOrder = 0;
 const pending = new Map(), wanted = new Map(), timers = new Map(), stateWaiters = new Set();
 const views = [new RadioDisplay($('fullband')), new RadioDisplay($('zoom-display'), true)];
 const frames = new FrameAssembler(frame => {
   const view = views[frame.stream === 0 ? 0 : 1];
   view.accept(frame);
+  if (view === views[0]) updateFrequencyMemories();
   if (digitalView === 'rtty') rtty.waterfall.accept(frame);
   if (ft8Visible()) ftWaterfall.accept(frame);
   if (cursor?.view === view) queueCursorUpdate();
@@ -180,29 +183,78 @@ function setFrequency(channel, hz, pair = selected) {
   const mode = digitalView;
   const digitalChannel = key === '2' ? 'rx' : key === 'tx2' ? 'tx' : null;
   wanted.set(key, {hz, id: promise.id}); renderFrequencies();
-  promise.then(answer => {
+  return promise.then(answer => {
     if (answer.status !== 0) throw fail(`Frequenz wurde nicht übernommen (Status ${answer.status}).`);
     if (mode && digitalChannel && digitalPairs[mode]?.[digitalChannel] !== hz)
       saveDigitalPair(mode, {...digitalPairs[mode], [digitalChannel]: hz});
+    return true;
   }).catch(error => {
     if (wanted.get(key)?.id === promise.id) {
       wanted.delete(key); applyDigitalPair();
       renderFrequencies(); renderFt8Controls(); renderWaterfallTxControls(); report(error);
     }
+    return false;
   });
 }
-function tune(hz, coupled = false) {
+function applyPlotTargets(target, remember = false, refine = false) {
+  const channel = selected;
+  const destination = {rx: target.frequency ?? frequency(channel), tx: target.tx ?? frequency('tx')};
+  const ref = refine ? frequencyMemoryView.selection(channel) : null;
+  const navigationSession = session, revision = ++frequencyTuningOrder;
+  if (target.tx !== undefined) stopPtt();
+  frequencyNavigationBusy++;
+  const changes = [];
+  if (target.rx !== undefined) changes.push(setFrequency(target.rx, target.frequency));
+  if (target.tx !== undefined) changes.push(setFrequency('tx', target.tx, channel));
+  updateFrequencyMemories();
+  Promise.all(changes).then(accepted => {
+    if (navigationSession !== session || !accepted.every(Boolean)) return;
+    if (remember) frequencyMemoryView.record(channel, destination);
+    else if (refine) frequencyMemoryView.refine(channel, ref, destination, revision);
+  }).finally(() => { frequencyNavigationBusy--; updateFrequencyMemories(); });
+}
+
+function tune(hz, coupled = false, remember = false, refine = false) {
   if (!canControl()) return;
   try {
     const target = tuneTargets({selected, frequency: hz, rx: frequency(selected), tx: frequency('tx'), rxCenter: Number(state.settings.rx_center_hz), txCenter: Number(state.settings.tx_center_hz), together: coupled});
-    if (target.tx !== undefined) stopPtt();
-    setFrequency(target.rx, target.frequency);
-    if (target.tx !== undefined) setFrequency('tx', target.tx);
+    applyPlotTargets(target, remember, refine);
   } catch (error) { report(error); }
 }
-function fineTune(channel, delta) {
+
+function updateFrequencyMemories() {
+  if (!frequencyMemoryView) return;
+  const rx = frequency(selected), tx = frequency('tx');
+  const pair = Number.isSafeInteger(rx) && Number.isSafeInteger(tx) ? {rx, tx} : null;
+  const settled = !frequencyNavigationBusy && !wanted.has(String(selected)) && !wanted.has(selected === 2 ? 'tx2' : 'tx');
+  const sending = state.tx?.ptt || state.tx2?.ptt || rttyTxActive() || sstvTxActive() || waterfallTxActive() ||
+    ft8Pending || ftAutoQso || (state.ft8_tx?.phase ?? 'idle') !== 'idle';
+  frequencyMemoryView.update({channel: selected, pair, geometry: views[0].geometry, canSave: !!pair && settled,
+    canRecall: !!pair && settled && canControl() && !(state.flags & 6) && !sending});
+}
+
+async function recallFrequencyMemory(channel, target, ref) {
+  if (channel !== selected || !frequencyMemoryView.context.canRecall) return;
+  try {
+    validateFrequency(target.rx, Number(state.settings.rx_center_hz), `RX${channel}`);
+    validateFrequency(target.tx, Number(state.settings.tx_center_hz), `TX${channel}`);
+    const navigationSession = session;
+    frequencyNavigationBusy++; updateFrequencyMemories();
+    try {
+      const accepted = await Promise.all([setFrequency(channel, target.rx), setFrequency('tx', target.tx, channel)]);
+      if (accepted.every(Boolean) && navigationSession === session) frequencyMemoryView.select(channel, ref);
+    } finally { frequencyNavigationBusy--; updateFrequencyMemories(); }
+  } catch (error) { report(error); }
+}
+function fineTune(channel, delta, refine = false) {
   if (!canControl()) return;
-  try { setFrequency(channel, frequency(channel) + delta); } catch (error) { report(error); }
+  try {
+    const hz = frequency(channel) + delta;
+    if (refine && channel === selected) {
+      validateFrequency(hz, Number(state.settings.rx_center_hz), `RX${channel}`);
+      applyPlotTargets({rx: channel, frequency: hz}, false, true);
+    } else setFrequency(channel, hz);
+  } catch (error) { report(error); }
 }
 function canFineTuneRx2() {
   return canControl() && Number.isSafeInteger(frequency(2));
@@ -248,6 +300,7 @@ function renderFrequencies() {
   const offset = tx - (rx - DOWNLINK_UPLINK_HZ);
   $('offset-status').textContent = t(`RX${selected} ausgewählt`, `RX${selected} selected`) + (Number.isSafeInteger(offset) ? ` · ${t('TX-Versatz', 'TX offset')} ${offset >= 0 ? '+' : '−'}${Math.abs(offset).toLocaleString('de-DE')} Hz` : '');
   queueCursorUpdate();
+  updateFrequencyMemories();
 }
 function queueCursorUpdate() {
   if (cursorFrame) return;
@@ -411,6 +464,7 @@ function syncRx2Subscription() {
   }
 }
 function controls() {
+  updateFrequencyMemories();
   syncRx2Subscription();
   subscribeDigitalView();
   applyDigitalPair();
@@ -755,9 +809,9 @@ function bindPlots(view, step) {
     let touchEndedAt = -Infinity;
     canvas.addEventListener('click', event => {
       if (event.pointerType === 'touch' || event.pointerType === 'pen' || performance.now() - touchEndedAt < 500 || performance.now() - menuDismissedAt < 400) return;
-      const hz = view.frequencyAt(event); if (hz !== null) tune(hz, true);
+      const hz = view.frequencyAt(event); if (hz !== null) tune(hz, true, !view.zoom, view.zoom);
     });
-    canvas.addEventListener('contextmenu', event => { event.preventDefault(); const hz = view.frequencyAt(event); if (hz !== null) tune(hz, false); });
+    canvas.addEventListener('contextmenu', event => { event.preventDefault(); const hz = view.frequencyAt(event); if (hz !== null) tune(hz, false, !view.zoom, view.zoom); });
     canvas.addEventListener('wheel', event => {
       if (!canControl() || !view.geometry) return;
       event.preventDefault();
@@ -767,17 +821,15 @@ function bindPlots(view, step) {
       try {
         const targets = wheelTargets({selected, rx: frequency(selected), tx: frequency('tx'), delta,
           rxCenter: Number(state.settings.rx_center_hz), txCenter: Number(state.settings.tx_center_hz), shift: event.shiftKey, ctrl: event.ctrlKey});
-        if (targets.tx !== undefined) stopPtt();
-        if (targets.rx !== undefined) setFrequency(targets.rx, targets.frequency);
-        if (targets.tx !== undefined) setFrequency('tx', targets.tx);
+        applyPlotTargets(targets, false, view.zoom);
       } catch (error) { report(error); }
     }, {passive: false});
     const adjust = canvas.hasAttribute('data-waterfall') ? delta => {
-      if (view.geometry) fineTune(selected, delta * step);
+      if (view.geometry) fineTune(selected, delta * step, view.zoom);
     } : null;
     bindPlotTouch(canvas, adjust, (event, tap) => {
       touchEndedAt = performance.now();
-      if (tap && touchEndedAt - menuDismissedAt >= 400) { const hz = view.frequencyAt(event); if (hz !== null) tune(hz, together); }
+      if (tap && touchEndedAt - menuDismissedAt >= 400) { const hz = view.frequencyAt(event); if (hz !== null) tune(hz, together, !view.zoom, view.zoom); }
     });
   }
 }
@@ -2006,6 +2058,8 @@ $('language').onchange = () => {
   setFullbandAxis(views[0].axisMode); controls();
 };
 applyLanguage(); views.forEach(view => view.setLanguage(language));
+frequencyMemoryView = new FrequencyMemoryView({saved: readPreference('frequencyMemories'),
+  persist: value => writePreference('frequencyMemories', value), recall: recallFrequencyMemory, notify});
 bindPlots(views[0], 250); bindPlots(views[1], 25);
 bindFrequency(1, $('frequency1')); bindFrequency(2, $('frequency2')); bindFrequency('tx', $('frequencytx'));
 const savedTxMonitorVolume = Number(readPreference('txMonitorVolume') ?? 0);
