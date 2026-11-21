@@ -368,10 +368,17 @@ export class RadioDisplay {
   }
   drawSpectrum() {
     const canvas = this.spectrum, ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+    const scale = this.dpr || 1, range = this.ceiling - this.floor;
+    // Keep labels readable in short plots, with every tick on a multiple of 5 dB.
+    const step = Math.max(5, Math.ceil(range * 14 * scale / Math.max(1, h) / 5) * 5);
+    const ticks = [];
+    for (let level = Math.ceil(this.floor / step) * step; level <= this.ceiling; level += step) {
+      ticks.push({level, y: h * (this.ceiling - level) / range});
+    }
     ctx.clearRect(0, 0, w, h);
     ctx.strokeStyle = '#263c4b'; ctx.lineWidth = 1;
     ctx.beginPath();
-    for (let y = 1; y < 5; y++) { ctx.moveTo(0, y * h / 5); ctx.lineTo(w, y * h / 5); }
+    for (const {y} of ticks) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
     for (let x = 1; x < 12; x++) { ctx.moveTo(x * w / 12, 0); ctx.lineTo(x * w / 12, h); }
     ctx.stroke();
     if (this.frame) {
@@ -385,9 +392,14 @@ export class RadioDisplay {
       this.paintMarkers(ctx, w, h);
       this.drawPeakLabels(ctx, w, h);
     }
-    ctx.font = `${9 * (this.dpr || 1)}px monospace`; ctx.fillStyle = '#819bad';
-    ctx.fillText(`${this.ceiling.toFixed(1)} dBFS`, 7 * this.dpr, 12 * this.dpr);
-    ctx.fillText(this.floor.toFixed(1), 7 * this.dpr, h - 5 * this.dpr);
+    ctx.save();
+    ctx.font = `${9 * scale}px monospace`; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#819bad'; ctx.strokeStyle = '#080f16'; ctx.lineWidth = 3 * scale;
+    for (const {level, y} of ticks) {
+      const text = `${level} dBFS`, labelY = Math.max(6 * scale, Math.min(h - 6 * scale, y));
+      ctx.strokeText(text, 7 * scale, labelY); ctx.fillText(text, 7 * scale, labelY);
+    }
+    ctx.restore();
   }
   drawPeakLabels(ctx, width, height) {
     if (this.zoom) return;
@@ -483,6 +495,14 @@ export class RadioDisplay {
       const label = document.createElement('span'); label.className = 'bandplan-label'; label.textContent = item.text;
       section.append(label); return section;
     }));
+  }
+  levelAt(event) {
+    if (event.currentTarget !== this.spectrum || !this.frame) return null;
+    const bounds = this.spectrum.getBoundingClientRect();
+    if (bounds.height <= 0 || !Number.isFinite(event.clientY)) return null;
+    const position = (event.clientY - bounds.top) / bounds.height;
+    if (position < 0 || position > 1) return null;
+    return this.ceiling - position * (this.ceiling - this.floor);
   }
   frequencyAt(event) {
     if (!this.geometry) return null;

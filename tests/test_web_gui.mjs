@@ -34,7 +34,32 @@ assert.deepEqual(filterValues(2500,2700,'low'),{low_hz:2200,high_hz:2700});
 assert.deepEqual(filterValues(301,500,'high'),{low_hz:301,high_hz:801});
 assert.deepEqual(filterValues(449.5,950.5),{low_hz:449.5,high_hz:950.5});
 
-const {zoomMatchesFrequency, FrameAssembler, displayOffsets, NoiseFloor, SpectrumPeaks, peakLabels, SpectrumAverage, axisFrequency, NB_BANDPLAN, bandplanSegments, AXIS_MODES} = await moduleAt('radio-display.js');
+const {RadioDisplay, zoomMatchesFrequency, FrameAssembler, displayOffsets, NoiseFloor, SpectrumPeaks, peakLabels, SpectrumAverage, axisFrequency, NB_BANDPLAN, bandplanSegments, AXIS_MODES} = await moduleAt('radio-display.js');
+// Fractional automatic limits must produce labelled, integral 5-dB grid lines.
+for (const zoom of [false,true]) for (const dpr of [1,2]) for (const height of [85,150,300]) {
+  const lines=[],labels=[];
+  const ctx={clearRect(){},beginPath(){},moveTo(x,y){this.start=[x,y];},lineTo(x,y){if(this.start?.[1]===y)lines.push(y);},
+    stroke(){},save(){},restore(){},strokeText(){},fillText(text,x,y){labels.push({text,y});}};
+  const view=Object.assign(Object.create(RadioDisplay.prototype),{zoom,dpr,floor:-72.3,ceiling:-27.3,
+    spectrum:{width:800*dpr,height:height*dpr,getContext:()=>ctx,getBoundingClientRect:()=>({top:50,height})}});
+  view.drawSpectrum();
+  assert(labels.length>1);assert.equal(lines.length,labels.length);
+  labels.forEach(({text,y},i)=>{
+    assert(/^-?\d+ dBFS$/.test(text));
+    const level=Number(text.split(' ')[0]);assert.equal(Math.abs(level%5),0);
+    assert(level>=view.floor && level<=view.ceiling);
+    assert(Math.abs(lines[i]-height*dpr*(view.ceiling-level)/(view.ceiling-view.floor))<1e-9);
+    assert(y>=0 && y<=height*dpr);
+  });
+  const event={currentTarget:view.spectrum,clientY:50+height/2};
+  assert.equal(view.levelAt(event),null,'No FFT must leave the cursor level empty');
+  view.frame={};
+  assert.equal(view.levelAt({...event,clientY:50}),view.ceiling);
+  assert.equal(view.levelAt({...event,clientY:50+height}),view.floor);
+  assert(Math.abs(view.levelAt(event)+49.8)<1e-9,'Cursor level must follow Y, independent of DPR');
+  assert.equal(view.levelAt({...event,currentTarget:{}}),null,'Waterfalls and axes have no cursor level');
+  assert.equal(view.levelAt({...event,clientY:49}),null);
+}
 assert.deepEqual(AXIS_MODES.map(mode=>mode.value),['bandplan','downlink','uplink','pluto-rx','pluto-tx']);
 assert.equal(NB_BANDPLAN[0].start,10489500000);assert.equal(NB_BANDPLAN.at(-1).end,10490000000);
 for(let i=1;i<NB_BANDPLAN.length;i++)assert.equal(NB_BANDPLAN[i-1].end,NB_BANDPLAN[i].start,'Bandplan has a gap or overlap');

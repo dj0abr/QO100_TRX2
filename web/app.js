@@ -257,6 +257,10 @@ function queueCursorUpdate() {
     const node = $('cursor-downlink'), text = frequencyText(downlink);
     if (node.textContent !== text) node.textContent = text;
     node.dataset.hz = Number.isSafeInteger(downlink) ? String(downlink) : '';
+    const level = cursor?.view.levelAt({currentTarget: cursor.canvas, clientY: cursor.y});
+    const levelNode = $('cursor-level'), hasLevel = Number.isFinite(level);
+    levelNode.textContent = hasLevel ? level.toFixed(1) : '—';
+    levelNode.dataset.dbfs = hasLevel ? String(level) : '';
   });
 }
 function rangePaint(input) {
@@ -272,6 +276,7 @@ function renderWaterfallSettings() {
   views.forEach(view => view.setOffsets(waterfallOffsets.floor, waterfallOffsets.ceiling));
   rtty.waterfall.offsets = ftWaterfall.offsets = waterfallOffsets;
   renderNoiseLevels();
+  queueCursorUpdate();
 }
 function renderNoiseLevels() {
   const format = value => value.toLocaleString('de-DE', {minimumFractionDigits: 1, maximumFractionDigits: 1});
@@ -740,7 +745,7 @@ function bindPlots(view, step) {
   for (const canvas of [...view.element.querySelectorAll('[data-tune]'), view.axis]) {
     canvas.addEventListener('pointermove', event => {
       if (event.pointerType !== 'mouse') return;
-      cursor = {view, canvas, x: event.clientX}; queueCursorUpdate();
+      cursor = {view, canvas, x: event.clientX, y: event.clientY}; queueCursorUpdate();
     });
     canvas.addEventListener('pointerleave', () => {
       if (cursor?.canvas === canvas) { cursor = null; queueCursorUpdate(); }
