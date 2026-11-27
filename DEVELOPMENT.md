@@ -18,9 +18,12 @@ Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
 ```
 
 Das erste Skript installiert bei jedem Aufruf die benötigten Debian-Pakete und
-baut Backend, Pluto-Treiber, WebSocket-Adapter und den RX3-FT8-Monitor mit libft8. Es konfiguriert den Webadapter auch dann mit, wenn er zuvor im
-Build abgeschaltet war. Standardmäßig werden höchstens vier parallele
-Build-Jobs verwendet; optional z. B. `CMAKE_BUILD_PARALLEL_LEVEL=2 ./build_all.sh`.
+baut Backend, Pluto-Treiber, WebSocket-Adapter und den RX3-FT8-Monitor mit libft8.
+Bei einer frischen Installation lädt es den festgelegten libft8-Quellstand von
+GitHub und speichert ihn unter `build/libft8/`. Es konfiguriert den Webadapter
+auch dann mit, wenn er zuvor im Build abgeschaltet war. Standardmäßig verwendet
+das Skript höchstens vier parallele Build-Jobs. Mit
+`CMAKE_BUILD_PARALLEL_LEVEL=2 ./build_all.sh` lassen sich zum Beispiel zwei wählen.
 Die benötigten Entwicklungspakete stehen unter **Bauen**.
 
 Das zweite Skript startet Backend, FT8-Empfänger und Webadapter mit
@@ -72,9 +75,10 @@ cmake --build build -j
 
 Für die Webbridge und RX3 wird ein installiertes libft8 ab 0.3.1 benötigt.
 Bei direktem CMake-Aufruf lässt sich das Installationspräfix mit
-`-Dlibft8_ROOT=/pfad/zur/installation` angeben. `build_all.sh` baut es
-standardmäßig aus `../../ft8/libft8`. `LIBFT8_SOURCE_DIR` überschreibt den
-Quellpfad, `LIBFT8_ROOT` wählt ein bereits installiertes Paket.
+`-Dlibft8_ROOT=/pfad/zur/installation` angeben. `build_all.sh` verwendet den
+lokalen Checkout unter `../../ft8/libft8`, falls vorhanden. `LIBFT8_SOURCE_DIR`
+wählt einen anderen Checkout. `LIBFT8_ROOT` hat Vorrang und verwendet ein
+bereits installiertes Paket.
 
 Der Adapter läuft zusätzlich zum Backend. Währenddessen darf kein weiteres GUI direkt
 den Backend-UDP-Port abonnieren. Für einen Build ohne Adapter: `-DQO100_BUILD_WEBBRIDGE=OFF`.

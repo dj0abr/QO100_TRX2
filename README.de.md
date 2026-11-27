@@ -60,8 +60,12 @@ cd QO100_TRX2
 ./build_all.sh
 ```
 
-Das Skript installiert die benötigten Pakete und baut alle Programme. Auf einem SBC werden fehlende Bibliotheken automatisch für dessen Prozessor gebaut.
-Die Paketinstallation läuft bei jedem Aufruf.
+Das Skript installiert die benötigten Pakete und baut alle Programme. Bei einer
+frischen Installation lädt es den passenden `libft8`-Quellstand von GitHub und
+baut die Bibliothek für den Prozessor des Zielsystems. Weitere Builds nutzen den
+gespeicherten Checkout. Die Paketinstallation läuft bei jedem Aufruf.
+Auf einem SBC baut das Skript bei Bedarf auch die übrigen fehlenden Bibliotheken
+für dessen Prozessor.
 
 Auch die ADI-Bibliotheken **libiio** und **libad9361** werden über die Debian-Pakete
 `libiio-dev` und `libad9361-dev` automatisch installiert; der mitgelieferte Pluto-Treiber

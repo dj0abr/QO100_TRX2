@@ -109,9 +109,10 @@ die Zuordnung am Monitor. [CPU-Budget](decoder-cpu.md)
 
 ## Build und Tests
 
-QO100 verwendet libft8 ab 0.3.1. `build_all.sh` baut die Bibliothek aus
-dem benachbarten Checkout oder verwendet das installierte Paket unter
-`LIBFT8_ROOT`. Für einen direkten CMake-Build das Präfix als
+QO100 verwendet libft8 ab 0.3.1. `build_all.sh` lädt bei Bedarf den
+festgelegten Quellstand von GitHub und baut die Bibliothek lokal.
+`LIBFT8_SOURCE_DIR` wählt einen lokalen Checkout, `LIBFT8_ROOT` ein bereits
+installiertes Paket. Für einen direkten CMake-Build das Präfix als
 `-Dlibft8_ROOT=/pfad/zur/installation` angeben.
 
 ```sh

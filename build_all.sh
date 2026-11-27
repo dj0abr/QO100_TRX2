@@ -8,6 +8,7 @@ usage() {
     echo "Installs the required Debian/Ubuntu packages with apt-get, then builds the transceiver."
     echo "  --install-deps  Accepted for compatibility. Installation is enabled by default."
     echo "Optional: CMAKE_BUILD_PARALLEL_LEVEL=2 ./build_all.sh"
+    echo "Downloads and builds libft8 when no local checkout or installed package is selected."
     echo "Set LIBFT8_ROOT to an installed libft8 package or LIBFT8_SOURCE_DIR to its checkout."
 }
 while (($#)); do
@@ -66,7 +67,7 @@ fi
 "${apt_command[@]}" update
 "${apt_command[@]}" install -y --no-install-recommends "${packages[@]}"
 
-for program in cmake python3 pkg-config cc c++ gfortran make; do
+for program in cmake python3 pkg-config cc c++ gfortran make git; do
     if ! command -v "$program" >/dev/null; then
         echo "Missing $program. Check the package installation above." >&2
         exit 1
@@ -91,22 +92,50 @@ if [[ ! -f "$speex_bundle/lib/linux-$arch/libspeexdsp.a" || ! -f "$speex_bundle/
     "$python_bin" "$project_dir/tools/build_speex.py" --jobs "$jobs"
 fi
 
-libft8_prefix="${LIBFT8_ROOT:-$project_dir/build/libft8/install}"
-if [[ -z ${LIBFT8_ROOT:-} ]]; then
+download_libft8() (
+    local destination=$1 revision=$2 temporary_source
+    mkdir -p -- "$(dirname -- "$destination")"
+    temporary_source=$(mktemp -d -- "$destination.XXXXXX")
+    trap 'rm -rf -- "$temporary_source"' EXIT
+    git init --quiet "$temporary_source"
+    GIT_TERMINAL_PROMPT=0 git -C "$temporary_source" fetch --quiet --depth=1 --no-tags \
+        https://github.com/dj0abr/libft8.git "$revision"
+    git -C "$temporary_source" checkout --quiet --detach "$revision"
+    mv -Tn -- "$temporary_source" "$destination"
+)
+
+libft8_prefix="${LIBFT8_ROOT:-}"
+if [[ -z $libft8_prefix ]]; then
     libft8_source="${LIBFT8_SOURCE_DIR:-$project_dir/../../ft8/libft8}"
+    libft8_dir="$project_dir/build/libft8"
+    if [[ -z ${LIBFT8_SOURCE_DIR:-} && ! -f "$libft8_source/CMakeLists.txt" ]]; then
+        # libft8 0.3.1, tested with the QO100 FT4/FT8 integration.
+        libft8_revision=e281d1a411f0980a914c9e0b9fd097f4c0d17500
+        libft8_source="$libft8_dir/source-$libft8_revision"
+        if [[ ! -d $libft8_source ]]; then
+            echo "Downloading libft8 from GitHub ($libft8_revision) ..."
+            download_libft8 "$libft8_source" "$libft8_revision"
+        fi
+    fi
     if [[ ! -f "$libft8_source/CMakeLists.txt" ]]; then
-        echo "Set LIBFT8_ROOT to an installed libft8 package or LIBFT8_SOURCE_DIR to its checkout." >&2
+        echo "No CMakeLists.txt in libft8 source directory: $libft8_source" >&2
         exit 1
     fi
-    cmake -S "$libft8_source" -B "$project_dir/build/libft8/core" \
+
+    # Each source directory needs its own CMake cache and installed library.
+    libft8_source=$(cd -- "$libft8_source" && pwd -P)
+    libft8_source_id=$(printf '%s' "$libft8_source" | git hash-object --stdin)
+    libft8_build="$libft8_dir/$libft8_source_id/core"
+    libft8_prefix="$libft8_dir/$libft8_source_id/install"
+    cmake -S "$libft8_source" -B "$libft8_build" \
         -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-    cmake --build "$project_dir/build/libft8/core" --parallel "$jobs"
-    cmake --install "$project_dir/build/libft8/core" --prefix "$libft8_prefix"
+    cmake --build "$libft8_build" --parallel "$jobs"
+    cmake --install "$libft8_build" --prefix "$libft8_prefix"
 fi
 
 cmake -S "$project_dir" -B "$project_dir/build" \
     -DCMAKE_BUILD_TYPE=Release -DQO100_BUILD_WEBBRIDGE=ON \
-    -DPython3_EXECUTABLE="$python_bin" -Dlibft8_ROOT="$libft8_prefix"
+    -DPython3_EXECUTABLE="$python_bin" -U libft8_DIR -Dlibft8_ROOT="$libft8_prefix"
 cmake --build "$project_dir/build" --parallel "$jobs" \
     --target qo100_backend qo100_webbridge qo100_ft8_decoder qo100_beacon_decoder qo100_mm_decoder qo100_digital_audio
 
