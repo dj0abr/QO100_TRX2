@@ -149,10 +149,13 @@ int main(int argc, char** argv) {
         auto last_tx2_audio=last_tx_audio,last_tx2_state=last_tx_audio;
         auto last_tx2_signal=last_tx_audio;
         auto tx2_source=qo100::Tx2AudioSource::internal;
+        Clock::time_point ft_ptt_deadline{};
+        uint32_t ft_ptt_reported=0;
         auto reset_tx2=[&] {
             ++tx2_epoch;tx2.reset(int64_t(tx2_frequency)-int64_t(c.tx_center_hz));
             last_tx2_audio=last_tx2_signal=Clock::now()-10s;
             tx2_source=qo100::Tx2AudioSource::internal;
+            ft_ptt_deadline={};
         };
         uint32_t filter_request=0;
         uint16_t filter_status=0;
@@ -192,6 +195,13 @@ int main(int argc, char** argv) {
         auto tx2_wants_ptt=[&](Clock::time_point now) {
             return now-last_tx2_signal < (tx2_source==qo100::Tx2AudioSource::internal ? 650ms : 200ms);
         };
+        auto ft_ptt_ready=[&](Clock::time_point now) { return now < ft_ptt_deadline && shelly.ready(now,0ms); };
+        auto ft_ptt_flags=[&](Clock::time_point now) -> uint32_t {
+            if (now < ft_ptt_deadline) return ft_ptt_ready(now) ? qo100::tx2_ft_ptt_ready : 0;
+            const bool other_tx = tx_enabled || now < relay_release_at ||
+                (tx2_used && tx2_source != qo100::Tx2AudioSource::ft && tx2_wants_ptt(now));
+            return other_tx || shelly.released() ? qo100::tx2_ft_ptt_released : 0;
+        };
         auto send_tx_state=[&]() {
             tx_reported_on=tx1_can_send(Clock::now());
             const auto status=tx_command_status ? tx_command_status :
@@ -201,9 +211,10 @@ int main(int argc, char** argv) {
             last_tx_state=Clock::now();
         };
         auto send_tx2_state=[&] {
+            ft_ptt_reported=ft_ptt_flags(Clock::now());
             send_packet(qo100::tx_state_packet(tx2_request,tx2_frequency,tx2_epoch,session_id,tx2_command_status,
                 hardware_online && !loop_pending && loop_mode==TestLoop::normal && tx2_used,tx2.level(),pluto_fill,
-                int32_t(std::lround(tx2.ppm())),qo100::tx2_stream));
+                int32_t(std::lround(tx2.ppm())),qo100::tx2_stream,ft_ptt_reported));
             last_tx2_state=Clock::now();
         };
         auto send_rx_state=[&](size_t i,uint16_t status=0) {
@@ -249,8 +260,7 @@ int main(int argc, char** argv) {
             const auto digital_timeout=managed_ptt && tx2_source==qo100::Tx2AudioSource::internal ? 650ms : 200ms;
             const bool digital_recent=tx2_used && active() && hardware_online && !loop_pending && loop_mode==TestLoop::normal &&
                 now-last_tx2_audio<digital_timeout && (!managed_ptt || tx2_wants_ptt(now));
-            // FT4/FT8 keeps its slot timing while the relay request runs in parallel.
-            const bool digital_ready=tx2_source==qo100::Tx2AudioSource::ft ||
+            const bool digital_ready=tx2_source==qo100::Tx2AudioSource::ft ? ft_ptt_ready(now) :
                 shelly.ready(now,tx2_source==qo100::Tx2AudioSource::internal ? ptt_lead : 0ms);
             const auto first_id=tx_block_id;
             const bool pack_iq=bool(tx_status);
@@ -623,12 +633,17 @@ int main(int argc, char** argv) {
                                 if(control.session!=session_id || (tx2_have_request && control.request!=tx2_request && int32_t(control.request-tx2_request)<0)) continue;
                                 if(tx2_have_request && control.request==tx2_request) {send_tx2_state();continue;}
                                 tx2_request=control.request;tx2_have_request=true;
-                                const bool valid=control.frequency>=c.tx_center_hz-275000 && control.frequency<=c.tx_center_hz+275000;
+                                const auto utc=stamp();
+                                const auto deadline=control.ft_deadline_ns;
+                                const bool ft_valid=!deadline || (deadline>utc && deadline-utc<=16'000'000'000ULL &&
+                                    tx2_used && hardware_online && !loop_pending && !pending_settings &&
+                                    loop_mode==TestLoop::normal && control.frequency==tx2_frequency);
+                                const bool valid=ft_valid && control.frequency>=c.tx_center_hz-275000 && control.frequency<=c.tx_center_hz+275000;
                                 tx2_command_status=valid?0:1;
                                 if(valid && (control.frequency!=tx2_frequency || control.enabled)) {
                                     if(control.frequency!=tx2_frequency) {tx2_frequency=control.frequency;c.initial_tx2_hz=tx2_frequency;settings.changed();}
-                                    // On TX2 the flag requests a fresh audio epoch, never a PTT change.
                                     reset_tx2();
+                                    if(deadline) ft_ptt_deadline=Clock::now()+std::chrono::nanoseconds(deadline-utc);
                                 }
                                 send_tx2_state();continue;
                             }
@@ -663,6 +678,8 @@ int main(int argc, char** argv) {
                                         return std::abs(int(sample)) >= external_audio_threshold;
                                     });
                                 const auto now=Clock::now();
+                                const bool ft_audio=audio.source==qo100::Tx2AudioSource::ft;
+                                if(ft_audio ? !ft_ptt_ready(now) : now<ft_ptt_deadline) continue;
                                 if(managed_ptt && !signal && !tx2_wants_ptt(now)) continue;
                                 const bool fast=audio.source!=qo100::Tx2AudioSource::internal;
                                 // Reserve room for the lead and one HTTP timeout at 20 ms per block.
@@ -736,11 +753,16 @@ int main(int argc, char** argv) {
                 send_tx_state();
             }
             const bool can_key=active() && hardware_online && !loop_pending && !pending_settings && loop_mode!=TestLoop::audio;
-            const bool want_relay=can_key && (tx_enabled ||
-                (tx2_used && loop_mode==TestLoop::normal && tx2_wants_ptt(ptt_now)));
+            if(ft_ptt_deadline!=Clock::time_point{} && (!can_key || ptt_now>=ft_ptt_deadline)) {
+                reset_tx2();
+                send_tx2_state();
+            }
+            const bool want_relay=can_key && (tx_enabled || (tx2_used && loop_mode==TestLoop::normal &&
+                tx2_source!=qo100::Tx2AudioSource::ft && tx2_wants_ptt(ptt_now)));
             if(!can_key) relay_release_at={};
             else if(want_relay) relay_release_at=ptt_now+ptt_release;
-            shelly.request(can_key && (want_relay || ptt_now<relay_release_at));
+            shelly.request(can_key && (want_relay || ptt_now<relay_release_at || ptt_now<ft_ptt_deadline));
+            if(ft_ptt_reported!=ft_ptt_flags(ptt_now)) send_tx2_state();
             if(tx_reported_on!=tx1_can_send(ptt_now)) send_tx_state();
             if(tx_status && (fds[2].revents&POLLIN)) {
                 bool update=false;

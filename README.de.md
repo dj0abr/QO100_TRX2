@@ -303,7 +303,7 @@ Der Bandplan zeigt die Bereiche für die verschiedenen Betriebsarten. Mit **↻*
 
 - **RX1:** normaler QO-100-Sprechfunk mit einstellbarem Audiofilter und Rauschreduktion.
 - **RX2/TX2:** unabhängiges Digitalpaar für FLdigi/WSJT-X mit virtuellen Audiogeräten und zusätzlicher RX2-Audiokontrolle im Browser. [Einrichtung und Pegel](docs/digital-audio.md).
-- **FT4/8 RX2/TX2:** FT4- und FT8-Transceiver unter **DigiModes → FT4/8** mit RX2-Wasserfall, manuellen Einzelsendungen und automatischer QSO-Abfolge. [Bedienung und Konfiguration](docs/ft8-decoder.md).
+- **FT4/8 RX2/TX2:** FT4- und FT8-Transceiver unter **DigiModes → FT4/8** mit RX2-Wasserfall, TX-Freigabe, Freitext und automatischer QSO-Abfolge über libft8. [Bedienung und Konfiguration](docs/ft8-decoder.md).
 - **Waterfall-Text TX2:** Seitlich gedrehte Schrift im Wasserfall mit Vorschau und einstellbarer Rasterdauer. [Bedienung](docs/webbridge.md#waterfall-text-über-tx2).
 - **RX3:** FT8-Monitor.
 - **RX4:** PSK-Bakenmonitor.

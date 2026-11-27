@@ -8,6 +8,7 @@ usage() {
     echo "Installs the required Debian/Ubuntu packages with apt-get, then builds the transceiver."
     echo "  --install-deps  Accepted for compatibility. Installation is enabled by default."
     echo "Optional: CMAKE_BUILD_PARALLEL_LEVEL=2 ./build_all.sh"
+    echo "Set LIBFT8_ROOT to an installed libft8 package or LIBFT8_SOURCE_DIR to its checkout."
 }
 while (($#)); do
     case "$1" in
@@ -90,9 +91,22 @@ if [[ ! -f "$speex_bundle/lib/linux-$arch/libspeexdsp.a" || ! -f "$speex_bundle/
     "$python_bin" "$project_dir/tools/build_speex.py" --jobs "$jobs"
 fi
 
+libft8_prefix="${LIBFT8_ROOT:-$project_dir/build/libft8/install}"
+if [[ -z ${LIBFT8_ROOT:-} ]]; then
+    libft8_source="${LIBFT8_SOURCE_DIR:-$project_dir/../../ft8/libft8}"
+    if [[ ! -f "$libft8_source/CMakeLists.txt" ]]; then
+        echo "Set LIBFT8_ROOT to an installed libft8 package or LIBFT8_SOURCE_DIR to its checkout." >&2
+        exit 1
+    fi
+    cmake -S "$libft8_source" -B "$project_dir/build/libft8/core" \
+        -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+    cmake --build "$project_dir/build/libft8/core" --parallel "$jobs"
+    cmake --install "$project_dir/build/libft8/core" --prefix "$libft8_prefix"
+fi
+
 cmake -S "$project_dir" -B "$project_dir/build" \
     -DCMAKE_BUILD_TYPE=Release -DQO100_BUILD_WEBBRIDGE=ON \
-    -DPython3_EXECUTABLE="$python_bin"
+    -DPython3_EXECUTABLE="$python_bin" -Dlibft8_ROOT="$libft8_prefix"
 cmake --build "$project_dir/build" --parallel "$jobs" \
     --target qo100_backend qo100_webbridge qo100_ft8_decoder qo100_beacon_decoder qo100_mm_decoder qo100_digital_audio
 

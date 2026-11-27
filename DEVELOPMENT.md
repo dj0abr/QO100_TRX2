@@ -18,7 +18,7 @@ Das GUI sendet Mikrofon-Audio als USB mit unabhängig einstellbarer TX-Frequenz.
 ```
 
 Das erste Skript installiert bei jedem Aufruf die benötigten Debian-Pakete und
-baut Backend, Pluto-Treiber, WebSocket-Adapter und beide FT8-Programme. Es konfiguriert den Webadapter auch dann mit, wenn er zuvor im
+baut Backend, Pluto-Treiber, WebSocket-Adapter und den RX3-FT8-Monitor mit libft8. Es konfiguriert den Webadapter auch dann mit, wenn er zuvor im
 Build abgeschaltet war. Standardmäßig werden höchstens vier parallele
 Build-Jobs verwendet; optional z. B. `CMAKE_BUILD_PARALLEL_LEVEL=2 ./build_all.sh`.
 Die benötigten Entwicklungspakete stehen unter **Bauen**.
@@ -43,7 +43,7 @@ im WebGUI unter **Setup → Monitoring-Empfänger** als ganze Hz einstellbare Fr
 Decoder laufen jeweils mit standardmäßig 10 % CPU-Budget eines Kerns sowie
 nice 19/SCHED_IDLE. Einstellbar mit `rx3_decoder_cpu_percent` und
 `rx4_decoder_cpu_percent` (1–10) in `backend.conf`; RX5 bleibt unbegrenzt.
-Die Begrenzung umfasst auch den FT8-Unterprozess und benötigt keine Root-Rechte.
+Die Begrenzung umfasst alle Threads der Monitoringprozesse und benötigt keine Root-Rechte.
 [Verarbeitung, Messwerte, Lasttests und Auslassungsregeln](docs/decoder-cpu.md). Die Webbridge leitet die getrennten
 Audioströme (Transport-IDs 5/6/8) lokal weiter und verteilt alle Textquellen gleichzeitig
 an die Browser. Radiobuttons wählen die sichtbare Quelle mit getrennten Textpuffern.
@@ -70,13 +70,20 @@ cmake --build build -j
 # http://BACKEND-IP:8080/ (Mikrofon über die HTTPS-Adresse der OPNsense)
 ```
 
+Für die Webbridge und RX3 wird ein installiertes libft8 ab 0.3.1 benötigt.
+Bei direktem CMake-Aufruf lässt sich das Installationspräfix mit
+`-Dlibft8_ROOT=/pfad/zur/installation` angeben. `build_all.sh` baut es
+standardmäßig aus `../../ft8/libft8`. `LIBFT8_SOURCE_DIR` überschreibt den
+Quellpfad, `LIBFT8_ROOT` wählt ein bereits installiertes Paket.
+
 Der Adapter läuft zusätzlich zum Backend. Währenddessen darf kein weiteres GUI direkt
 den Backend-UDP-Port abonnieren. Für einen Build ohne Adapter: `-DQO100_BUILD_WEBBRIDGE=OFF`.
 
 ## Bauen
 
-Benötigt werden Linux, CMake >= 3.20, ein C++17-Compiler, libiio (0.x-API),
-libad9361, libsamplerate und FFTW3 mit Float-Unterstützung.
+Benötigt werden Linux, CMake >= 3.20, libiio (0.x-API), libad9361,
+libsamplerate und FFTW3 mit Float-Unterstützung. Webbridge und RX3-FT8
+benötigen einen C++20-Compiler. Die übrigen C++-Ziele verwenden C++17.
 Für das Test-GUI: Python 3, tkinter, numpy und Pillow; zur Audioausgabe die
 Systembibliotheken libasound und libsamplerate. Es ist kein zusätzliches
 Python-Audiopaket nötig. Unter Debian/Ubuntu heißen die zusätzlichen
@@ -109,7 +116,7 @@ Binärdateien; ein optionaler Neuaufbau erfolgt mit `python3 tools/build_liquid.
 
 Der normale Build erzeugt Backend und Pluto-Treiber aus Quellcode:
 `build/bin/qo100_backend` und `build/bin/pluto`. Mit eingeschaltetem Webadapter
-kommen `qo100_webbridge`, `qo100_ft8_decoder` und dessen Rechenkern `ft8-decoder`
+kommen `qo100_webbridge` und `qo100_ft8_decoder`
 im selben Verzeichnis hinzu.
 Auch ein gezielter Build von `qo100_backend` baut den Treiber mit.
 Die eingebundenen Treiberquellen unter `external/Pluto/` sind im Projekt

@@ -55,7 +55,7 @@ void ShellyPtt::configure(const std::string& ip) {
     ++revision_;
     ip_ = ip;
     on_since_ = valid_until_ = {};
-    requested_ = false;
+    requested_ = off_confirmed_ = false;
     wake_.notify_one();
 }
 
@@ -64,6 +64,7 @@ void ShellyPtt::request(bool on) {
     if (requested_ == on) return;
     ++revision_;
     requested_ = on;
+    off_confirmed_ = false;
     if (!on) on_since_ = valid_until_ = {};
     wake_.notify_one();
 }
@@ -71,6 +72,11 @@ void ShellyPtt::request(bool on) {
 bool ShellyPtt::ready(Clock::time_point now, std::chrono::milliseconds lead) const {
     std::lock_guard lock(mutex_);
     return ip_.empty() || (requested_ && now < valid_until_ && now >= on_since_ + lead);
+}
+
+bool ShellyPtt::released() const {
+    std::lock_guard lock(mutex_);
+    return ip_.empty() || (!requested_ && off_confirmed_);
 }
 
 void ShellyPtt::run() {
@@ -103,10 +109,13 @@ void ShellyPtt::run() {
             const bool ok = switch_relay(http, ip, on);
             const auto now = Clock::now();
             lock.lock();
-            if (completed == revision_ && on && ok) {
-                if (sent >= valid_until_ || now >= valid_until_) on_since_ = now;
-                // The device starts its timer after the request leaves this process.
-                valid_until_ = sent + lease;
+            if (completed == revision_ && ok) {
+                off_confirmed_ = !on;
+                if (on) {
+                    if (sent >= valid_until_ || now >= valid_until_) on_since_ = now;
+                    // The device starts its timer after the request leaves this process.
+                    valid_until_ = sent + lease;
+                }
             }
             if (!ok) next = now + retry;
             else next = on ? now + refresh : Clock::time_point::max();

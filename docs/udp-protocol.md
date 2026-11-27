@@ -199,11 +199,16 @@ TX2 verwendet `TX_CONTROL`/`TX_STATE`/`TX_AUDIO` mit Stream **7**. Frequenz-,
 Session-, Epochen-, PCM- und Sampleindexfelder entsprechen TX1. In TX2-`TX_AUDIO`
 kennzeichnet Offset 44 (4 Byte) die Quelle für die Hardware-PTT: 0 externes
 Audio ohne zusätzlichen Vorlauf, 1 eingebauter DigiMode mit Vorlauf,
-2 eingebautes FT4/FT8 mit paralleler Relaisanfrage und sofortiger Audiofreigabe.
+2 eingebautes FT4/FT8 mit bestätigter PTT-Vorbereitung für diese Audio-Epoche.
+Bei FT gibt `TX_CONTROL.format=2` eine neue Epoche frei und setzt eine
+UTC-Frist in Nanosekunden (Offset 16, 8 Byte). Das Backend begrenzt die
+PTT-Anforderung bis zu dieser Frist. `TX_STATE` meldet an Offset 16
+(8 Byte) Bit 0 für die bestätigte Vorbereitung und Bit 1 für die
+freigegebene FT-PTT. Bei gemeinsamem Relais kann TX1 weiter senden.
 Bei TX2 bedeutet
 `TX_STATE.first` (Offset 48) **Audioweg bereit**, unabhängig von einer PTT.
 `TX_CONTROL.format=0` stimmt TX2 ab; `format=1` fordert bei einem Adapterneustart
-zusätzlich eine neue Audio-Epoche an. Wiederholte Request-IDs lösen keinen weiteren
+zusätzlich eine neue Audio-Epoche an und beendet eine laufende FT-PTT-Anforderung. Wiederholte Request-IDs lösen keinen weiteren
 Reset aus. Alte Sessions, Epochen oder Frequenzen werden für TX2 ebenfalls verworfen.
 Ein fehlender Browser/PTT-Keepalive schaltet TX2 im Normalbetrieb nicht ab. Ausfall
 des Audioadapters, Hardwarewechsel oder Test-Loops verwerfen ungeeignetes Audio.

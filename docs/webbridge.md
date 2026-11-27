@@ -1,6 +1,7 @@
 # HTTP-/WebSocket-Adapter
 
-Eigenständiges C++17-Programm **`qo100_webbridge`**. Backend und DSP bleiben unverändert.
+Eigenständiges C++20-Programm **`qo100_webbridge`**. Für FT4/8 verwendet
+die Webbridge libft8 ab 0.3.1.
 HTTP und WebSocket liegen auf **Port 8080**; Backend-UDP bleibt lokal auf `127.0.0.1:40900`.
 
 ## Start
@@ -15,7 +16,8 @@ Normaler Projektbuild erzeugt `build/bin/qo100_webbridge`. Backend zuerst starte
 Adapter und FT8-Empfänger ohne Pluto-/Backend-Treiber bauen:
 
 ```sh
-cmake -S webbridge -B build-webbridge -DCMAKE_BUILD_TYPE=Release
+cmake -S webbridge -B build-webbridge -DCMAKE_BUILD_TYPE=Release \
+  -Dlibft8_ROOT=/pfad/zur/installation
 cmake --build build-webbridge -j2
 ./build-webbridge/qo100_webbridge --config config/webbridge.conf
 ```
@@ -127,6 +129,22 @@ erneuter Synchronisation an der berechneten Bildposition fort.
 Die Moduswahl oberhalb der Bildflächen bietet **Auto**, **Martin M1** und
 **Scottie 1**. Bei Einstieg ohne VIS erscheint der empfangbare Rest
 als Teilbild. Zuschauer können das Live-Bild und den Wasserfall mitverfolgen.
+
+### FT4/8 über RX2 und TX2
+
+`ft8_subscribe` aktiviert die FT-Ansicht pro WebSocket-Client.
+Der gemeinsame Zustand steht in `state.ft`. Er enthält Betriebsart,
+Stationsdaten, TX-Freigabe, QSO-Phase und den UTC-Sendezeitpunkt.
+Die Webbridge veröffentlicht `ft_decode`, `ft_tx` und `ft_notice`
+an die FT-Abonnenten.
+
+Der Bediener steuert FT mit `ft_config`, `ft_mode`, `ft_arm`,
+`ft_auto`, `ft_cq`, `ft_free_text`, `ft_start_qso` und
+`ft_abort`. `ft_start_qso` übernimmt die `decode_id` einer
+aktuellen Empfangszeile. `ack` bestätigt die Annahme eines Befehls.
+Ergebnisse und Fehler meldet libft8 über Zustandsänderungen und
+`ft_notice`. `ft_adif` liefert dem Bediener einen einmaligen
+Download-Link für das Logbuch. [FT4/8-Bedienung](ft8-decoder.md)
 
 ### SSTV-Senden über TX2
 

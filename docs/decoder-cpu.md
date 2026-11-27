@@ -22,9 +22,9 @@ Parameter `--cpu-percent` erlaubt für explizite Offline-Messungen bis 100.
 Die Empfangsprogramme starten vor ihren DSP-Threads einen kleinen lokalen
 Prozesswächter. Er zählt die CPU-Zeit aller Threads, separat gestarteter Solver
 und sich selbst. Prozess-CPU-Uhren liefern feinere Werte als `/proc`-Tickzähler.
-Die Prozesssuche berücksichtigt Kinder aus beliebigen Threads, weil der
-FT8-Rechenkern aus dem Decode-Worker gestartet wird und eine eigene Prozessgruppe
-besitzt. PID-Dateideskriptoren beziehungsweise Startzeitprüfung schützen gegen
+Die Prozesssuche berücksichtigt Kinder aus beliebigen Threads.
+RX3 führt libft8 in seinem eigenen Decode-Thread aus.
+PID-Dateideskriptoren beziehungsweise Startzeitprüfung schützen gegen
 PID-Wiederverwendung. Das benötigt keine Root-Rechte, cgroup-Delegation,
 `cpulimit`-Installation oder festen Kernbindungen.
 
@@ -47,8 +47,8 @@ beenden auch angehaltene native Worker/Solver bei abruptem Ende ihres Wächters
 beziehungsweise Empfängers. Nur eigene Prozesse werden gesteuert.
 
 In `htop` erscheinen pro Dienst ein Wächter und ein gleichnamiger
-Empfangsprozess, bei FT8 zusätzlich zeitweise `ft8-decoder`. Die Quote gilt
-für deren Summe einschließlich aller Threads und der Überwachung.
+Empfangsprozess. Die Quote gilt für deren Summe einschließlich aller Threads
+und der Überwachung.
 
 ## Effizienter PSK-Decoder in C++
 
@@ -75,13 +75,10 @@ langsam verarbeitet, ersetzt das aktuelle das ältere wartende Fenster.
 
 ## FT8
 
-FT8 verwendete bereits einen nativen C++-/Fortran-Kern aus WSJT-X. Dieser bleibt
-erhalten. Für den Monitoringdienst wird die schnelle Dekodierstufe `--depth 1`
-verwendet. Es gibt maximal den laufenden und den neuesten wartenden UTC-Slot;
-ältere wartende Slots werden ersetzt. Die vorhandene Zeitgrenze von 45 Sekunden
-verstrichener Zeit bleibt bestehen. Schwache oder zu spät dekodierte Meldungen
-dürfen entfallen, damit der Funkbetrieb ungestört bleibt. Der eigenständige
-Offline-Rechenkern behält seine bisherigen Defaults.
+Der RX3-Monitor dekodiert UTC-Slots mit libft8 und Tiefe 1. Es gibt maximal
+einen laufenden und einen wartenden Slot. Neue Slots ersetzen den jeweils
+wartenden Slot. Ergebnisse nach Umstimmung oder nach Ablauf der
+45-Sekunden-Frist werden verworfen.
 
 ## Prüfung und Messung
 

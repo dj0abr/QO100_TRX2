@@ -35,7 +35,9 @@ std::shared_ptr<const Bytes> encoded(const Json& j) {
     const auto s=j.dump();return std::make_shared<const Bytes>(s.begin(),s.end());
 }
 }
-Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp_(io),digital_(io),mm_audio_(io),timer_(io),tx2_timer_(io) {
+Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp_(io),digital_(io),mm_audio_(io),
+    ft_clock_(std::chrono::milliseconds(config_.ft_rx_offset_ms), ft8::sample_rate / 10),
+    timer_(io),tx2_timer_(io),ft_timer_(io) {
     udp_.open(net::ip::udp::v4());
     udp_.set_option(net::socket_base::receive_buffer_size(4*1024*1024));
     udp_.bind({net::ip::make_address_v4("127.0.0.1"),0});
@@ -82,17 +84,14 @@ Bridge::Bridge(net::io_context& io,Config config):config_(std::move(config)),udp
         digital_.bind({net::ip::make_address_v4("127.0.0.1"),config_.digital_bridge_port});
         digital_.connect({net::ip::make_address_v4("127.0.0.1"),config_.digital_audio_port});
     }
-    if (!config_.ft_log_path.empty() && decoders_[Config::rx2_ft8]) {
-        try { ft_logbook_.emplace(config_.ft_log_path); }
-        catch (const std::exception& e) { std::cerr << "FT4/8 logbook: " << e.what() << '\n'; }
-    }
     state_={{"type","state"},{"software_version",QO100_SOFTWARE_VERSION},{"session",0},{"ready",false},{"settings",Json::object()},
         {"revision","0"},{"flags",0},{"sstv_mode","auto"},{"sstv_tx",{{"phase","idle"}}},
-        {"ft_mode","FT8"},{"ft8_enabled",bool(decoders_[Config::rx2_ft8])},{"ft8_tx",{{"phase","idle"}}},
+        {"ft",Json::object()},{"ft8_tx",{{"phase","idle"}}},
         {"waterfall_tx",{{"phase","idle"}}},{"rtty_reverse",false},{"rtty_tx",{{"phase","idle"}}},{"rx",Json::object()},{"tx",Json::object()},
         {"filter",Json::object()},{"compressor",Json::object()},{"nr",Json::object()},{"loop",Json::object()},{"tx2",Json::object()}};
+    init_ft();
 }
-void Bridge::start() {receive();if(digital_.is_open()) receive_digital();for(size_t i=0;i<decoders_.size();++i) if(decoders_[i]) receive_decoder(i);tick();}
+void Bridge::start() {receive();if(digital_.is_open()) receive_digital();for(size_t i=0;i<decoders_.size();++i) if(decoders_[i]) receive_decoder(i);tick();if(config_.ft_enabled) poll_ft();}
 void Bridge::send_digital(Bytes p) {
     if(!digital_.is_open()) return;
     auto data=std::make_shared<Bytes>(std::move(p));
@@ -133,6 +132,7 @@ void Bridge::update_digital_activity() {
     // Older adapters have no usage report and retain their always-active path.
     unsigned flags=live?(digital_usage_known_?digital_usage_:3u):0;
     if(sstv_active_ || rtty_active_ || ft8_active_) flags|=1;
+    if(ft_authorized_) flags|=2;
     if (tx2_holds_audio()) {
         flags |= 2;
         const auto mode = tx2_job_ ? tx2_job_->mode : tx2_release_->mode;
@@ -197,8 +197,7 @@ void Bridge::receive_decoder(size_t index) {
             try {
                 // JSON encoding validates UTF-8. Decoder input is always text data, never a GUI command.
                 const std::string text(decoders_[index]->buffer.data(),n);
-                if(index==Config::rx2_ft8) publish_ft8(text);
-                else broadcast({{"type","decoder_text"},{"stream",index+3},{"text",text}});
+                broadcast({{"type","decoder_text"},{"stream",index+3},{"text",text}});
             } catch(const std::exception& e) {std::cerr<<"Ignored decoder text: "<<e.what()<<'\n';}
         }
         if(!stopping_ && ec!=net::error::operation_aborted) receive_decoder(index);
@@ -262,6 +261,7 @@ void Bridge::update_mm_subscription() {
         [](const auto& item){return item.second.mm_diagnostics;}));
 }
 void Bridge::revoke(const std::string& reason) {
+    disarm_ft("disconnected");
     end_tx2("disconnected");
     const auto old=owner_;owner_=0;
     for(auto it=pending_.begin();it!=pending_.end();) {
@@ -298,6 +298,8 @@ void Bridge::safety() {
     if(session_) {auto p=header(13);put(p,54,1,2);control(std::move(p),14,0,nullptr,"",true);}
 }
 void Bridge::reset_backend() {
+    disarm_ft("backend_reset", false);
+    reset_ft_receive();
     end_tx2("backend_reset", false);
     tx2_release_.reset();
     last_tx2_state_ = {};
@@ -342,6 +344,7 @@ void Bridge::update_state(const Bytes& p) {
         v["frequency_hz"]=get(p,32,8);v["epoch"]=get(p,24,8);
         if(type==4) state_["rx"][std::to_string(qo100::receiver_number(stream))]=v;
         else {
+            if(stream==qo100::tx2_stream) v["ft_ptt_ready"]=(get(p,16,8)&qo100::tx2_ft_ptt_ready)!=0;
             v["ptt"]=get(p,48,4)!=0;v["audio_fifo"]=get(p,44,4);v["pluto_fifo"]=get(p,52,2);
             const auto raw=get(p,56,4);v["ppm"]=raw>=0x80000000ULL?int64_t(raw)-0x100000000LL:int64_t(raw);
             state_[stream==qo100::tx2_stream?"tx2":"tx"]=v;
@@ -381,16 +384,7 @@ void Bridge::packet(Bytes p) {
         if(type==5 && stream==2) {
             send_digital(p);
             if(sstv_active_ || rtty_active_) receive_rx2(p);
-            if(ft8_active_ && !(state_["flags"].get<unsigned>()&6) && !state_["loop"].value("mode",0)) {
-                const auto& receivers=state_["rx"];
-                if(receivers.contains("2") && receivers["2"]["epoch"]==get(p,12,4) &&
-                    receivers["2"]["frequency_hz"]==get(p,32,8)) {
-                    auto audio=p;
-                    put(audio,44,ft_mode_revision_,4);
-                    put(audio,48,static_cast<unsigned>(ft_mode_),4);
-                    send_decoder(Config::rx2_ft8,std::move(audio));
-                }
-            }
+            if(ft8_active_) receive_ft(p);
         }
         if(type==5 && stream==qo100::rx5_stream) {
             if(mm_audio_.is_open()) {
@@ -444,7 +438,17 @@ void Bridge::packet(Bytes p) {
     if(type==7 && stream==qo100::tx2_stream) {
         last_tx2_state_ = Clock::now();
         if(tx2_release_) {
-            if(get(p,24,8)!=tx2_release_->epoch) tx2_release_.reset();
+            const bool new_epoch=get(p,24,8)!=tx2_release_->epoch;
+            const bool ft_released=(get(p,16,8)&qo100::tx2_ft_ptt_released)!=0;
+            if(new_epoch && (!tx2_release_->ft_completed_id || ft_released || get(p,54,2))) {
+                const auto release=*tx2_release_;
+                tx2_release_.reset();
+                if(release.ft_completed_id) {
+                    const bool completed=Clock::now()<release.ft_deadline && !get(p,54,2) && ft_released;
+                    report_ft_radio(release.ft_completed_id,completed?ft8::RadioReport::Status::Completed:
+                                    ft8::RadioReport::Status::Failed,{},completed?"":"TX2 release failed");
+                }
+            }
             else if(get(p,54,2) && !pending_.count(tx2_key))
                 reset_tx2_audio(get(p,32,8)); // A rejected retune may supersede the FIFO reset.
         }
@@ -503,6 +507,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
         }
         if(type=="ft8_subscribe") {
             clients_.at(client).ft8_rx=j.at("enabled").get<bool>();
+            if(client==owner_ && !clients_.at(client).ft8_rx) disarm_ft("view_closed");
             update_ft8_subscription();return;
         }
         if(client!=owner_) {error(client,id,"read_only","Only the operator can send commands");return;}
@@ -517,20 +522,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
                 end_tx2("stopped");
             return;
         }
-        if(type=="ft_mode") {
-            set_ft_mode(client,id,j.at("mode").get<std::string>());return;
-        }
-        if(type=="ft_qso_log") {save_ft_qso(client,id,j);return;}
-        if(type=="ft8_tx_start") {
-            begin_ft8_tx(client,integer(j,"id"),integer(j,"frequency_hz",6000000000ULL),integer(j,"level",100),
-                j.at("message").get<std::string>(),integer(j,"audio_hz",3950),integer(j,"parity",1),
-                j.value("mode",ft_mode_name(ft_mode_)));
-            return;
-        }
-        if(type=="ft8_tx_stop") {
-            if(tx2_active(Tx2Mode::ft8)) end_tx2("stopped");
-            return;
-        }
+        if(type.starts_with("ft_")) {command_ft(client,id,type,j);return;}
         if(type=="activity") {clients_.at(client).activity=Clock::now();return;}
         if(type=="ptt_keepalive") {if(ptt_requested_) ptt_until_=Clock::now()+std::chrono::milliseconds(750);return;}
         if(type=="rtty_tx_keepalive") {keep_rtty_tx(integer(j,"tx_id"));return;}
@@ -582,9 +574,10 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
         if(type=="tune") {
             const auto stream=integer(j,"stream",2);if(!stream) throw std::runtime_error("RX stream must be 1 or 2");
             const auto hz=integer(j,"frequency_hz",UINT64_MAX);
-            if(stream==2 && tx2_active(Tx2Mode::ft8) &&
-                state_["rx"].value("2",Json::object()).value("frequency_hz",uint64_t(0))!=hz)
-                end_tx2("retuned");
+            if(stream==2 && state_["rx"].value("2",Json::object()).value("frequency_hz",uint64_t(0))!=hz) {
+                disarm_ft("retuned");
+                reset_ft_receive();
+            }
             p=header(3,stream);put(p,32,hz,8);reply=4;
         } else if(type=="tx") {
             const auto channel=j.contains("channel")?integer(j,"channel",2):1;
@@ -592,6 +585,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             if(channel==2) {
                 if(j.value("ptt",false)) throw std::runtime_error("TX2 uses external audio, no browser PTT");
                 const auto hz=integer(j,"frequency_hz",6000000000ULL);
+                if(ft_authorized_ && hz!=ft_uplink_) disarm_ft("retuned");
                 if((sstv_upload_ && hz!=sstv_upload_->frequency) || (tx2_job_ && hz!=tx2_job_->frequency))
                     end_tx2("retuned");
                 p=header(6,qo100::tx2_stream);put(p,32,hz,8);
@@ -643,7 +637,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
                 p.insert(p.end(),payload.begin(),payload.end());
                 for(const auto* key:{"pluto_connection","pluto_ip","lnb_reference_hz","rx_correction_hz",
                     "tx_correction_hz","pluto_tx_base_hz","tx_attenuation_db","initial_tx_hz"}) {
-                    if(values.contains(key)) {hardware_change_=true;safety();break;}
+                    if(values.contains(key)) {hardware_change_=true;disarm_ft("unavailable");safety();break;}
                 }
             }
         } else throw std::runtime_error("Unknown command: "+type);
@@ -652,7 +646,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
             if(!query && reply!=14) put(p,40,12000,4);
         }
         // Changing a test loop invalidates any outstanding transmit permission.
-        if(type=="loop" && !query) {end_tx2("unavailable");tx_off();}
+        if(type=="loop" && !query) {disarm_ft("unavailable");end_tx2("unavailable");tx_off();}
         control(std::move(p),reply,client,id,type);
     } catch(const std::exception& e) {error(client,id,"invalid",e.what());}
 }
@@ -670,7 +664,6 @@ void Bridge::tick() {
         }
     }
     if(ptt_requested_ && now>ptt_until_) tx_off();
-    if(tx2_active(Tx2Mode::ft8) && !tx2_ready(tx2_job_->frequency,now)) end_tx2("unavailable");
     update_digital_activity();
     if(initialized_ && now>=next_rx_) {
         for(unsigned stream:{1u,2u}) {
@@ -704,7 +697,9 @@ void Bridge::stop() {
     boost::system::error_code ec;digital_.close(ec);mm_audio_.close(ec);
     if(mm_monitor_) mm_monitor_->stop();
     for(auto& decoder:decoders_) if(decoder) decoder->socket.close(ec);
+    ft_timer_.cancel(ec);
     revoke("shutdown");
+    retire_ft();
     const auto copy=clients_;for(const auto& c:copy) c.second.peer->close("Server shutdown");
 }
 }

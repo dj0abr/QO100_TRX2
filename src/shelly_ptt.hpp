@@ -18,6 +18,7 @@ public:
     void configure(const std::string& ip);
     void request(bool on);
     bool ready(Clock::time_point now, std::chrono::milliseconds lead) const;
+    bool released() const;
 
 private:
     void run();
@@ -26,7 +27,7 @@ private:
     std::condition_variable wake_;
     std::string ip_;
     uint64_t revision_ = 0;
-    bool requested_ = false, stopping_ = false;
+    bool requested_ = false, stopping_ = false, off_confirmed_ = false;
     Clock::time_point on_since_{}, valid_until_{};
     std::thread worker_;
 };

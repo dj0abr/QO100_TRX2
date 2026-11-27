@@ -43,13 +43,14 @@ struct FilterControl {
 bool parse_filter_control(const uint8_t*, size_t, FilterControl&);
 std::vector<uint8_t> filter_state_packet(uint32_t request, double bandwidth, double center,
     uint32_t epoch, uint32_t session, uint16_t status, bool edges=false);
-struct TxControl { uint32_t request, session; uint64_t frequency; bool enabled; uint32_t stream=3; };
+struct TxControl { uint32_t request, session; uint64_t frequency; bool enabled; uint32_t stream=3; uint64_t ft_deadline_ns=0; };
+inline constexpr uint32_t tx2_ft_ptt_ready=1, tx2_ft_ptt_released=2;
 enum class Tx2AudioSource : uint32_t { external=0, internal=1, ft=2 };
 struct TxAudio { uint32_t epoch, session; uint64_t index, frequency; std::vector<int16_t> samples; uint32_t stream=3; Tx2AudioSource source=Tx2AudioSource::external; };
 bool parse_tx_control(const uint8_t*, size_t, TxControl&);
 bool parse_tx_audio(const uint8_t*, size_t, TxAudio&);
 std::vector<uint8_t> tx_state_packet(uint32_t request, uint64_t frequency, uint32_t epoch,
-    uint32_t session, uint16_t status, bool enabled, uint32_t audio_fill, uint16_t pluto_fill, int32_t ppm, uint32_t stream=3);
+    uint32_t session, uint16_t status, bool enabled, uint32_t audio_fill, uint16_t pluto_fill, int32_t ppm, uint32_t stream=3, uint32_t ft_ptt_flags=0);
 struct FrameInfo {
     uint32_t frame_id;
     uint64_t timestamp_ns, sample_index, center_hz;

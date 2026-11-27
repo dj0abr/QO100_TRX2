@@ -19,7 +19,7 @@ def main():
         backend_port, http_port, audio3, text3, audio4, text4 = [port() for _ in range(6)]
         config = root/'backend.conf'; config.write_text(private_config(defaults, backend_port))
         raw = root/'ft8.raw'
-        subprocess.run([str(generator), str(raw), 'CQ K1ABC FN42', '1500', '0.2', '-12'], check=True, timeout=10)
+        subprocess.run([str(generator), 'encode', 'FT8', str(raw), 'CQ K1ABC FN42'], check=True, timeout=10)
         ft8 = struct.unpack('<180000h', raw.read_bytes())
         logs = [(root/name).open('w') for name in ('backend.log', 'bridge.log', 'ft8.log', 'psk.log')]
         radio = subprocess.Popen([str(backend), '--config', str(config), '--source', 'synthetic'], stdout=logs[0], stderr=logs[0])
@@ -34,7 +34,7 @@ def main():
         decoder4 = subprocess.Popen([str(beacon_receiver), '--port', str(audio4)], stdout=logs[3], stderr=logs[3])
         clients = []
         try:
-            wait(lambda: 'waiting for a complete UTC slot' in (root/'ft8.log').read_text() and 'PSK beacon receiver: RX4' in (root/'psk.log').read_text())
+            wait(lambda: 'FT8 receiver: RX3' in (root/'ft8.log').read_text() and 'PSK beacon receiver: RX4' in (root/'psk.log').read_text())
             def available():
                 try:
                     return urllib.request.urlopen(f'http://127.0.0.1:{http_port}/health', timeout=.2).status == 200

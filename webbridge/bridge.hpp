@@ -1,7 +1,6 @@
 #pragma once
 #include "wire.hpp"
-#include "ft_mode.hpp"
-#include "ft_logbook.hpp"
+#include "ft_audio.hpp"
 #include "mm_monitor.hpp"
 #include "qo100/channels.hpp"
 #include "rtty_rx.hpp"
@@ -12,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <array>
 #include <chrono>
+#include <deque>
 #include <map>
 #include <memory>
 #include <optional>
@@ -25,10 +25,11 @@ struct Config {
     std::string listen="0.0.0.0", web_root=QO100_WEB_ROOT;
     uint16_t port=8080,backend_port=40900;
     struct Decoder { uint16_t audio_port=0,text_port=0; }; // Both zero disables this link.
-    static constexpr std::size_t rx2_ft8 = 2;
-    std::array<Decoder,3> decoders;
-    unsigned ft8_tx_lead_ms = 80;
-    std::string ft_log_path;
+    std::array<Decoder,2> decoders;
+    bool ft_enabled = false;
+    unsigned ft8_tx_lead_ms = 80, ft_ptt_lead_ms = 450;
+    int ft_rx_offset_ms = 0;
+    std::string ft_log_path, ft_station_path, ft_qrz_api_key;
     uint16_t digital_audio_port=0,digital_bridge_port=0;
     uint16_t rx5_decoder_audio_port=0,mm_http_port=0;
     unsigned idle_seconds=0,heartbeat_seconds=60,max_clients=16;
@@ -64,11 +65,30 @@ class Bridge {
         std::array<char,4097> buffer{};
         explicit DecoderLink(net::io_context& io):socket(io) {}
     };
-    std::array<std::unique_ptr<DecoderLink>,3> decoders_;
-    std::optional<FtLogbook> ft_logbook_;
-    bool ft8_active_ = false;
-    FtMode ft_mode_ = FtMode::ft8;
-    uint32_t ft_mode_revision_ = 1;
+    std::array<std::unique_ptr<DecoderLink>,2> decoders_;
+    ft8::Config ft_config_;
+    unsigned ft_level_ = 25;
+    std::unique_ptr<ft8::Transceiver> ft_;
+    net::thread_pool ft_cleanup_{1};
+    qo100::FtSampleClock ft_clock_;
+    bool ft8_active_ = false, ft_authorized_ = false, ft_armed_ = false;
+    ft8::State ft_state_ = ft8::State::Receiving;
+    ft8::AutoMode ft_auto_ = ft8::AutoMode::Off;
+    std::string ft_peer_;
+    unsigned ft_retries_ = 0;
+    uint64_t ft_uplink_ = 0, ft_downlink_ = 0;
+    uint64_t ft_receive_revision_ = 1, ft_receive_reset_ = 0;
+    uint64_t ft_next_decode_id_ = 0, ft_next_request_ = 0, ft_abort_request_ = 0;
+    std::deque<std::pair<uint64_t, ft8::Decode>> ft_decodes_;
+    std::optional<ft8::TxTiming> ft_timing_;
+    Clock::time_point ft_next_clock_{};
+    int64_t ft_utc_ms_ = 0;
+    struct FtDownload {
+        std::string token;
+        uint64_t owner;
+        Clock::time_point expires;
+    };
+    std::optional<FtDownload> ft_download_;
     enum class Tx2Mode { sstv, rtty, ft8, waterfall };
     static constexpr auto tx2_key = (uint64_t(6) << 32) | qo100::tx2_stream;
     struct SstvUpload {
@@ -81,12 +101,9 @@ class Bridge {
         Clock::time_point deadline;
     };
     struct Ft8Tx {
-        static constexpr auto preparation = std::chrono::seconds(1);
-        static constexpr auto minimum_preparation = std::chrono::milliseconds(200);
-        std::vector<int16_t> pcm;
-        double slot_utc;
-        std::chrono::system_clock::time_point dispatch_utc;
-        Clock::time_point dispatch_at;
+        ft8::Playback playback;
+        Clock::time_point dispatch_at, ptt_deadline;
+        std::size_t skip = 0;
     };
     struct WaterfallTx {
         std::vector<int16_t> pcm;
@@ -119,11 +136,13 @@ class Bridge {
     struct Tx2Release {
         uint32_t epoch;
         Tx2Mode mode;
+        uint64_t ft_completed_id = 0;
+        Clock::time_point ft_deadline{};
     };
     std::optional<Tx2Release> tx2_release_;
     uint64_t tx2_schedule_ = 0;
     Clock::time_point last_tx2_state_{};
-    net::steady_timer timer_, tx2_timer_;
+    net::steady_timer timer_, tx2_timer_, ft_timer_;
     std::array<uint8_t,65536> receive_buffer_{};
     std::map<uint64_t,Client> clients_;
     std::map<uint64_t,uint32_t> counters_;
@@ -143,10 +162,21 @@ class Bridge {
     void receive();void packet(Bytes p);void tick();void reset_backend();void bootstrap();
     void send_udp(Bytes p);
     void receive_decoder(size_t index);
+    void init_ft();
     void update_ft8_subscription();
-    void set_ft_mode(uint64_t client, const Json& id, const std::string& mode);
-    void save_ft_qso(uint64_t client, const Json& id, const Json& qso);
-    void publish_ft8(const std::string& text);void send_decoder(size_t index,Bytes p);
+    void reset_ft_receive(bool reset_clock = true);
+    void receive_ft(const Bytes& packet);
+    void command_ft(uint64_t client, const Json& id, const std::string& type, const Json& request);
+    bool ft_operator() const;
+    bool ft_tx_ready(Clock::time_point now) const;
+    void disarm_ft(const char* reason, bool flush = true);
+    void retire_ft();
+    void process_ft_event(const ft8::Event& event);
+    void process_ft_action(const ft8::RadioAction& action);
+    void report_ft_radio(uint64_t id, ft8::RadioReport::Status status, ft8::Time start = {}, std::string detail = {});
+    void refresh_ft_state();
+    void poll_ft();
+    void send_decoder(size_t index,Bytes p);
     void receive_digital();void send_digital(Bytes p);
     void update_mm_subscription();void update_digital_activity();
     void subscribe_sstv(uint64_t client, bool enabled);
@@ -170,8 +200,6 @@ class Bridge {
     bool tx2_active(Tx2Mode mode) const;
     bool can_start_tx2(uint64_t client, uint32_t id, uint64_t frequency, unsigned level);
     bool tx2_ready(uint64_t frequency, Clock::time_point now) const;
-    void begin_ft8_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level,
-                      const std::string& message, unsigned audio_hz, unsigned parity, const std::string& mode);
     void begin_waterfall_tx(uint64_t client, uint32_t id, uint64_t frequency, unsigned level,
                             const std::string& message, unsigned row_ms);
     void begin_sstv_tx(uint64_t client, uint32_t upload_id, uint64_t frequency, unsigned level);
@@ -186,7 +214,7 @@ class Bridge {
     void schedule_tx2(Clock::time_point when);
     void step_tx2();
     void end_tx2(const char* result, bool flush = true);
-    void reset_tx2_audio(uint64_t frequency);
+    void reset_tx2_audio(uint64_t frequency, ft8::Time ft_deadline = {});
     std::optional<qo100::audio::TxBlock> take_tx2_block(Tx2Job& job);
     void send_tx2_audio(Tx2Job& job, const qo100::audio::Pcm& pcm);
     void tx2_state(Tx2Mode mode, const char* phase, const char* result = "", std::optional<uint32_t> id = {});
@@ -197,7 +225,9 @@ class Bridge {
     void update_state(const Bytes& p);void revoke(const std::string& reason);bool ready() const;
 public:
     Bridge(net::io_context& io,Config config);
+    ~Bridge();
     const Config& config() const {return config_;}
+    bool take_ft_download(std::string_view token);
     void start();void stop();
     uint64_t join(std::shared_ptr<Peer> peer);
     void leave(uint64_t id);

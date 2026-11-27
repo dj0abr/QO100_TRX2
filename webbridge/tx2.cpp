@@ -13,7 +13,8 @@ using qo100::sstv::Sender;
 constexpr auto audio_period = Milliseconds(20);
 constexpr unsigned prefill = 8;
 constexpr unsigned tx_tail_blocks = 13;
-constexpr auto ft8_start_tolerance = Milliseconds(40);
+constexpr unsigned ft_tail_blocks = 4;
+constexpr auto ft_clock_tolerance = Milliseconds(80);
 constexpr std::size_t rtty_text_limit = 512;
 constexpr std::size_t rtty_pending_frames = 512;
 constexpr auto rtty_ptt_lease = Milliseconds(1000);
@@ -49,7 +50,8 @@ void Bridge::tx2_state(Tx2Mode mode, const char* phase, const char* result, std:
     if (mode == Tx2Mode::waterfall && tx2_job_) id = std::get<WaterfallTx>(tx2_job_->source).id;
     if (id) tx["tx_id"] = *id;
     if (mode == Tx2Mode::ft8 && tx2_job_)
-        tx["slot_utc"] = std::get<Ft8Tx>(tx2_job_->source).slot_utc;
+        tx["slot_utc_ms"] = std::chrono::duration_cast<Milliseconds>(
+            std::get<Ft8Tx>(tx2_job_->source).playback.slot.time_since_epoch()).count();
     dirty_ = true;
 }
 
@@ -131,18 +133,20 @@ void Bridge::start_tx2(Tx2Mode mode, Tx2Source source, uint64_t frequency, unsig
                        std::optional<RttyTx> rtty) {
     tx2_job_ = Tx2Job{mode, std::move(source), frequency, level, Clock::now() + std::chrono::seconds(3), rtty};
     const auto* ft8 = std::get_if<Ft8Tx>(&tx2_job_->source);
-    if (ft8) tx2_job_->deadline = ft8->dispatch_at + ft8_start_tolerance;
+    if (ft8) tx2_job_->deadline = ft8->dispatch_at + (ft8->playback.latest_audio_start - ft8->playback.audio_start);
     tx2_state(mode, ft8 ? "scheduled" : "preparing");
     next_activity_ = {};
     update_digital_activity();
-    const auto now = Clock::now();
-    schedule_tx2(ft8 ? std::max(now, ft8->dispatch_at - Ft8Tx::preparation) : now);
+    schedule_tx2(Clock::now());
 }
 
-void Bridge::reset_tx2_audio(uint64_t frequency) {
+void Bridge::reset_tx2_audio(uint64_t frequency, ft8::Time ft_deadline) {
     auto packet = header(6, qo100::tx2_stream);
     put(packet, 32, frequency, 8);
-    put(packet, 54, 1, 2); // Reset the TX2 audio epoch and discard its FIFO.
+    if (ft_deadline != ft8::Time{})
+        put(packet, 16, std::chrono::duration_cast<std::chrono::nanoseconds>(ft_deadline.time_since_epoch()).count(), 8);
+    // A lease prepares PTT as part of the fresh audio epoch. A plain reset releases it.
+    put(packet, 54, ft_deadline == ft8::Time{} ? 1 : 2, 2);
     control(std::move(packet), 7);
 }
 
@@ -153,13 +157,14 @@ std::optional<audio::TxBlock> Bridge::take_tx2_block(Tx2Job& job) {
     audio::TxBlock block;
     const auto* ft8 = std::get_if<Ft8Tx>(&job.source);
     const auto* waterfall = std::get_if<WaterfallTx>(&job.source);
-    const auto* pcm = ft8 ? &ft8->pcm : waterfall ? &waterfall->pcm : nullptr;
+    const auto* pcm = ft8 ? &ft8->playback.frame->samples : waterfall ? &waterfall->pcm : nullptr;
     if (pcm) {
-        if (job.sample_index < pcm->size()) {
-            const auto count = std::min(block.pcm.size(), pcm->size() - job.sample_index);
-            std::copy_n(pcm->begin() + job.sample_index, count, block.pcm.begin());
+        const auto position = job.sample_index + (ft8 ? ft8->skip : 0);
+        if (position < pcm->size()) {
+            const auto count = std::min(block.pcm.size(), pcm->size() - position);
+            std::copy_n(pcm->begin() + position, count, block.pcm.begin());
         } else {
-            block.last = ++job.tail == tx_tail_blocks;
+            block.last = ++job.tail == (ft8 ? ft_tail_blocks : tx_tail_blocks);
         }
         return block;
     }
@@ -176,8 +181,10 @@ void Bridge::send_tx2_audio(Tx2Job& job, const audio::Pcm& pcm) {
     put(packet, 24, job.sample_index, 8);
     put(packet, 32, job.frequency, 8);
     put(packet, 40, audio::sample_rate, 4);
-    if (!state_["settings"].value("shelly_ptt_ip", std::string{}).empty())
-        put(packet, 44, uint32_t(job.mode == Tx2Mode::ft8 ? qo100::Tx2AudioSource::ft : qo100::Tx2AudioSource::internal), 4);
+    if (job.mode == Tx2Mode::ft8)
+        put(packet, 44, uint32_t(qo100::Tx2AudioSource::ft), 4);
+    else if (!state_["settings"].value("shelly_ptt_ip", std::string{}).empty())
+        put(packet, 44, uint32_t(qo100::Tx2AudioSource::internal), 4);
     put(packet, 52, pcm.size(), 2);
     put(packet, 54, 2, 2);
     put(packet, 56, pcm.size(), 4);
@@ -222,29 +229,46 @@ void Bridge::step_tx2() {
     const auto& tx = state_["tx2"];
     const auto epoch = tx.at("epoch").get<uint32_t>();
     const auto available = tx.value("ptt", false);
+    auto* ft = std::get_if<Ft8Tx>(&job.source);
+    if (ft) {
+        const auto utc = ft8::Time::clock::now();
+        const auto drift = (ft->playback.ptt_deadline - utc) - (ft->ptt_deadline - now);
+        if (!ft_authorized_ || !ft_operator() || now >= ft->ptt_deadline) {
+            end_tx2("unavailable");
+            return;
+        }
+        if (drift < -ft_clock_tolerance || drift > ft_clock_tolerance) {
+            end_tx2("clock_changed");
+            return;
+        }
+    }
+
     if (job.phase == Tx2Job::Phase::preparing) {
-        const auto* ft8 = std::get_if<Ft8Tx>(&job.source);
-        if (now >= job.deadline) {
-            end_tx2(ft8 ? "missed_slot" : "unavailable");
+        if (now > job.deadline) {
+            end_tx2(ft ? "missed_slot" : "unavailable");
             return;
         }
         const auto* sstv = std::get_if<std::unique_ptr<Sender>>(&job.source);
-        if (ft8) {
-            const auto drift = (std::chrono::system_clock::now() - ft8->dispatch_utc) - (now - ft8->dispatch_at);
-            if (drift > ft8_start_tolerance || drift < -ft8_start_tolerance) {
-                end_tx2("clock_changed");
-                return;
-            }
-        }
         if (!job.epoch_requested && available && !pending_.count(tx2_key)) {
             job.epoch_requested = true;
             job.epoch = epoch;
-            reset_tx2_audio(job.frequency);
+            reset_tx2_audio(job.frequency, ft ? ft->playback.ptt_deadline : ft8::Time{});
         } else if (job.epoch_requested && available && !pending_.count(tx2_key) &&
-                   epoch != job.epoch && !tx.value("status", 0) && (!sstv || (*sstv)->available() >= prefill)) {
-            if (ft8 && now < ft8->dispatch_at) {
-                schedule_tx2(ft8->dispatch_at);
-                return;
+                   epoch != job.epoch && !tx.value("status", 0) && (!sstv || (*sstv)->available() >= prefill) &&
+                   (!ft || tx.value("ft_ptt_ready", false))) {
+            ft8::Time first_audio{};
+            if (ft) {
+                first_audio = ft8::Time::clock::now() + Milliseconds(config_.ft8_tx_lead_ms);
+                if (first_audio < ft->playback.audio_start) {
+                    schedule_tx2(now + (ft->playback.audio_start - first_audio));
+                    return;
+                }
+                const auto skip = ft8::playback_offset(ft->playback, first_audio);
+                if (!skip) {
+                    end_tx2("missed_slot");
+                    return;
+                }
+                ft->skip = *skip;
             }
             job.epoch = epoch;
             for (unsigned i = 0; i < prefill; ++i)
@@ -252,14 +276,18 @@ void Bridge::step_tx2() {
             job.phase = Tx2Job::Phase::sending;
             job.next_audio = now + audio_period;
             tx2_state(job.mode, "sending");
+            if (ft) report_ft_radio(ft->playback.id, ft8::RadioReport::Status::Started, first_audio);
+        } else if (ft && job.epoch_requested && !pending_.count(tx2_key) && tx.value("status", 0)) {
+            end_tx2("ptt_unavailable");
+            return;
         }
-        auto next = now + audio_period;
-        if (ft8 && now < ft8->dispatch_at) next = std::min(next, ft8->dispatch_at);
+        auto next = now + (ft && job.phase == Tx2Job::Phase::preparing ? Milliseconds(5) : audio_period);
+        if (ft && now < ft->dispatch_at) next = std::min(next, ft->dispatch_at);
         schedule_tx2(next);
         return;
     }
 
-    if (!available || job.epoch != epoch) {
+    if (!available || job.epoch != epoch || (ft && !tx.value("ft_ptt_ready", false))) {
         end_tx2("unavailable");
         return;
     }
@@ -275,9 +303,14 @@ void Bridge::step_tx2() {
     send_tx2_audio(job, block->pcm);
     if (block->last) {
         job.phase = Tx2Job::Phase::draining;
-        const bool delayed = job.mode != Tx2Mode::ft8 &&
-            !state_["settings"].value("shelly_ptt_ip", std::string{}).empty();
-        schedule_tx2(now + (delayed ? Milliseconds(720) : Milliseconds(220)));
+        if (ft) {
+            // Let the waveform and the DSP tail leave the radio before the FIFO reset.
+            const auto estimated_end = now + (ft->playback.audio_end - ft8::Time::clock::now());
+            schedule_tx2(std::max(now, estimated_end + Milliseconds(100)));
+        } else {
+            const bool delayed = !state_["settings"].value("shelly_ptt_ip", std::string{}).empty();
+            schedule_tx2(now + (delayed ? Milliseconds(720) : Milliseconds(220)));
+        }
     } else {
         job.next_audio += audio_period;
         schedule_tx2(job.next_audio);
@@ -299,11 +332,17 @@ void Bridge::end_tx2(const char* result, bool flush) {
     std::optional<uint32_t> id;
     if (tx2_job_->rtty) id = tx2_job_->rtty->id;
     if (const auto* waterfall = std::get_if<WaterfallTx>(&tx2_job_->source)) id = waterfall->id;
+    const auto* ft = std::get_if<Ft8Tx>(&tx2_job_->source);
+    const auto ft_id = ft ? ft->playback.id : 0;
+    const auto ft_deadline = ft ? ft->ptt_deadline : Clock::time_point{};
+    const bool release = flush && session_ && state_["tx2"].value("frequency_hz", uint64_t(0)) == frequency;
+    const bool complete = release && std::string_view(result) == "complete";
     tx2_job_.reset();
-    if (flush && session_ && state_["tx2"].value("frequency_hz", uint64_t(0)) == frequency) {
-        tx2_release_ = Tx2Release{state_["tx2"].at("epoch").get<uint32_t>(), mode};
+    if (release) {
+        tx2_release_ = Tx2Release{state_["tx2"].at("epoch").get<uint32_t>(), mode, complete ? ft_id : 0, ft_deadline};
         reset_tx2_audio(frequency);
     }
+    if (ft_id && !complete) report_ft_radio(ft_id, ft8::RadioReport::Status::Failed, {}, result);
     next_activity_ = {};
     tx2_state(mode, "idle", result, id);
 }

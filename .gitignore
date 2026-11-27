@@ -7,6 +7,8 @@ __pycache__/
 /data/mm-beacon/
 /data/ft4-ft8.adi
 /data/ft4-ft8.adi.tmp-*
+/data/ft-station.json
+/data/ft-station.json.tmp
 /external/mmdecoder/build/
 /external/mmdecoder/logs/
 /external/mmdecoder/data/

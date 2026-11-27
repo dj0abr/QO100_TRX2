@@ -29,7 +29,7 @@ class DependencyInstallTest(unittest.TestCase):
                 'dpkg-query': '#!/usr/bin/python3\nimport os,sys\nif sys.argv[-1]==os.environ.get("QO100_TEST_INSTALLED"):print("install ok installed")\nelse:sys.exit(1)\n'}
             if custom_server:scripts[custom_server]='#!/bin/sh\nexit 0\n'
             for name,body in scripts.items():p=tools/name;p.write_text(body);p.chmod(0o755)
-            env={**os.environ,'PATH':str(tools),'QO100_TEST_APT_LOG':str(log),'QO100_TEST_INSTALLED':installed}
+            env={**os.environ,'LIBFT8_ROOT':str(root/'libft8-package'),'PATH':str(tools),'QO100_TEST_APT_LOG':str(log),'QO100_TEST_INSTALLED':installed}
             result=subprocess.run(['/bin/bash',str(project/'build_all.sh'),*args],
                 env=env,text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr+result.stdout)

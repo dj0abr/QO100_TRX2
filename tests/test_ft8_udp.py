@@ -1,7 +1,6 @@
 """Real FT8 waveform -> RX3 UDP -> FT8 service -> adapter -> two WebSocket clients."""
 from datetime import datetime, timezone
 from pathlib import Path
-import re
 import struct
 import subprocess
 import sys
@@ -19,9 +18,9 @@ def main():
         root=Path(temp);backend_port,http_port,audio_port,text_port=[port() for _ in range(4)]
         config=root/'backend.conf';config.write_text(private_config(defaults,backend_port))
         raw=root/'signal.raw'
-        subprocess.run([str(generator),str(raw),'CQ K1ABC FN42','1500','0.2','-12'],check=True,timeout=10)
+        subprocess.run([str(generator),'encode','FT8',str(raw),'CQ K1ABC FN42'],check=True,timeout=10)
         payload=raw.read_bytes();assert len(payload)==360000
-        with wave.open(str(Path(__file__).resolve().parents[1]/'external/ft8/tests/data/210703_133430.wav'),'rb') as sample:
+        with wave.open(str(Path(__file__).resolve().parents[1]/'tests/data/ft/wsjtx-ft8.wav'),'rb') as sample:
             recorded=sample.readframes(180000)
         logs=[(root/name).open('w') for name in ['backend.log','adapter.log','receiver.log']]
         radio=subprocess.Popen([str(backend),'--config',str(config),'--source','synthetic'],stdout=logs[0],stderr=logs[0])
@@ -34,7 +33,7 @@ def main():
         decoder=subprocess.Popen([str(receiver),'--port',str(audio_port),'--time-offset-ms','0'],stdout=logs[2],stderr=logs[2])
         clients=[]
         try:
-            wait(lambda:'waiting for a complete UTC slot' in (root/'receiver.log').read_text())
+            wait(lambda:'FT8 receiver: RX3' in (root/'receiver.log').read_text())
             def available():
                 try:
                     return urllib.request.urlopen(f'http://127.0.0.1:{http_port}/health',timeout=.2).status==200
@@ -65,7 +64,7 @@ def main():
                 wait(lambda:'CQ K1ABC FN42' in text(client),timeout=15)
                 line=next(line for line in text(client).splitlines() if 'CQ K1ABC FN42' in line)
                 assert line.startswith(datetime.fromtimestamp(slot_utc,timezone.utc).strftime('%H%M%S')),line
-                assert re.search(r'1500\.\d+\s+~ CQ K1ABC FN42',line),line
+                assert abs(float(line.split()[3]) - 1500) < 2, line
             # Replayed/late packets must not decode the same slot again.
             for client in clients: client.messages.clear()
             feed(payload,slot_utc);time.sleep(.2)
@@ -78,7 +77,6 @@ def main():
             for client in clients:
                 wait(lambda:all(message in text(client) for message in ['W1FC F5BZB -08','CQ F5RXL IN94','K1JT HA0DU KN07']),timeout=20)
                 assert not any(isinstance(p,bytes) and p[5]==5 and HEADER.unpack_from(p)[4]==5 for p in client.messages),'RX3 PCM leaked to browser'
-            assert 'Discarded partial slot: audio sample gap' in (root/'receiver.log').read_text()
             assert decoder.poll() is None
             print('FT8 UDP: real generated message and WSJT-X recording decoded to operator/viewer; UTC labels, '
                   '64-bit QO100 RF, duplicate rejection, packet-loss recovery and no RX3 PCM in browser passed')

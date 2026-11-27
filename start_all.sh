@@ -98,7 +98,14 @@ try:
             raise ValueError(f'Beide RX{rx}-Decoder-Ports muessen zusammen aktiviert werden.')
         return audio, text
 
-    audio2, text2 = decoder_ports(2, 'rx2_decoder_audio_port', 'rx2_decoder_text_port')
+    if 'ft_enabled' in bridge:
+        ft_value = bridge['ft_enabled']
+        if ft_value not in ('0', '1'):
+            raise ValueError('ft_enabled muss 0 oder 1 sein.')
+        ft_enabled = external and rx_enabled[2] and ft_value == '1'
+    else:
+        legacy_audio, _ = decoder_ports(2, 'rx2_decoder_audio_port', 'rx2_decoder_text_port')
+        ft_enabled = bool(legacy_audio)
     audio3, text3 = decoder_ports(3, 'rx3_decoder_audio_port', 'rx3_decoder_text_port')
     audio4, text4 = decoder_ports(4, 'rx4_decoder_audio_port', 'rx4_decoder_text_port')
     mm_audio, mm_http = decoder_ports(5, 'rx5_decoder_audio_port', 'mm_http_port')
@@ -108,14 +115,14 @@ try:
     listen, http = bridge.get('listen', '0.0.0.0'), int(bridge.get('port', 8080))
     if not all(1 <= p <= 65535 for p in (gui_port, http)):
         raise ValueError('GUI- und HTTP-Ports muessen 1..65535 sein.')
-    udp_ports = [p for p in (gui_port, audio2, text2, audio3, text3, audio4, text4, digital, digital_bridge, mm_audio) if p]
+    udp_ports = [p for p in (gui_port, audio3, text3, audio4, text4, digital, digital_bridge, mm_audio) if p]
     if len(set(udp_ports)) != len(udp_ports):
         raise ValueError('Alle aktivierten UDP-Ports muessen verschieden sein.')
     if mm_http and mm_http == http:
         raise ValueError('MM-HTTP und WebGUI muessen verschiedene TCP-Ports verwenden.')
     addresses = [(socket.SOCK_DGRAM, gui_bind, gui_port),
                  (socket.SOCK_STREAM, listen, http)]
-    addresses += [(socket.SOCK_DGRAM, '127.0.0.1', p) for p in (audio2, text2, audio3, text3, audio4, text4, mm_audio) if p]
+    addresses += [(socket.SOCK_DGRAM, '127.0.0.1', p) for p in (audio3, text3, audio4, text4, mm_audio) if p]
     if mm_http:
         addresses += [(socket.SOCK_STREAM, '127.0.0.1', mm_http)]
     if sys.argv[3] == 'pluto':
@@ -136,14 +143,14 @@ try:
             protocol = 'TCP' if kind == socket.SOCK_STREAM else 'UDP'
             raise ValueError(f'{protocol} {host}:{port} nicht verfuegbar: {error}. '
                              'Bereits laufende Dienste zuerst beenden.') from error
-    print('127.0.0.1' if listen == '0.0.0.0' else listen, http, audio2, text2, audio3, text3, audio4, text4, digital, digital_bridge, mm_audio, mm_http, ft8_cpu, beacon_cpu, int(digital_auto_idle))
+    print('127.0.0.1' if listen == '0.0.0.0' else listen, http, int(ft_enabled), audio3, text3, audio4, text4, digital, digital_bridge, mm_audio, mm_http, ft8_cpu, beacon_cpu, int(digital_auto_idle))
 except (OSError, ValueError) as error:
     sys.exit(f'Start abgebrochen: {error}')
 PY
 )"
-read -r http_host http_port ft8_rx2_port ft8_rx2_text_port ft8_port ft8_text_port beacon_port beacon_text_port digital_port digital_bridge_port mm_port mm_http_port ft8_cpu beacon_cpu digital_auto_idle <<< "$connection"
+read -r http_host http_port ft_enabled ft8_port ft8_text_port beacon_port beacon_text_port digital_port digital_bridge_port mm_port mm_http_port ft8_cpu beacon_cpu digital_auto_idle <<< "$connection"
 decoder_programs=()
-if ((ft8_port || ft8_rx2_port)); then decoder_programs+=(qo100_ft8_decoder ft8-decoder); fi
+if ((ft8_port)); then decoder_programs+=(qo100_ft8_decoder); fi
 if ((beacon_port)); then decoder_programs+=(qo100_beacon_decoder); fi
 for program in "${decoder_programs[@]}"; do
     if [[ ! -x "$bin_dir/$program" ]]; then
@@ -193,9 +200,40 @@ launch() {
     "$@" >"$log_dir/$name.log" 2>&1 &
     pids+=("$!")
 }
+run_webbridge() {
+    local qrz_env="${HOME:-}/.config/qo100-trx2/qrz.env"
+    if [[ -n ${HOME:-} && ! -v QO100_QRZ_API_KEY && -f $qrz_env ]]; then
+        # Read the assignment as data and pass it only to the webbridge process.
+        exec python3 - "$qrz_env" "$bin_dir/qo100_webbridge" "$@" <<'PY'
+import os
+from pathlib import Path
+import shlex
+import sys
+
+name = 'QO100_QRZ_API_KEY'
+try:
+    key = None
+    for line in Path(sys.argv[1]).read_text(encoding='utf-8').splitlines():
+        fields = shlex.split(line, comments=True)
+        if fields[:1] == ['export']:
+            fields = fields[1:]
+        if fields and fields[0].startswith(name + '='):
+            if len(fields) != 1:
+                raise ValueError('Expected one QRZ key assignment')
+            key = fields[0].split('=', 1)[1]
+    if key is not None:
+        os.environ[name] = key
+except (OSError, ValueError):
+    print('QRZ-Konfiguration konnte nicht geladen werden.', file=sys.stderr)
+
+os.execv(sys.argv[2], sys.argv[2:])
+PY
+    fi
+    exec "$bin_dir/qo100_webbridge" "$@"
+}
 show_logs() {
     local name
-    for name in backend decoder-ft8 decoder-ft8-rx2 decoder-beacon webbridge decoder-mm; do
+    for name in backend decoder-ft8 decoder-beacon webbridge decoder-mm; do
         [[ -f "$log_dir/$name.log" ]] || continue
         echo "$name ($log_dir/$name.log):" >&2
         tail -n 12 "$log_dir/$name.log" >&2
@@ -204,11 +242,7 @@ show_logs() {
 
 backend_index=${#pids[@]}
 launch backend "$bin_dir/qo100_backend" --config "$backend_config" --source "$source"
-ft8_index=-1; ft8_rx2_index=-1; beacon_index=-1
-if ((ft8_rx2_port)); then
-    ft8_rx2_index=${#pids[@]}
-    launch decoder-ft8-rx2 "$bin_dir/qo100_ft8_decoder" --rx 2 --port "$ft8_rx2_port"
-fi
+ft8_index=-1; beacon_index=-1
 if ((ft8_port)); then
     ft8_index=${#pids[@]}
     launch decoder-ft8 "$bin_dir/qo100_ft8_decoder" --port "$ft8_port" --cpu-percent "$ft8_cpu"
@@ -218,8 +252,8 @@ if ((beacon_port)); then
     launch decoder-beacon "$bin_dir/qo100_beacon_decoder" --port "$beacon_port" --cpu-percent "$beacon_cpu"
 fi
 webbridge_index=${#pids[@]}
-launch webbridge "$bin_dir/qo100_webbridge" --config "$webbridge_config" \
-    --rx2-decoder-audio-port "$ft8_rx2_port" --rx2-decoder-text-port "$ft8_rx2_text_port" \
+launch webbridge run_webbridge --config "$webbridge_config" \
+    --ft-enabled "$ft_enabled" \
     --rx3-decoder-audio-port "$ft8_port" --rx3-decoder-text-port "$ft8_text_port" \
     --rx4-decoder-audio-port "$beacon_port" --rx4-decoder-text-port "$beacon_text_port" \
     --rx5-decoder-audio-port "$mm_port" --mm-http-port "$mm_http_port"
@@ -238,7 +272,6 @@ echo "Starte QO100; Logs: $log_dir"
 deadline=$((SECONDS + 15))
 while :; do
     startup_indices=("$backend_index" "$webbridge_index")
-    if ((ft8_rx2_index >= 0)); then startup_indices+=("$ft8_rx2_index"); fi
     if ((ft8_index >= 0)); then startup_indices+=("$ft8_index"); fi
     if ((beacon_index >= 0)); then startup_indices+=("$beacon_index"); fi
     if ((mm_index >= 0)); then startup_indices+=("$mm_index"); fi
@@ -251,7 +284,6 @@ while :; do
         fi
     done
     if grep -q '^Source=' "$log_dir/backend.log" && \
-       { ((ft8_rx2_port == 0)) || grep -q '^FT8 receiver: RX2' "$log_dir/decoder-ft8-rx2.log"; } && \
        { ((ft8_port == 0)) || grep -q '^FT8 receiver: RX3' "$log_dir/decoder-ft8.log"; } && \
        { ((beacon_port == 0)) || grep -q '^PSK beacon receiver: RX4' "$log_dir/decoder-beacon.log"; } && \
        grep -q '^HTTP/WS' "$log_dir/webbridge.log" && \
@@ -284,7 +316,7 @@ else
     if ((ft8_port)); then echo "RX3 FT8 laeuft."; else echo "RX3 FT8 ausgeschaltet."; fi
     if ((beacon_port)); then echo "RX4 PSK laeuft."; else echo "RX4 PSK ausgeschaltet."; fi
 fi
-if ((ft8_rx2_port)); then echo "FT4/8 RX2/TX2 im WebGUI verfuegbar."; fi
+if ((ft_enabled)); then echo "FT4/8 RX2/TX2 im WebGUI verfuegbar."; fi
 if ((mm_port == 0)); then echo "RX5 MM-Decoder ausgeschaltet."; fi
 if ((mm_port)); then echo "RX5 MM-Bake: DX-Cluster, CW-Skimmer und Bulletin (Daten: $mm_data_dir)."; fi
 if ((digital_audio)); then echo "RX2/TX2 Audioschnittstelle: fromQO100 / toQO100 (Status: $log_dir/digital-audio.log)."; fi
@@ -326,7 +358,6 @@ while :; do
         fi
     done
     restart_indices=()
-    if ((ft8_rx2_index >= 0)); then restart_indices+=("$ft8_rx2_index"); fi
     if ((ft8_index >= 0)); then restart_indices+=("$ft8_index"); fi
     if ((beacon_index >= 0)); then restart_indices+=("$beacon_index"); fi
     if ((digital_index >= 0)); then restart_indices+=("$digital_index"); fi
@@ -338,9 +369,6 @@ while :; do
             if ((index == ft8_index)); then
                 name=decoder-ft8; program=qo100_ft8_decoder; monitor_port="$ft8_port"
                 extra_args=(--cpu-percent "$ft8_cpu")
-            elif ((index == ft8_rx2_index)); then
-                name=decoder-ft8-rx2; program=qo100_ft8_decoder; monitor_port="$ft8_rx2_port"
-                extra_args=(--rx 2)
             elif ((index == beacon_index)); then
                 name=decoder-beacon; program=qo100_beacon_decoder; monitor_port="$beacon_port"
                 extra_args=(--cpu-percent "$beacon_cpu")

@@ -699,7 +699,7 @@ html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text
   border-radius: 7px;
   background: var(--heading-bg);
 }
-.ft-mode-toolbar label, .ft-qso .ft-auto { display: flex; align-items: center; gap: 6px; }
+.ft-mode-toolbar label, .ft-qso .ft-arm { display: flex; align-items: center; gap: 6px; }
 .ft-slot-meter { flex-wrap: nowrap; }
 #ft-utc-clock { white-space: nowrap; font: 11px var(--mono); color: var(--text-secondary); }
 #ft-slot-progress {
@@ -811,7 +811,7 @@ button.ft-decode-line:disabled { opacity: 1; }
   border-radius: 7px;
   background: var(--heading-bg);
 }
-.ft-qso, .ft-contact, .ft-tx-settings, .ft-tx-actions, #ft8-tx-form {
+.ft-qso, .ft-contact, #ft8-tx-form {
   display: flex;
   align-items: end;
   flex-wrap: wrap;
@@ -830,16 +830,20 @@ button.ft-decode-line:disabled { opacity: 1; }
   font: 11px var(--mono);
 }
 .ft-qso input:not([type="checkbox"]) { width: 94px; text-transform: uppercase; }
-.ft-auto { min-height: 26px; padding-inline: 5px; white-space: nowrap; }
-.ft-auto input { margin: 0; accent-color: var(--rx2); }
+.ft-qso .ft-arm { min-height: 26px; }
+.ft-arm input, .ft-cq-only input { margin: 0; accent-color: var(--rx2); }
 .ft-controls .small-button { min-height: 26px; padding: 4px 8px; white-space: nowrap; }
 #ft8-send:enabled { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent-text); }
 #ft8-stop:enabled { border-color: var(--message-border); color: var(--message-text); }
-#ft8-tx-form input[type="number"] { width: 66px; }
+#ft-settings input[type="number"] { width: 66px; }
 .ft8-message { flex: 1 1 160px; min-width: 0; }
 #ft8-message { width: 100%; }
 .ft-status-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--text-secondary); }
-.ft-status-bar:has(#ft-contact[hidden]):has(#ft8-status:empty) { display: none; }
+.ft-status-bar:has(#ft-contact[hidden]):has(#ft8-status:empty):has(#ft-adif-status[hidden]):has(#ft-qrz-status:empty) { display: none; }
+#ft8-log[data-cq-only] .ft-decode-line:not([data-ft-cq]) { display: none; }
+.ft-sent-line, #ft-next-tx { color: var(--rx2); }
+#ft-adif-message:not(:empty) { margin-inline-start: 4px; }
+#ft-qrz-status { margin: 0; }
 .ft-contact { align-items: center; flex: 1 1 auto; }
 #ft-qso-status { font-family: var(--mono); color: var(--rx2); overflow-wrap: anywhere; }
 #ft8-status { margin: 0; }

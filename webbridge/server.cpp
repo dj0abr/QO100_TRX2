@@ -3,6 +3,10 @@
 #include <deque>
 #include <filesystem>
 #include <iostream>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace bridge {
 namespace beast=boost::beast;
@@ -143,10 +147,45 @@ class Http final: public std::enable_shared_from_this<Http> {
         http::response<http::string_body> response{status,11};response.set(http::field::content_type,"text/plain; charset=utf-8");
         response.body()=message;response.prepare_payload();reply(std::move(response));
     }
+    void download_adif(std::string_view token) {
+        if (!bridge_.take_ft_download(token)) {
+            error(http::status::forbidden,"ADIF download requires an operator request");
+            return;
+        }
+        const auto fd=::open(bridge_.config().ft_log_path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+        if (fd<0) {
+            error(errno==ENOENT ? http::status::not_found : http::status::internal_server_error,
+                  "ADIF logbook is unavailable");
+            return;
+        }
+        beast::file_posix file;
+        file.native_handle(fd);
+        struct stat info{};
+        if (::fstat(fd,&info)!=0 || !S_ISREG(info.st_mode)) {
+            error(http::status::internal_server_error,"ADIF logbook is unavailable");
+            return;
+        }
+        if (::flock(fd,LOCK_SH | LOCK_NB)!=0) {
+            error(http::status::service_unavailable,"The ADIF logbook is being written");
+            return;
+        }
+        http::response<http::file_body> response{http::status::ok,11};
+        boost::system::error_code ec;
+        response.body().reset(std::move(file),ec);
+        if (::flock(fd,LOCK_UN)!=0 || ec) {
+            error(http::status::internal_server_error,"ADIF logbook is unavailable");
+            return;
+        }
+        response.set(http::field::content_type,"application/octet-stream");
+        response.set(http::field::content_disposition,"attachment; filename=\"ft4-ft8.adi\"");
+        response.content_length(response.body().size());
+        reply(std::move(response));
+    }
     void handle() {
         auto request=parser_.release();
         if(request.method()!=http::verb::get && request.method()!=http::verb::head) {error(http::status::method_not_allowed,"GET or HEAD required");return;}
-        auto target=std::string(request.target());target=target.substr(0,target.find('?'));
+        const auto url=std::string(request.target());
+        auto target=url.substr(0,url.find('?'));
         if(target=="/ws" && websocket::is_upgrade(request)) {
             const auto origin=request[http::field::origin];
             if(!origin.empty()) {
@@ -161,6 +200,15 @@ class Http final: public std::enable_shared_from_this<Http> {
         if(target=="/health") {
             http::response<http::string_body> response{http::status::ok,11};response.set(http::field::content_type,"application/json");
             response.body()="{\"service\":\"qo100_webbridge\"}";response.prepare_payload();reply(std::move(response));return;
+        }
+        if (target=="/ft4-ft8.adi") {
+            const auto query=std::string_view(url).substr(target.size());
+            if (request.method()!=http::verb::get || !query.starts_with("?token=")) {
+                error(http::status::forbidden,"ADIF download requires an operator request");
+                return;
+            }
+            download_adif(query.substr(7));
+            return;
         }
         // Static assets only, constrained to the configured document root, including symlinks.
         if(target.empty() || target[0]!='/' || target.find_first_of("%\\\0",0,3)!=std::string::npos) {

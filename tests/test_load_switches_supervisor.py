@@ -27,8 +27,6 @@ def run_case(script, binaries, defaults, assets, changes, enabled, linger=False,
                 program = bin_dir / name
                 program.write_text(f'#!/usr/bin/python3\nimport signal\nprint({marker!r},flush=True)\nwhile True: signal.pause()\n')
                 program.chmod(0o755)
-        if enabled[0]:
-            (bin_dir / 'ft8-decoder').symlink_to('/usr/bin/true')
         if enabled[2]:
             (bin_dir / 'qo100_mm_probe').symlink_to('/usr/bin/true')
         # Binaries of disabled decoders deliberately do not exist.

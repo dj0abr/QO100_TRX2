@@ -101,9 +101,13 @@ std::vector<uint8_t> filter_state_packet(uint32_t request, double bandwidth, dou
     return p;
 }
 bool parse_tx_control(const uint8_t* p,size_t n,TxControl& c) {
-    if(n!=64 || !tx_header(p,n,tx_control_type,true) || get(p,54,2)>1 ||
-       get(p,16,8) || get(p,24,8) || get(p,40,8) || get(p,48,6) || get(p,56,4)) return false;
-    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),get(p,32,8),get(p,54,2)!=0,uint32_t(get(p,8,4))};return true;
+    if(n!=64 || !tx_header(p,n,tx_control_type,true) ||
+       get(p,24,8) || get(p,40,8) || get(p,48,6) || get(p,56,4)) return false;
+    const auto stream=uint32_t(get(p,8,4)), format=uint32_t(get(p,54,2));
+    const auto deadline=get(p,16,8);
+    if (format>2 || (format==2 ? (stream!=tx2_stream || !deadline) : deadline!=0)) return false;
+    c={uint32_t(get(p,12,4)),uint32_t(get(p,60,4)),get(p,32,8),format!=0,stream,deadline};
+    return true;
 }
 bool parse_tx_audio(const uint8_t* p,size_t n,TxAudio& a) {
     if(!tx_header(p,n,tx_audio_type,true) || n!=544 || get(p,40,4)!=12000 || get(p,48,4) ||
@@ -118,8 +122,9 @@ bool parse_tx_audio(const uint8_t* p,size_t n,TxAudio& a) {
     return true;
 }
 std::vector<uint8_t> tx_state_packet(uint32_t request,uint64_t frequency,uint32_t epoch,
-    uint32_t session,uint16_t status,bool enabled,uint32_t audio_fill,uint16_t pluto_fill,int32_t ppm,uint32_t stream) {
+    uint32_t session,uint16_t status,bool enabled,uint32_t audio_fill,uint16_t pluto_fill,int32_t ppm,uint32_t stream,uint32_t ft_ptt_flags) {
     auto p=state_packet(request,frequency,epoch,session,status,stream);p[5]=tx_state_type;
+    if (stream==tx2_stream) put(p,16,ft_ptt_flags,8);
     put(p,44,audio_fill,4);put(p,48,enabled?1:0,4);put(p,52,pluto_fill,2);put(p,56,uint32_t(ppm),4);
     return p;
 }
