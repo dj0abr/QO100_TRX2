@@ -495,10 +495,11 @@ def main():
             ft_state = snapshot(lambda s: s.get('ft', {}).get('configured') and s['ft']['callsign'] == 'DJ0ABR')
             wait(lambda:execute('return !document.getElementById("ft-arm").disabled'))
 
-            def decode(text, source='', destination='', value='', cq=False, worked=None, decode_id='431'):
+            def decode(text, source='', destination='', value='', cq=False, worked=None, decode_id='431',
+                       event_type='ft_decode', slot_ms=120000):
                 item = ft_state['ft']
-                row = dict(type='ft_decode', mode=item['mode'], session=ft_state['session'],
-                           receive_revision=item['receive_revision'], slot_utc_ms=120000, snr_db=-5,
+                row = dict(type=event_type, mode=item['mode'], session=ft_state['session'],
+                           receive_revision=item['receive_revision'], slot_utc_ms=slot_ms, snr_db=-5,
                            dt_s=.2, audio_hz=1500, text=text, source=source, destination=destination,
                            value=value, cq=cq, decode_id=decode_id)
                 if worked is not None:
@@ -529,6 +530,12 @@ def main():
                     !log.children[3].querySelector('.ft-message-body');""")
             click('#ft-cq-only')
             assert execute('return [...document.querySelector("#ft8-log").children].filter(n => getComputedStyle(n).display !== "none").length') == 3
+            decode('TEST DJ0ABR', event_type='ft_tx', slot_ms=135000)
+            decode('TEST DJ0ABR', slot_ms=135000)
+            assert lines('ft8-own-log') == [*decodes[1:3], None, 'TEST DJ0ABR']
+            assert execute("""const rx = document.getElementById('ft8-own-log').lastElementChild;
+                return rx.textContent.includes('-5 dB') && getComputedStyle(rx).display !== 'none' &&
+                    rx.previousElementSibling.classList.contains('ft-sent-line');""")
             click('#ft-cq-only')
             assert execute('return document.querySelector("#ft8-log button").disabled'), 'A TX action was enabled before arming'
             click('#ft-arm')

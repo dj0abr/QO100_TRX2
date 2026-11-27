@@ -80,6 +80,7 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
   let state = {}, radio = {}, clock, error = '', outcome = '', settingsDirty = false;
   let revision = 0;
   const pending = new Set();
+  const recentTx = [];
   const busy = () => !!state.busy || radio.phase === 'scheduled' || radio.phase === 'sending' ||
     ['ft_cq', 'ft_free_text', 'ft_start_qso', 'ft_auto'].some(command => pending.has(command));
 
@@ -103,6 +104,7 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
   }
   function scrollToEnd() { logs.forEach(follow); }
   function clear() {
+    recentTx.length = 0;
     for (const log of logs) {
       log.lines.length = 0;
       log.output.textContent = '';
@@ -285,6 +287,8 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     if (row.session !== radio.session || row.receive_revision !== state.receive_revision ||
         row.mode !== state.mode || !Number.isFinite(row.slot_utc_ms)) return;
     if (row.type === 'ft_tx') {
+      recentTx.push(row);
+      if (recentTx.length > 2) recentTx.shift();
       const line = document.createElement('div');
       line.className = 'ft-decode-line ft-sent-line';
       line.textContent = utcLabel(row.slot_utc_ms) + ' TX  ' + Math.round(row.audio_hz) + ' Hz  ' + row.text;
@@ -308,7 +312,8 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
       line.onclick = () => { if (canStart()) submit('ft_start_qso', {decode_id: row.decode_id}); };
     }
     append(all, line);
-    if (state.callsign && (row.source === state.callsign || row.destination === state.callsign)) {
+    const matchesTx = !row.source && recentTx.some(tx => tx.slot_utc_ms === row.slot_utc_ms && tx.text === row.text);
+    if (matchesTx || (state.callsign && (row.source === state.callsign || row.destination === state.callsign))) {
       const copy = line.cloneNode(true);
       copy.onclick = line.onclick;
       copy.removeAttribute('data-new-cq');

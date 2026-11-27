@@ -1,7 +1,7 @@
 # HTTP-/WebSocket-Adapter
 
 Eigenständiges C++20-Programm **`qo100_webbridge`**. Für FT4/8 verwendet
-die Webbridge libft8 ab 0.3.1.
+die Webbridge libft8 ab 0.3.2.
 HTTP und WebSocket liegen auf **Port 8080**; Backend-UDP bleibt lokal auf `127.0.0.1:40900`.
 
 ## Start

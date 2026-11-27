@@ -109,8 +109,8 @@ if [[ -z $libft8_prefix ]]; then
     libft8_source="${LIBFT8_SOURCE_DIR:-$project_dir/../../ft8/libft8}"
     libft8_dir="$project_dir/build/libft8"
     if [[ -z ${LIBFT8_SOURCE_DIR:-} && ! -f "$libft8_source/CMakeLists.txt" ]]; then
-        # libft8 0.3.1, tested with the QO100 FT4/FT8 integration.
-        libft8_revision=e281d1a411f0980a914c9e0b9fd097f4c0d17500
+        # libft8 0.3.2 supports full-duplex FT4/FT8 decoding.
+        libft8_revision=5c991d62d2695a157f7025b5854bbfe33c0758d9
         libft8_source="$libft8_dir/source-$libft8_revision"
         if [[ ! -d $libft8_source ]]; then
             echo "Downloading libft8 from GitHub ($libft8_revision) ..."

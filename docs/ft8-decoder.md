@@ -5,7 +5,11 @@
 Unter **DigiModes → FT4/8** erscheinen der RX2-Audiowasserfall, die UTC-Uhr,
 der Slotfortschritt und die Nachrichtenlisten. **Nur CQ** filtert die obere
 Liste. Die untere zeigt Nachrichten mit eigenem Rufzeichen und gesendete
-Nachrichten. **Default-QRG** stimmt RX2 auf 10 489 540 000 Hz und TX2 auf
+Nachrichten. RX2 dekodiert auch im eigenen Sende-Slot. Das über QO-100
+empfangene Signal erscheint mit seinem SNR. Die untere Liste zeigt auch
+empfangenen Freitext, der zur eigenen Sendung im selben Slot passt. Die
+QSO-Automatik verarbeitet weiterhin die Antworten aus den Empfangs-Slots.
+**Default-QRG** stimmt RX2 auf 10 489 540 000 Hz und TX2 auf
 2 400 040 000 Hz. **Betriebsart** wählt FT4 oder FT8 für beide Richtungen.
 
 Rufzeichen, QTH-Locator, Audiofrequenz und TX-Pegel eintragen und
@@ -109,7 +113,7 @@ die Zuordnung am Monitor. [CPU-Budget](decoder-cpu.md)
 
 ## Build und Tests
 
-QO100 verwendet libft8 ab 0.3.1. `build_all.sh` lädt bei Bedarf den
+QO100 verwendet libft8 ab 0.3.2. `build_all.sh` lädt bei Bedarf den
 festgelegten Quellstand von GitHub und baut die Bibliothek lokal.
 `LIBFT8_SOURCE_DIR` wählt einen lokalen Checkout, `LIBFT8_ROOT` ein bereits
 installiertes Paket. Für einen direkten CMake-Build das Präfix als

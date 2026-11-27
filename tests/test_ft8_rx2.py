@@ -174,6 +174,7 @@ def main():
             incoming = (
                 (first, 'CQ K2ABC FN42'),
                 (first + 7.5, 'CQ K1ABC FN42'),
+                (first + 15, 'K1ABC DJ0ABR JN68'),
                 (first + 22.5, 'DJ0ABR K1ABC -10'),
                 (first + 37.5, 'DJ0ABR K1ABC RR73'),
             )
@@ -184,6 +185,8 @@ def main():
             tx = event('ft_tx', lambda p: p['destination'] == 'K1ABC', timeout=18)
             assert tx['mode'] == 'FT4' and tx['slot_utc_ms'] == (first + 15) * 1000 and tx['text'] == 'K1ABC DJ0ABR JN68', tx
             assert 300 <= tx['audio_start_ms'] - tx['slot_utc_ms'] <= 400, tx
+            echo = event('ft_decode', lambda p: p['slot_utc_ms'] == tx['slot_utc_ms'] and p['text'] == tx['text'])
+            assert echo['source'] == 'DJ0ABR' and isinstance(echo['snr_db'], int), echo
             event('ft_notice', lambda p: p['kind'] == 'adif' and p['outcome'] == 'completed', timeout=38)
             record = logbook.read_text()
             for field in ('<CALL:5>K1ABC', '<MODE:4>MFSK<SUBMODE:3>FT4', '<BAND:4>13cm',
@@ -234,9 +237,14 @@ def main():
             state_ft(lambda ft: ft['armed'] and not ft['busy'] and ft['auto'] == 'off')
             assert len(tx_packets()) == before, 'Aborted preparation emitted PCM'
 
+            return_pcm = waveform('FT8', 'TNX 73')
             command('ft_free_text', text='TNX 73')
             tx = event('ft_tx', lambda p: p['text'] == 'TNX 73', timeout=18)
             assert tx['mode'] == 'FT8' and 500 <= tx['audio_start_ms'] - tx['slot_utc_ms'] <= 680, tx
+            # Model the downlink by delaying the RX waveform by thirteen PCM blocks.
+            rx.schedule(2, tx['slot_utc_ms'] / 1000 + .26, return_pcm[:-13 * BLOCK])
+            echo = event('ft_decode', lambda p: p['slot_utc_ms'] == tx['slot_utc_ms'] and p['text'] == tx['text'], timeout=17)
+            assert isinstance(echo['snr_db'], int) and abs(echo['dt_s'] - .26) < .2, echo
             event('ft_notice', lambda p: p['kind'] == 'free-text' and p['outcome'] == 'completed', timeout=16)
             play_captured('FT8', tx_packets()[before:], 'TNX 73')
             state_ft(lambda ft: not ft['busy'] and ft['armed'])
@@ -254,6 +262,7 @@ def main():
             time.sleep(.45)
             assert len(tx_packets()) == count, 'TX2 continued emitting after leaving the FT mode'
             assert not radio['tx']['ptt'], 'This test must use TX2 rather than TX1'
+            print('RX2 decoded the FT4 and FT8 transmit slots with SNR', flush=True)
             print('FT4/FT8 TX2 waveform, UTC start, queued abort and active cancellation passed', flush=True)
         except BaseException:
             for item in list(owner.messages):

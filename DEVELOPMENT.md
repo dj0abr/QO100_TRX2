@@ -73,7 +73,7 @@ cmake --build build -j
 # http://BACKEND-IP:8080/ (Mikrofon über die HTTPS-Adresse der OPNsense)
 ```
 
-Für die Webbridge und RX3 wird ein installiertes libft8 ab 0.3.1 benötigt.
+Für die Webbridge und RX3 wird ein installiertes libft8 ab 0.3.2 benötigt.
 Bei direktem CMake-Aufruf lässt sich das Installationspräfix mit
 `-Dlibft8_ROOT=/pfad/zur/installation` angeben. `build_all.sh` verwendet den
 lokalen Checkout unter `../../ft8/libft8`, falls vorhanden. `LIBFT8_SOURCE_DIR`

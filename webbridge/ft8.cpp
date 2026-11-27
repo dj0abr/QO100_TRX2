@@ -85,6 +85,13 @@ ft8::Config station_config(ft8::Config config, const Json& request)
     return config;
 }
 
+std::unique_ptr<ft8::Transceiver> make_ft_transceiver(const ft8::Config& config)
+{
+    auto radio = std::make_unique<ft8::Transceiver>(config);
+    radio->set_decode_during_tx(true);
+    return radio;
+}
+
 std::string download_token()
 {
     constexpr char hex[] = "0123456789abcdef";
@@ -146,7 +153,7 @@ void Bridge::init_ft()
                 const auto station = Json::parse(file);
                 const auto level = ft_number(station, "tx_level", 1, 100);
                 auto config = station_config(ft_config_, station);
-                ft_ = std::make_unique<ft8::Transceiver>(config);
+                ft_ = make_ft_transceiver(config);
                 ft_config_ = std::move(config);
                 ft_level_ = level;
             } else if (std::filesystem::exists(config_.ft_station_path)) {
@@ -157,7 +164,7 @@ void Bridge::init_ft()
         }
     }
     if (config_.ft_enabled && !ft_)
-        ft_ = std::make_unique<ft8::Transceiver>(ft_config_);
+        ft_ = make_ft_transceiver(ft_config_);
     refresh_ft_state();
 }
 
@@ -269,7 +276,7 @@ void Bridge::command_ft(uint64_t client, const Json& id, const std::string& type
                 queue(command);
             }
         } else {
-            auto new_radio = std::make_unique<ft8::Transceiver>(config);
+            auto new_radio = make_ft_transceiver(config);
             save_station(config_.ft_station_path, config, level);
             retire_ft();
             ft_ = std::move(new_radio);
