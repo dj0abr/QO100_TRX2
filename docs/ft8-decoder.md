@@ -21,8 +21,11 @@ Audiofrequenz beenden ein laufendes FT-QSO beim Speichern. Ein neuer TX-Pegel
 wird auch während einer Sendung übernommen. RX2 dekodiert bei aktivem
 FT-DigiMode auch ohne Stationsdaten und bei stummem Browser-Audio.
 
-FT-TX wird automatisch freigegeben, sobald der Bediener FT4/8 ausgewählt
-hat, die Stationsdaten gültig sind und der Sendeweg bereit ist. Mit **CQ rufen** geht
+Die Bedienelemente stehen dem Bediener beim Öffnen von FT4/8 zur Verfügung.
+Falls die Webbridge noch keine Station gespeichert hat, übernimmt sie beim
+Öffnen die gültigen Stationsdaten aus dem Browser. FT-TX wird automatisch
+freigegeben, sobald die Stationsdaten gültig sind und der Sendeweg bereit ist.
+Mit **CQ rufen** geht
 ein CQ in den nächsten verfügbaren Slot. Die Slotfolge lässt sich dafür
 manuell auswählen. Ein Klick auf einen Decode startet ein QSO mit dessen
 Absender im passenden Gegenslot. libft8 führt den Austausch und eventuelle

@@ -69,7 +69,8 @@ function notify(text, error = false, duration = 5000) {
 function report(error) { if (error?.code !== 'superseded') notify(error.message || String(error), true); }
 function fail(message, code = 'invalid') { return Object.assign(new Error(message), {code}); }
 function command(type, values = {}) {
-  const allowed = type === 'ft_config' ? operator && isOpen() : canControl();
+  // The webbridge checks FT transmit readiness when it receives the command.
+  const allowed = type.startsWith('ft_') ? operator && isOpen() : canControl();
   if (!allowed) return Promise.reject(fail(operator ? 'Backend ist nicht bedienbereit.' : 'Zuschauer können nur empfangen.', 'not_ready'));
   const id = request = (request + 1) >>> 0;
   const promise = new Promise((resolve, reject) => {

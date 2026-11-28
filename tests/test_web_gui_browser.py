@@ -198,6 +198,10 @@ def main():
                             if (message.type.startsWith('ft_')) window.__ftRequests.push(message);
                             if (message.type === 'ft_config') {
                                 window.__ftConfigSentAt = performance.now();
+                                if (window.__holdFtConfig) {
+                                    window.__releaseFtConfig = () => super.send(data);
+                                    return;
+                                }
                                 if (window.__ftConfigDelay) {
                                     setTimeout(() => super.send(data), window.__ftConfigDelay);
                                     window.__ftConfigDelay = 0;
@@ -211,6 +215,7 @@ def main():
                 if(!localStorage.getItem('qo100.testDbSeeded')){
                     localStorage.setItem('qo100.fullbandFloor','-113');localStorage.setItem('qo100.zoomFloor','-97');
                     localStorage.setItem('qo100.fullbandAxis','pluto-tx');
+                    localStorage.setItem('qo100.ftOwnCall','DJ0ABR');localStorage.setItem('qo100.ftOwnGrid','JN68');
                     localStorage.setItem('qo100.testDbSeeded','true');
                 }
                 const themeObserver=new MutationObserver(()=>{
@@ -484,6 +489,7 @@ def main():
             decoder_socket.sendto(b'abcdef\n', ('127.0.0.1', decoder_text_port))
             wait(lambda:execute('return document.getElementById("decoder-text").textContent')=='abcdef\n')
             toggle_decoder()
+            execute('window.__holdFtConfig = true')
             for mode in ('sstv', 'rtty', 'ft8'):
                 select_view(mode)
                 assert execute('return getComputedStyle(document.getElementById("fullband")).flexGrow') == '0.43', mode
@@ -497,7 +503,19 @@ def main():
             observer.role('viewer')
             observer.state()
             observer.send({'type': 'audio_subscription', 'stream': 2, 'enabled': False})
-            assert execute('return !document.querySelector("#ft-arm,#ft-save") && document.getElementById("ft-cq").disabled')
+            wait(lambda: execute('return typeof window.__releaseFtConfig === "function"'))
+            assert not (root / 'ft-station.json').exists()
+            assert execute('''return !document.querySelector("#ft-arm,#ft-save") &&
+                ['ft-auto', 'ft8-parity', 'ft-cq', 'ft8-send', 'ft8-stop', 'ft8-message']
+                .every(id => !document.getElementById(id).disabled)''')
+            changed('#ft-auto', 'call-cq')
+            changed('#ft8-message', 'TNX 73')
+            click('#ft8-send')
+            assert execute('return window.__ftRequests.map(m => m.type)') == ['ft_config']
+            execute('window.__holdFtConfig = false; window.__releaseFtConfig()')
+            restored = snapshot(lambda s: s.get('ft', {}).get('armed') and s['ft']['callsign'] == 'DJ0ABR')
+            assert restored['ft']['locator'] == 'JN68' and restored['ft']['auto'] == 'off'
+
             changed('#ft-own-call', 'dj0abr')
             changed('#ft-own-grid', 'JN68')
             time.sleep(.55)
@@ -505,7 +523,7 @@ def main():
             last_edit = execute('return performance.now()')
             ft_state = snapshot(lambda s: s.get('ft', {}).get('armed') and s['ft']['callsign'] == 'DJ0ABR'
                                 and s['ft']['tx_level'] == 26)
-            assert execute('return window.__ftRequests.filter(m => m.type === "ft_config").length') == 1
+            assert execute('return window.__ftRequests.filter(m => m.type === "ft_config").length') == 2
             assert execute('return window.__ftConfigSentAt') - last_edit >= 950
             wait(lambda:execute('return !document.getElementById("ft-cq").disabled'))
             assert execute('return [...document.querySelectorAll("#ft-settings input")].every(input => !input.disabled)')

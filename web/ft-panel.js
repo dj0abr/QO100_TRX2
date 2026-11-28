@@ -79,7 +79,7 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
   const status = $('ft8-status'), qso = $('ft-contact'), nextTx = $('ft-next-tx');
   let state = {}, radio = {}, clock, error = '', outcome = '', settingsDirty = false;
   let revision = 0;
-  let settingsRevision = 0, settingsTimer = null;
+  let settingsRevision = 0, settingsTimer = null, settingsSubmitted = false;
   const pending = new Set();
   const recentTx = [];
   const busy = () => !!state.busy || radio.phase === 'scheduled' || radio.phase === 'sending' ||
@@ -143,9 +143,8 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
   cqOnly.checked = readPreference('ftCqOnly') === 'true';
   cqOnly.onchange = () => { writePreference('ftCqOnly', cqOnly.checked); filterCQ(); };
 
-  const canStart = () => radio.control && radio.active && state.armed && state.tx_ready &&
-    !settingsDirty && !radio.tuning && !busy() && !pending.size;
   const canEditSettings = () => radio.connected && radio.operator && state.available;
+  const canUseControls = () => canEditSettings() && radio.active;
 
   async function submit(command, fields = {}) {
     if (pending.has(command)) return;
@@ -167,6 +166,14 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     }
   }
 
+  function requestTransmission(command, fields) {
+    if (!canUseControls() || !state.configured || settingsDirty || radio.tuning) {
+      render();
+      return;
+    }
+    void submit(command, fields);
+  }
+
   async function saveSettings() {
     if (!settingsDirty || !canEditSettings() || pending.has('ft_config')) return;
     if (!settings.checkValidity()) {
@@ -178,6 +185,7 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     const connection = revision, draft = settingsRevision;
     const fields = {callsign: callsign.value.trim().toUpperCase(), locator: locator.value.trim().toUpperCase(),
       tx_hz: offset.valueAsNumber, tx_level: level.valueAsNumber};
+    settingsSubmitted = true;
     const reply = await submit('ft_config', fields);
     if (connection !== revision || !canEditSettings()) return;
     if (reply) {
@@ -201,6 +209,13 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     settingsDirty = false;
   }
 
+  function restoreBrowserSettings() {
+    if (settingsSubmitted || state.configured !== false || settingsDirty || !canUseControls()) return;
+    if (!callsign.value.trim() || !locator.value.trim() || !settings.checkValidity()) return;
+    settingsDirty = true;
+    void saveSettings();
+  }
+
   function renderClock() {
     if (!radio.visible) return;
     const label = $('ft-utc-clock'), progress = $('ft-slot-progress');
@@ -214,26 +229,29 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
       ? t('TX in ', 'TX in ') : t('TX frühestens in ', 'Earliest TX in ')) + seconds + ' s' : '';
   }
   function render() {
-    const control = radio.control && radio.active && state.available;
+    const control = canUseControls();
     const transmitting = radio.phase === 'sending';
     mode.value = state.mode || 'FT8';
-    mode.disabled = !control || pending.size > 0;
+    mode.disabled = !control || pending.has('ft_mode');
     automatic.value = state.auto || 'off';
-    automatic.disabled = !control || !state.armed || pending.has('ft_auto');
-    for (const option of automatic.options) option.disabled = option.value !== 'off' && settingsDirty;
-    cq.disabled = send.disabled = parity.disabled = !canStart();
-    abort.disabled = !control || pending.has('ft_abort') || (!busy() && (!state.auto || state.auto === 'off'));
-    $('ft8-default-qrg').disabled = !control || radio.tuning || busy();
+    automatic.disabled = !control || pending.has('ft_auto');
+    cq.disabled = !control || pending.has('ft_cq');
+    send.disabled = !control || pending.has('ft_free_text');
+    parity.disabled = !control;
+    abort.disabled = !control || pending.has('ft_abort');
+    $('ft8-default-qrg').disabled = !control || !radio.control || radio.tuning || busy();
     const edit = canEditSettings();
     for (const field of [callsign, locator, offset, level]) field.disabled = !edit;
-    freeText.disabled = !control || busy();
-    for (const log of logs) for (const line of log.lines) if (line.tagName === 'BUTTON') line.disabled = !canStart();
+    freeText.disabled = !control;
+    const replyDisabled = !control || pending.has('ft_start_qso');
+    for (const log of logs) for (const line of log.lines) if (line.tagName === 'BUTTON') line.disabled = replyDisabled;
     const qsoLabel = [state.peer, labels[state.state] ? t(...labels[state.state]) : '',
       state.retries ? t('Wiederholungen ', 'Retries ') + state.retries : ''].filter(Boolean).join(' · ');
     $('ft-qso-status').textContent = qsoLabel;
     qso.hidden = !qsoLabel && !state.next_tx_ms;
     status.textContent = error || (!state.available && radio.active ? t('FT4/8 an RX2 ist deaktiviert.', 'FT4/8 on RX2 is disabled.') :
-      transmitting ? t('Sendet …', 'Transmitting …') : pending.has('ft_config') ? t('Speichert …', 'Saving …') :
+      transmitting ? t('Sendet …', 'Transmitting …') : settingsDirty ? t('Speichert …', 'Saving …') :
+      control && radio.tuning ? t('Frequenz wird übernommen …', 'Applying frequency …') :
       !state.configured && radio.operator && radio.active ? t('Für FT-TX Rufzeichen und QTH-Locator eingeben.', 'Enter your callsign and grid locator to enable FT TX.') : outcome);
     status.classList.toggle('error', !!error);
     status.classList.toggle('sending', transmitting && !error);
@@ -274,6 +292,7 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     }
     if ((refresh || lostOperator) && !settingsDirty) fillSettings();
     render();
+    restoreBrowserSettings();
   }
   function reset() {
     ++revision;
@@ -282,6 +301,7 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     radio = {};
     clock = undefined;
     error = outcome = '';
+    settingsSubmitted = false;
     discardSettingsDraft();
     $('ft-adif-message').textContent = '';
     $('ft-qrz-status').textContent = '';
@@ -339,8 +359,8 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     decodeFields(line, meta, row);
     if (clickable) {
       line.type = 'button';
-      line.disabled = !canStart();
-      line.onclick = () => { if (canStart()) submit('ft_start_qso', {decode_id: row.decode_id}); };
+      line.disabled = !canUseControls() || pending.has('ft_start_qso');
+      line.onclick = () => requestTransmission('ft_start_qso', {decode_id: row.decode_id});
     }
     append(all, line);
     const matchesTx = !row.source && recentTx.some(tx => tx.slot_utc_ms === row.slot_utc_ms && tx.text === row.text);
@@ -366,12 +386,16 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
   };
   settings.onsubmit = event => event.preventDefault();
   mode.onchange = () => submit('ft_mode', {mode: mode.value});
-  automatic.onchange = () => submit('ft_auto', {auto: automatic.value});
-  cq.onclick = () => submit('ft_cq', parity.value === 'auto' ? {} : {parity: Number(parity.value)});
+  automatic.onchange = () => {
+    const auto = automatic.value;
+    if (auto === 'off') void submit('ft_auto', {auto});
+    else requestTransmission('ft_auto', {auto});
+  };
+  cq.onclick = () => requestTransmission('ft_cq', parity.value === 'auto' ? {} : {parity: Number(parity.value)});
   abort.onclick = () => submit('ft_abort');
   $('ft8-tx-form').onsubmit = event => {
     event.preventDefault();
-    if (canStart()) submit('ft_free_text', {text: freeText.value});
+    requestTransmission('ft_free_text', {text: freeText.value});
   };
   $('ft8-default-qrg').onclick = tuneDefault;
   download.onclick = async () => {
