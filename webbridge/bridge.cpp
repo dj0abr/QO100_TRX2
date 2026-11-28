@@ -481,7 +481,7 @@ void Bridge::message(uint64_t client,const Bytes& bytes,bool binary) {
                 throw std::runtime_error("Invalid TX_AUDIO identity, index, or PCM format");
             send_udp(bytes);return;
         }
-        const auto j=Json::parse(bytes);if(!j.is_object()) throw std::runtime_error("Expected JSON object");
+        const auto j=Json::parse(bytes,nullptr,false);if(!j.is_object()) throw std::runtime_error("Expected JSON object");
         id=j.value("id",Json(nullptr));if(!id.is_null()) integer(j,"id");
         const auto type=j.at("type").get<std::string>();
         if(type=="state") {state_["ready"]=ready();text(client,state_);return;}

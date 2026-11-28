@@ -1,11 +1,15 @@
 #include "bridge.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <fcntl.h>
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <unistd.h>
 
 namespace bridge {
 namespace {
@@ -14,6 +18,7 @@ using Command = ft8::Command;
 using Type = Command::Type;
 using RadioStatus = ft8::RadioReport::Status;
 constexpr auto rx2_tune_key = (std::uint64_t(3) << 32) | 2;
+constexpr std::size_t max_qrz_key_size = 256;
 
 const char* mode_name(ft8::Mode mode) { return mode == ft8::Mode::FT4 ? "FT4" : "FT8"; }
 int max_offset(ft8::Mode mode) { return mode == ft8::Mode::FT4 ? 3930 : 3950; }
@@ -131,6 +136,68 @@ void save_station(const std::filesystem::path& path, const ft8::Config& config, 
         throw;
     }
 }
+
+std::string qrz_key_value(std::string_view key)
+{
+    const auto first = key.find_first_not_of(" \t");
+    if (first == std::string_view::npos) return {};
+    key = key.substr(first, key.find_last_not_of(" \t") - first + 1);
+    if (key.size() > max_qrz_key_size ||
+        std::any_of(key.begin(), key.end(), [](unsigned char ch) { return ch < 32 || ch == 127; }))
+        throw std::invalid_argument("Invalid QRZ logbook API key");
+    return std::string(key);
+}
+
+std::optional<std::string> load_qrz_key(const std::filesystem::path& path)
+{
+    const auto status = std::filesystem::symlink_status(path);
+    if (!std::filesystem::exists(status)) return std::nullopt;
+    if (!std::filesystem::is_regular_file(status))
+        throw std::runtime_error("Expected a regular QRZ key file");
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file) throw std::runtime_error("Cannot open QRZ key file");
+    std::array<char, max_qrz_key_size + 2> buffer{};
+    file.read(buffer.data(), buffer.size());
+    if (!file.eof() || file.bad()) throw std::runtime_error("Cannot read QRZ key file");
+    std::string_view key(buffer.data(), file.gcount());
+    if (key.ends_with('\n')) key.remove_suffix(1);
+    return qrz_key_value(key);
+}
+
+void save_qrz_key(const std::filesystem::path& path, const std::string& key)
+{
+    std::filesystem::create_directories(path.parent_path());
+    auto temporary = path.string() + ".tmp-XXXXXX" + qrz_key_extension;
+    const auto data = key + '\n';
+    const int fd = ::mkostemps(temporary.data(), sizeof(qrz_key_extension) - 1, O_CLOEXEC);
+    if (fd < 0) throw std::runtime_error("Cannot create QRZ key file");
+
+    bool closed = false;
+    try {
+        std::size_t offset = 0;
+        while (offset < data.size()) {
+            const auto written = ::write(fd, data.data() + offset, data.size() - offset);
+            if (written < 0 && errno == EINTR) continue;
+            if (written <= 0) throw std::runtime_error("Cannot write QRZ key file");
+            offset += static_cast<std::size_t>(written);
+        }
+        if (::fsync(fd) < 0) throw std::runtime_error("Cannot sync QRZ key file");
+        closed = true;
+        if (::close(fd) < 0) throw std::runtime_error("Cannot close QRZ key file");
+        std::filesystem::rename(temporary, path);
+    } catch (...) {
+        if (!closed) ::close(fd);
+        ::unlink(temporary.c_str());
+        throw;
+    }
+
+    const int directory = ::open(path.parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (directory >= 0) {
+        (void)::fsync(directory);
+        ::close(directory);
+    }
+}
 }
 
 Bridge::~Bridge()
@@ -145,7 +212,16 @@ void Bridge::init_ft()
     ft_config_.ptt_lead_ms = int(config_.ft_ptt_lead_ms);
     ft_config_.prop_mode = "SAT";
     ft_config_.sat_name = "QO-100";
-    if (config_.ft_enabled) prepare_log_directory(ft_config_.adif_log_path);
+    if (config_.ft_enabled && !config_.ft_log_path.empty()) {
+        prepare_log_directory(ft_config_.adif_log_path);
+        try {
+            if (auto saved_key = load_qrz_key(config_.ft_log_path + qrz_key_extension))
+                ft_config_.qrz_api_key = std::move(*saved_key);
+        } catch (const std::exception&) {
+            ft_config_.qrz_api_key.clear();
+            std::cerr << "Cannot load saved QRZ logbook API key\n";
+        }
+    }
     if (config_.ft_enabled && !config_.ft_station_path.empty()) {
         try {
             std::ifstream file(config_.ft_station_path);
@@ -177,6 +253,17 @@ void Bridge::retire_ft()
         (void)radio->take_radio_actions(); // The bridge has already released TX2.
         radio.reset();
     });
+}
+
+void Bridge::replace_ft(std::unique_ptr<ft8::Transceiver> radio)
+{
+    disarm_ft("settings_changed");
+    retire_ft();
+    ft_ = std::move(radio);
+    ft_state_ = ft8::State::Receiving;
+    ft_peer_.clear();
+    ft_retries_ = 0;
+    reset_ft_receive();
 }
 
 bool Bridge::ft_operator() const
@@ -287,6 +374,17 @@ void Bridge::command_ft(uint64_t client, const Json& id, const std::string& type
         text(client, {{"type", "ack"}, {"command", type}, {"id", id}, {"status", 0},
                       {"url", "/ft4-ft8.adi?token=" + ft_download_->token}});
         return;
+    } else if (type == "ft_qrz_key") {
+        if (config_.ft_log_path.empty()) throw std::runtime_error("FT logbook is disabled");
+        const auto key = request.find("key");
+        if (key == request.end() || !key->is_string())
+            throw std::invalid_argument("Expected a QRZ logbook API key");
+        auto config = ft_config_;
+        config.qrz_api_key = qrz_key_value(key->get_ref<const std::string&>());
+        auto new_radio = config.qrz_api_key != ft_config_.qrz_api_key ? make_ft_transceiver(config) : nullptr;
+        save_qrz_key(config_.ft_log_path + qrz_key_extension, config.qrz_api_key);
+        if (new_radio) replace_ft(std::move(new_radio));
+        ft_config_.qrz_api_key = std::move(config.qrz_api_key);
     } else if (type == "ft_config") {
         const auto level = ft_number(request, "tx_level", 1, 100);
         auto config = station_config(ft_config_, request);
@@ -301,10 +399,7 @@ void Bridge::command_ft(uint64_t client, const Json& id, const std::string& type
         } else {
             auto new_radio = make_ft_transceiver(config);
             save_station(config_.ft_station_path, config, level);
-            disarm_ft("settings_changed");
-            retire_ft();
-            ft_ = std::move(new_radio);
-            reset_ft_receive();
+            replace_ft(std::move(new_radio));
         }
         ft_config_ = std::move(config);
         ft_level_ = level;
@@ -503,6 +598,7 @@ void Bridge::refresh_ft_state()
                   {"locator", ft_config_.locator}, {"tx_hz", ft_config_.tx_hz}, {"tx_level", ft_level_},
                   {"armed", ft_armed_}, {"auto", auto_name(ft_auto_)}, {"state", state_name(ft_state_)},
                   {"peer", ft_peer_}, {"retries", ft_retries_}, {"log_enabled", !config_.ft_log_path.empty()},
+                  {"qrz_configured", !ft_config_.qrz_api_key.empty()},
                   {"busy", ft_state_ != ft8::State::Receiving || ft_abort_request_ || tx2_active(Tx2Mode::ft8) ||
                            (tx2_release_ && tx2_release_->ft_completed_id)},
                   {"tx_ready", ft_tx_ready(now)}, {"receive_revision", ft_receive_revision_},

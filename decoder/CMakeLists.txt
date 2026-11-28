@@ -71,5 +71,9 @@ if(BUILD_TESTING)
             $<TARGET_FILE:qo100_ft8_decoder> $<TARGET_FILE:ft-test-pcm>
             ${CMAKE_CURRENT_SOURCE_DIR}/../config/backend.conf ${CMAKE_CURRENT_SOURCE_DIR}/../web)
         set_tests_properties(ft8_rx2_tx2_websocket PROPERTIES TIMEOUT 155 RUN_SERIAL TRUE)
+        add_test(NAME ft_qrz_settings COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_ft_qrz_settings.py
+            $<TARGET_FILE:qo100_webbridge>)
+        set_tests_properties(ft_qrz_settings PROPERTIES TIMEOUT 20)
     endif()
 endif()

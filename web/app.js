@@ -17,6 +17,7 @@ let socket, operator = false, state = {}, selected = 1, together = true, request
 let session = 0, loopGeneration = null, cutoff = 0n, guiLoaded = false, lastActivity = 0;
 let pttHeld = false, pttAcked = false, pttIntent = 0, txIdentity = '', txIndex = 0;
 let noticeUntil = 0, settingsBase = {}, editingFrequency = '1', settingsTail = Promise.resolve();
+let qrzKeySaving = false;
 let filterBusy = 0;
 let menuDismissedAt = -Infinity;
 let cursor = null, cursorFrame = 0;
@@ -453,6 +454,7 @@ function controls() {
   applyDigitalPair();
   const writable = canControl();
   for (const element of document.querySelectorAll('[data-control]')) element.disabled = !writable;
+  if ($('setup-dialog').open) renderQrzSettings();
   for (const canvas of [$('sstv-waterfall'), $('rtty-waterfall')])
     canvas.parentElement.dataset.tunable = String(canFineTuneRx2());
   renderSstvTxControls();
@@ -722,6 +724,40 @@ function toggleTxMonitorMute() {
   txVolumeChanged();
 }
 function compressorLabel() { const value = Number($('compressor').value); $('compressor-value').textContent = value === 0 ? 'Bypass' : `${value.toLocaleString('de-DE', {maximumFractionDigits: 1})} %`; rangePaint($('compressor')); }
+function renderQrzSettings() {
+  const configured = state.ft?.qrz_configured;
+  const available = state.ft?.available && state.ft?.log_enabled && typeof configured === 'boolean';
+  const writable = available && operator && isOpen();
+  const input = $('qrz-api-key');
+  if (!writable) input.value = '';
+  input.disabled = !writable || qrzKeySaving;
+  $('qrz-key-save').disabled = input.disabled || !input.value.trim();
+  $('qrz-key-remove').disabled = input.disabled || !configured;
+  $('qrz-key-status').textContent = available
+    ? (configured ? t('Schlüssel hinterlegt.', 'Key configured.') : t('Kein Schlüssel hinterlegt.', 'No key configured.'))
+    : t('QRZ-Logbuch nicht verfügbar.', 'QRZ logbook unavailable.');
+}
+async function saveQrzKey(key) {
+  const input = $('qrz-api-key');
+  if (input.disabled) return;
+  const message = $('qrz-key-message');
+  qrzKeySaving = true;
+  message.hidden = true;
+  message.classList.remove('error');
+  renderQrzSettings();
+  try {
+    await checked('ft_qrz_key', {key});
+    input.value = '';
+    message.textContent = key ? t('QRZ-Schlüssel gespeichert.', 'QRZ key saved.') : t('QRZ-Schlüssel entfernt.', 'QRZ key removed.');
+  } catch (error) {
+    message.textContent = error.message;
+    message.classList.add('error');
+  } finally {
+    qrzKeySaving = false;
+    message.hidden = false;
+    renderQrzSettings();
+  }
+}
 function openSetup() {
   stopPtt(); settingsBase = {...state.settings};
   for (const field of document.querySelectorAll('[data-setting]')) field.value = settingsBase[field.dataset.setting] ?? '';
@@ -730,6 +766,7 @@ function openSetup() {
     const field = document.querySelector(`[data-setting="${key}"]`); field.min = center - 275000; field.max = center + 275000;
   }
   $('settings-message').textContent = ''; $('settings-message').classList.remove('error');
+  $('qrz-key-message').hidden = true;
   $('setup-dialog').showModal(); controls();
   radio.refreshDevices().catch(() => {});
 }
@@ -865,6 +902,14 @@ for (const [id, kind] of [['audio-input', 'audioinput'], ['audio-output', 'audio
   } catch (error) { notify(radio.error || error.message, true); }
 };
 $('setup').onclick = openSetup;
+$('setup-dialog').addEventListener('close', () => { $('qrz-api-key').value = ''; });
+$('qrz-api-key').oninput = renderQrzSettings;
+$('qrz-key-form').onsubmit = event => {
+  event.preventDefault();
+  const key = $('qrz-api-key').value.trim();
+  if (key) saveQrzKey(key);
+};
+$('qrz-key-remove').onclick = () => saveQrzKey('');
 for (const button of document.querySelectorAll('[data-setting-default]')) button.onclick = () => {
   if (!canControl()) return;
   const field = document.querySelector(`[data-setting="${button.dataset.settingDefault}"]`);

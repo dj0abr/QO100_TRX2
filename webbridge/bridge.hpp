@@ -21,6 +21,7 @@ namespace bridge {
 namespace net=boost::asio;
 using Json=nlohmann::json;
 using Clock=std::chrono::steady_clock;
+inline constexpr char qrz_key_extension[] = ".qrz-key";
 struct Config {
     std::string listen="0.0.0.0", web_root=QO100_WEB_ROOT;
     uint16_t port=8080,backend_port=40900;
@@ -172,6 +173,7 @@ class Bridge {
     void maybe_arm_ft(Clock::time_point now);
     void disarm_ft(const char* reason, bool flush = true);
     void retire_ft();
+    void replace_ft(std::unique_ptr<ft8::Transceiver> radio);
     void process_ft_event(const ft8::Event& event);
     void process_ft_action(const ft8::RadioAction& action);
     void report_ft_radio(uint64_t id, ft8::RadioReport::Status status, ft8::Time start = {}, std::string detail = {});

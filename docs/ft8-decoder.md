@@ -57,21 +57,20 @@ eigene Rufzeichen bleiben für die Automatik zulässig. FT4 und FT8 zählen
 gemeinsam. Ein leerer `ft_log_path` deaktiviert die Datei und die
 CQ-Markierung.
 
-`start_all.sh` liest den optionalen QRZ-Schlüssel beim Start aus
-`~/.config/qo100-trx2/qrz.env` des startenden Benutzers. Das Installationsskript
-speichert den als Argument übergebenen Schlüssel in dieser Datei mit Rechten
-`600`. Ersetze den Platzhalter im Aufruf durch deinen API-Key.
+Als Bediener öffnest du **Setup → QRZ.com-Logbuch**, gibst den Logbook-API-Schlüssel
+ein und klickst auf **Schlüssel speichern**. Bei Zugriff über das Netz nutze
+die HTTPS-Adresse des Reverse-Proxy. Die Webbridge speichert den Schlüssel
+mit Dateirechten `600` neben dem ADIF-Logbuch, standardmäßig in
+`data/ft4-ft8.adi.qrz-key`. Das Eingabefeld bleibt beim nächsten Öffnen leer.
+Der Status zeigt, ob ein Schlüssel hinterlegt ist.
 
-```sh
-./install_qrz_api.sh 'DEIN_QRZ_LOGBOOK_API_KEY'
-```
-
-Ohne Argument erstellt `./install_qrz_api.sh` bei Bedarf eine Vorlage, die du
-im Texteditor ausfüllen kannst.
-
-Eine bereits gesetzte Umgebungsvariable `QO100_QRZ_API_KEY` hat Vorrang.
-Mit einem Schlüssel lädt libft8 neue Einträge nach dem lokalen Speichern
-an QRZ hoch.
+libft8 lädt neue QSOs nach dem lokalen Speichern an QRZ hoch. Der neue
+Schlüssel wirkt sofort. Bei einer Änderung initialisiert die Webbridge
+FT4/8 neu und beendet einen laufenden FT-Austausch.
+**Schlüssel entfernen** deaktiviert den Upload dauerhaft.
+Solange keine Auswahl im WebGUI gespeichert wurde, gelten weiterhin
+`QO100_QRZ_API_KEY` und die von `start_all.sh` unterstützte Datei
+`~/.config/qo100-trx2/qrz.env`.
 
 ### Audiozeit und Konfiguration
 

@@ -9,6 +9,7 @@ __pycache__/
 /data/ft4-ft8.adi.tmp-*
 /data/ft-station.json
 /data/ft-station.json.tmp
+*.qrz-key
 /external/mmdecoder/build/
 /external/mmdecoder/logs/
 /external/mmdecoder/data/

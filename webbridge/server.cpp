@@ -217,7 +217,8 @@ class Http final: public std::enable_shared_from_this<Http> {
         if(target=="/") target="/index.html";
         std::error_code ec;const auto path=std::filesystem::canonical(std::filesystem::path(bridge_.config().web_root)/target.substr(1),ec);
         const auto root=bridge_.config().web_root+"/";
-        if(ec || path.string().compare(0,root.size(),root)!=0 || !std::filesystem::is_regular_file(path,ec)) {
+        if(ec || path.string().compare(0,root.size(),root)!=0 || path.extension()==qrz_key_extension ||
+           !std::filesystem::is_regular_file(path,ec)) {
             error(http::status::not_found,"Not found");return;
         }
         const auto ext=path.extension().string();std::string mime="application/octet-stream";

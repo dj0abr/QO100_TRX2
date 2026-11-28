@@ -145,7 +145,10 @@ und `ft_abort`. `ft_start_qso` übernimmt die `decode_id` einer
 aktuellen Empfangszeile. `ack` bestätigt die Annahme eines Befehls.
 Ergebnisse und Fehler meldet libft8 über Zustandsänderungen und
 `ft_notice`. `ft_adif` liefert dem Bediener einen einmaligen
-Download-Link für das Logbuch. [FT4/8-Bedienung](ft8-decoder.md)
+Download-Link für das Logbuch. Mit `ft_qrz_key` und dem String `key`
+speichert der Bediener den QRZ-Logbook-Schlüssel. Ein leerer String
+deaktiviert den Upload. `state.ft.qrz_configured` meldet, ob ein Schlüssel
+hinterlegt ist. [FT4/8-Bedienung](ft8-decoder.md)
 
 ### SSTV-Senden über TX2
 

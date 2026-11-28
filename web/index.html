@@ -486,6 +486,23 @@
         <label data-en="Playback device">Wiedergabegerät<select id="audio-output"><option value="default">Systemstandard</option></select></label>
         <label data-en="Recording device">Aufnahmegerät<select id="audio-input"><option value="default">Systemstandard</option></select></label>
       </div><p id="audio-device-details" class="field-help" data-en="Device names appear after microphone permission is granted. Device selection is saved in this browser only.">Gerätenamen erscheinen nach Freigabe des Mikrofons. Die Geräteauswahl wird nur in diesem Browser gespeichert.</p></fieldset>
+      <form id="qrz-key-form">
+        <fieldset>
+          <legend data-en="QRZ.com logbook">QRZ.com-Logbuch</legend>
+          <div class="form-grid">
+            <label data-en="Logbook API key">Logbook-API-Schlüssel
+              <input id="qrz-api-key" type="password" maxlength="256" autocomplete="off" spellcheck="false"
+                aria-describedby="qrz-key-status" disabled>
+            </label>
+            <p id="qrz-key-status" class="field-help"></p>
+          </div>
+          <p id="qrz-key-message" class="form-message" role="status" hidden></p>
+          <div class="form-footer">
+            <button id="qrz-key-remove" type="button" class="small-button" data-en="Remove key" disabled>Schlüssel entfernen</button>
+            <button id="qrz-key-save" type="submit" class="primary-button" data-en="Save key" disabled>Schlüssel speichern</button>
+          </div>
+        </fieldset>
+      </form>
       <fieldset><legend data-en="PTT button">PTT-Taste</legend>
         <label class="option-label" data-en="Space = PTT"><input id="ptt-space" type="checkbox">Leertaste = PTT</label>
         <div class="ptt-options" role="group" aria-label="PTT-Bedienung" data-en-aria-label="PTT operation">
