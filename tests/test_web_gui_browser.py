@@ -196,6 +196,14 @@ def main():
                         if (typeof data === 'string') {
                             const message = JSON.parse(data);
                             if (message.type.startsWith('ft_')) window.__ftRequests.push(message);
+                            if (message.type === 'ft_config') {
+                                window.__ftConfigSentAt = performance.now();
+                                if (window.__ftConfigDelay) {
+                                    setTimeout(() => super.send(data), window.__ftConfigDelay);
+                                    window.__ftConfigDelay = 0;
+                                    return;
+                                }
+                            }
                         }
                         return super.send(data);
                     }
@@ -489,11 +497,18 @@ def main():
             observer.role('viewer')
             observer.state()
             observer.send({'type': 'audio_subscription', 'stream': 2, 'enabled': False})
+            assert execute('return !document.querySelector("#ft-arm,#ft-save") && document.getElementById("ft-cq").disabled')
             changed('#ft-own-call', 'dj0abr')
             changed('#ft-own-grid', 'JN68')
-            click('#ft-save')
-            ft_state = snapshot(lambda s: s.get('ft', {}).get('configured') and s['ft']['callsign'] == 'DJ0ABR')
-            wait(lambda:execute('return !document.getElementById("ft-arm").disabled'))
+            time.sleep(.55)
+            changed('#ft8-level', '26')
+            last_edit = execute('return performance.now()')
+            ft_state = snapshot(lambda s: s.get('ft', {}).get('armed') and s['ft']['callsign'] == 'DJ0ABR'
+                                and s['ft']['tx_level'] == 26)
+            assert execute('return window.__ftRequests.filter(m => m.type === "ft_config").length') == 1
+            assert execute('return window.__ftConfigSentAt') - last_edit >= 950
+            wait(lambda:execute('return !document.getElementById("ft-cq").disabled'))
+            assert execute('return [...document.querySelectorAll("#ft-settings input")].every(input => !input.disabled)')
 
             def decode(text, source='', destination='', value='', cq=False, worked=None, decode_id='431',
                        event_type='ft_decode', slot_ms=120000):
@@ -537,9 +552,6 @@ def main():
                 return rx.textContent.includes('-5 dB') && getComputedStyle(rx).display !== 'none' &&
                     rx.previousElementSibling.classList.contains('ft-sent-line');""")
             click('#ft-cq-only')
-            assert execute('return document.querySelector("#ft8-log button").disabled'), 'A TX action was enabled before arming'
-            click('#ft-arm')
-            snapshot(lambda s: s.get('ft', {}).get('armed'))
             wait(lambda:execute('return !document.querySelector("#ft8-log button").disabled'))
             click('#ft8-log button:first-child')
             wait(lambda:execute('return window.__ftRequests.some(m => m.type==="ft_start_qso" && m.decode_id==="431")'))
@@ -549,7 +561,7 @@ def main():
             snapshot(lambda s: s.get('ft', {}).get('auto') == 'answer-cq')
             click('#ft8-stop')
             snapshot(lambda s: s.get('ft', {}).get('auto') == 'off' and not s['ft']['busy'])
-            assert execute('return document.getElementById("ft-arm").checked')
+            wait(lambda:execute('return !document.getElementById("ft-cq").disabled'))
             click('.ft-log-end[aria-controls="ft8-log"]')
             for i in range(65):
                 decode(f'TEXT {i:03}')
@@ -563,7 +575,7 @@ def main():
             click('.ft-log-end[aria-controls="ft8-log"]')
             wait(lambda:execute('const n=document.querySelector("#ft8-log");return n.scrollHeight-n.clientHeight-n.scrollTop<4'))
             changed('#ft-mode', 'FT4')
-            snapshot(lambda s: s.get('ft', {}).get('mode') == 'FT4' and not s['ft']['armed'])
+            snapshot(lambda s: s.get('ft', {}).get('mode') == 'FT4' and s['ft']['armed'])
             wait(lambda:execute('return document.getElementById("ft8-parity").options[2].textContent.startsWith(":07.5")'))
             assert not lines('ft8-log')
             assert execute('return document.getElementById("ft8-message").maxLength===13')
@@ -1378,10 +1390,15 @@ def main():
             # Preferences survive a reload; transmitting is never restored.
             select_view('ft8')
             wait(lambda:execute('return !document.getElementById("ft8-audio-hz").disabled'))
+            save_count = execute('return window.__ftRequests.filter(m => m.type === "ft_config").length')
+            execute('window.__ftConfigDelay = 1600')
             changed('#ft8-audio-hz', '1325')
+            changed('#ft8-level', '13')
+            wait(lambda:execute('return window.__ftRequests.filter(m => m.type === "ft_config").length') == save_count + 1)
+            assert execute('return !document.getElementById("ft8-level").disabled')
             changed('#ft8-level', '12')
-            click('#ft-save')
             snapshot(lambda s: s.get('ft', {}).get('tx_hz') == 1325 and s['ft']['tx_level'] == 12)
+            assert execute('return window.__ftRequests.filter(m => m.type === "ft_config").length') == save_count + 2
             changed('#ft8-audio-hz', '')
             changed('#ft8-level', '101')
             select_view('')
@@ -1403,7 +1420,7 @@ def main():
             assert execute('return document.getElementById("spectrum-average").value')=='20'
             assert execute('return ["ft8-audio-hz", "ft8-level"].map(id => document.getElementById(id).value)')==['1325','12']
             assert execute('return ["text", "row", "level"].map(field => document.getElementById("waterfall-tx-" + field).value)') == ['DJ0ABR', '320', '37']
-            assert execute('return document.getElementById("ft-auto").value === "off" && !document.getElementById("ft-arm").checked')
+            assert execute('return document.getElementById("ft-auto").value === "off" && !document.querySelector("#ft-arm,#ft-save")')
             assert execute('return document.getElementById("display-color").value')=='green'
             assert execute('return document.getElementById("fullband-axis").dataset.mode')=='bandplan'
             assert not execute('return document.getElementById("decoder-panel").hidden'),'Decoder visibility was not restored'

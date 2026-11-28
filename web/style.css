@@ -699,7 +699,7 @@ html[lang="en"] .decoder-text:empty::before { content: "Waiting for decoder text
   border-radius: 7px;
   background: var(--heading-bg);
 }
-.ft-mode-toolbar label, .ft-qso .ft-arm { display: flex; align-items: center; gap: 6px; }
+.ft-mode-toolbar label { display: flex; align-items: center; gap: 6px; }
 .ft-slot-meter { flex-wrap: nowrap; }
 #ft-utc-clock { white-space: nowrap; font: 11px var(--mono); color: var(--text-secondary); }
 #ft-slot-progress {
@@ -830,8 +830,7 @@ button.ft-decode-line:disabled { opacity: 1; }
   font: 11px var(--mono);
 }
 .ft-qso input:not([type="checkbox"]) { width: 94px; text-transform: uppercase; }
-.ft-qso .ft-arm { min-height: 26px; }
-.ft-arm input, .ft-cq-only input { margin: 0; accent-color: var(--rx2); }
+.ft-cq-only input { margin: 0; accent-color: var(--rx2); }
 .ft-controls .small-button { min-height: 26px; padding: 4px 8px; white-space: nowrap; }
 #ft8-send:enabled { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent-text); }
 #ft8-stop:enabled { border-color: var(--message-border); color: var(--message-text); }

@@ -138,9 +138,10 @@ Stationsdaten, TX-Freigabe, QSO-Phase und den UTC-Sendezeitpunkt.
 Die Webbridge veröffentlicht `ft_decode`, `ft_tx` und `ft_notice`
 an die FT-Abonnenten.
 
-Der Bediener steuert FT mit `ft_config`, `ft_mode`, `ft_arm`,
-`ft_auto`, `ft_cq`, `ft_free_text`, `ft_start_qso` und
-`ft_abort`. `ft_start_qso` übernimmt die `decode_id` einer
+Die Webbridge gibt FT-TX bei aktiver FT-Subscription des Bedieners frei,
+sobald Stationsdaten und Sendeweg bereit sind. Der Bediener steuert FT mit
+`ft_config`, `ft_mode`, `ft_auto`, `ft_cq`, `ft_free_text`, `ft_start_qso`
+und `ft_abort`. `ft_start_qso` übernimmt die `decode_id` einer
 aktuellen Empfangszeile. `ack` bestätigt die Annahme eines Befehls.
 Ergebnisse und Fehler meldet libft8 über Zustandsänderungen und
 `ft_notice`. `ft_adif` liefert dem Bediener einen einmaligen

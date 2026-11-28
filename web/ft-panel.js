@@ -72,13 +72,14 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
   const mode = $('ft-mode'), parity = $('ft8-parity');
   const callsign = $('ft-own-call'), locator = $('ft-own-grid');
   const offset = $('ft8-audio-hz'), level = $('ft8-level');
-  const settings = $('ft-settings'), save = $('ft-save');
-  const arm = $('ft-arm'), automatic = $('ft-auto'), cq = $('ft-cq'), abort = $('ft8-stop');
+  const settings = $('ft-settings');
+  const automatic = $('ft-auto'), cq = $('ft-cq'), abort = $('ft8-stop');
   const cqOnly = $('ft-cq-only'), freeText = $('ft8-message'), send = $('ft8-send');
   const adif = $('ft-adif-status'), download = $('ft-adif-download');
   const status = $('ft8-status'), qso = $('ft-contact'), nextTx = $('ft-next-tx');
   let state = {}, radio = {}, clock, error = '', outcome = '', settingsDirty = false;
   let revision = 0;
+  let settingsRevision = 0, settingsTimer = null;
   const pending = new Set();
   const recentTx = [];
   const busy = () => !!state.busy || radio.phase === 'scheduled' || radio.phase === 'sending' ||
@@ -142,8 +143,9 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
   cqOnly.checked = readPreference('ftCqOnly') === 'true';
   cqOnly.onchange = () => { writePreference('ftCqOnly', cqOnly.checked); filterCQ(); };
 
-  const canStart = () => radio.operator && radio.active && state.armed && state.tx_ready &&
-    !radio.tuning && !busy() && !pending.size;
+  const canStart = () => radio.control && radio.active && state.armed && state.tx_ready &&
+    !settingsDirty && !radio.tuning && !busy() && !pending.size;
+  const canEditSettings = () => radio.connected && radio.operator && state.available;
 
   async function submit(command, fields = {}) {
     if (pending.has(command)) return;
@@ -154,11 +156,6 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     try {
       const reply = await request(command, fields);
       if (current !== revision) return;
-      if (command === 'ft_config') {
-        settingsDirty = false;
-        for (const [key, value] of Object.entries({ftOwnCall: callsign.value, ftOwnGrid: locator.value,
-          ftAudioHz: offset.value, ftTxLevel: level.value})) writePreference(key, value);
-      }
       return reply;
     } catch (failure) {
       if (current === revision) error = failure.message;
@@ -168,6 +165,40 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
         render();
       }
     }
+  }
+
+  async function saveSettings() {
+    if (!settingsDirty || !canEditSettings() || pending.has('ft_config')) return;
+    if (!settings.checkValidity()) {
+      error = t('Bitte gültige FT-Einstellungen eingeben.', 'Enter valid FT settings.');
+      render();
+      return;
+    }
+
+    const connection = revision, draft = settingsRevision;
+    const fields = {callsign: callsign.value.trim().toUpperCase(), locator: locator.value.trim().toUpperCase(),
+      tx_hz: offset.valueAsNumber, tx_level: level.valueAsNumber};
+    const reply = await submit('ft_config', fields);
+    if (connection !== revision || !canEditSettings()) return;
+    if (reply) {
+      for (const [key, value] of Object.entries({ftOwnCall: fields.callsign, ftOwnGrid: fields.locator,
+        ftAudioHz: fields.tx_hz, ftTxLevel: fields.tx_level})) writePreference(key, value);
+      if (draft === settingsRevision) {
+        settingsDirty = false;
+        callsign.value = fields.callsign;
+        locator.value = fields.locator;
+      }
+    }
+    // An older save may have been in flight when the newer draft's timer fired.
+    if (draft !== settingsRevision && settingsTimer === null) void saveSettings();
+    render();
+  }
+
+  function discardSettingsDraft() {
+    ++settingsRevision;
+    clearTimeout(settingsTimer);
+    settingsTimer = null;
+    settingsDirty = false;
   }
 
   function renderClock() {
@@ -183,20 +214,18 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
       ? t('TX in ', 'TX in ') : t('TX frühestens in ', 'Earliest TX in ')) + seconds + ' s' : '';
   }
   function render() {
-    const control = radio.operator && radio.active && state.available;
+    const control = radio.control && radio.active && state.available;
     const transmitting = radio.phase === 'sending';
     mode.value = state.mode || 'FT8';
     mode.disabled = !control || pending.size > 0;
-    arm.checked = !!state.armed;
-    arm.disabled = !control || pending.has('ft_arm') ||
-      (!state.armed && (!state.tx_ready || settingsDirty || radio.tuning || pending.size > 0));
     automatic.value = state.auto || 'off';
     automatic.disabled = !control || !state.armed || pending.has('ft_auto');
+    for (const option of automatic.options) option.disabled = option.value !== 'off' && settingsDirty;
     cq.disabled = send.disabled = parity.disabled = !canStart();
     abort.disabled = !control || pending.has('ft_abort') || (!busy() && (!state.auto || state.auto === 'off'));
     $('ft8-default-qrg').disabled = !control || radio.tuning || busy();
-    const edit = control && !state.armed && !busy() && !pending.size;
-    for (const field of [callsign, locator, offset, level, save]) field.disabled = !edit;
+    const edit = canEditSettings();
+    for (const field of [callsign, locator, offset, level]) field.disabled = !edit;
     freeText.disabled = !control || busy();
     for (const log of logs) for (const line of log.lines) if (line.tagName === 'BUTTON') line.disabled = !canStart();
     const qsoLabel = [state.peer, labels[state.state] ? t(...labels[state.state]) : '',
@@ -204,8 +233,8 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     $('ft-qso-status').textContent = qsoLabel;
     qso.hidden = !qsoLabel && !state.next_tx_ms;
     status.textContent = error || (!state.available && radio.active ? t('FT4/8 an RX2 ist deaktiviert.', 'FT4/8 on RX2 is disabled.') :
-      !state.configured && radio.operator && radio.active ? t('Für FT-TX Rufzeichen und QTH-Locator speichern.', 'Save your callsign and grid locator to enable FT TX.') :
-      transmitting ? t('Sendet …', 'Transmitting …') : outcome);
+      transmitting ? t('Sendet …', 'Transmitting …') : pending.has('ft_config') ? t('Speichert …', 'Saving …') :
+      !state.configured && radio.operator && radio.active ? t('Für FT-TX Rufzeichen und QTH-Locator eingeben.', 'Enter your callsign and grid locator to enable FT TX.') : outcome);
     status.classList.toggle('error', !!error);
     status.classList.toggle('sending', transmitting && !error);
     adif.hidden = !state.log_enabled;
@@ -230,6 +259,8 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
 
   function update(next, context) {
     if (radio.connected && !context.connected) reset();
+    const lostOperator = radio.operator && !context.operator;
+    if (lostOperator) discardSettingsDraft();
     const refresh = next.callsign !== state.callsign || next.locator !== state.locator ||
       next.tx_hz !== state.tx_hz || next.tx_level !== state.tx_level || next.mode !== state.mode;
     if (context.session !== radio.session || next.receive_revision !== state.receive_revision) clear();
@@ -241,7 +272,7 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
       offset.max = state.mode === 'FT4' ? 3930 : 3950;
       parityLabels();
     }
-    if (refresh && !settingsDirty) fillSettings();
+    if ((refresh || lostOperator) && !settingsDirty) fillSettings();
     render();
   }
   function reset() {
@@ -251,7 +282,7 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     radio = {};
     clock = undefined;
     error = outcome = '';
-    settingsDirty = false;
+    discardSettingsDraft();
     $('ft-adif-message').textContent = '';
     $('ft-qrz-status').textContent = '';
     clear();
@@ -321,13 +352,20 @@ export function createFtPanel({request, readPreference, writePreference, tuneDef
     }
   }
 
-  settings.oninput = () => { settingsDirty = true; error = ''; render(); };
-  settings.onsubmit = event => {
-    event.preventDefault();
-    submit('ft_config', {callsign: callsign.value, locator: locator.value, tx_hz: offset.valueAsNumber, tx_level: level.valueAsNumber});
+  settings.oninput = () => {
+    if (!canEditSettings()) return;
+    ++settingsRevision;
+    settingsDirty = true;
+    error = '';
+    clearTimeout(settingsTimer);
+    settingsTimer = setTimeout(() => {
+      settingsTimer = null;
+      void saveSettings();
+    }, 1000);
+    render();
   };
+  settings.onsubmit = event => event.preventDefault();
   mode.onchange = () => submit('ft_mode', {mode: mode.value});
-  arm.onchange = () => submit('ft_arm', {armed: arm.checked});
   automatic.onchange = () => submit('ft_auto', {auto: automatic.value});
   cq.onclick = () => submit('ft_cq', parity.value === 'auto' ? {} : {parity: Number(parity.value)});
   abort.onclick = () => submit('ft_abort');

@@ -171,6 +171,7 @@ void Bridge::init_ft()
 void Bridge::retire_ft()
 {
     if (!ft_) return;
+    ft_disarm_request_ = 0;
     boost::asio::post(ft_cleanup_, [radio = std::move(ft_)]() mutable {
         radio->stop();
         (void)radio->take_radio_actions(); // The bridge has already released TX2.
@@ -230,9 +231,27 @@ bool Bridge::ft_tx_ready(Clock::time_point now) const
     const auto downlink = state_["rx"].value("2", Json::object()).value("frequency_hz", uint64_t(0));
     const auto uplink = state_["tx2"].value("frequency_hz", uint64_t(0));
     return ft_ && !ft_config_.callsign.empty() && downlink && uplink &&
-           !ft_receive_reset_ && !ft_abort_request_ &&
+           !ft_receive_reset_ && !ft_abort_request_ && !ft_disarm_request_ &&
            !pending_.count(rx2_tune_key) && !pending_.count(tx2_key) &&
            !sstv_upload_ && !tx2_holds_audio() && !digital_tx_busy() && tx2_ready(uplink, now);
+}
+
+void Bridge::maybe_arm_ft(Clock::time_point now)
+{
+    if (ft_authorized_ || !ft_operator() || !ft_tx_ready(now)) return;
+
+    const auto uplink = state_["tx2"]["frequency_hz"].get<uint64_t>();
+    const auto downlink = state_["rx"]["2"]["frequency_hz"].get<uint64_t>();
+    Command dial(Type::SetDialFrequency);
+    dial.dial_frequency_hz = uplink;
+    dial.rx_dial_frequency_hz = downlink;
+    if (!ft_->command(dial) || !ft_->command(Command(Type::ArmTx))) return;
+
+    ft_uplink_ = uplink;
+    ft_downlink_ = downlink;
+    ft_authorized_ = true;
+    next_activity_ = {};
+    update_digital_activity();
 }
 
 void Bridge::disarm_ft(const char* reason, bool flush)
@@ -243,7 +262,12 @@ void Bridge::disarm_ft(const char* reason, bool flush)
     ft_abort_request_ = 0;
     ft_timing_.reset();
     ft_auto_ = ft8::AutoMode::Off;
-    if (ft_) ft_->command(Command(Type::DisarmTx));
+    if (ft_) {
+        Command command(Type::DisarmTx);
+        command.request_id = ++ft_next_request_;
+        // Wait for the scheduler to discard the old TX actions before arming again.
+        if (ft_->command(command)) ft_disarm_request_ = command.request_id;
+    }
     if (tx2_active(Tx2Mode::ft8)) end_tx2(reason, flush);
     if (tx2_release_) tx2_release_->ft_completed_id = 0;
     next_activity_ = {};
@@ -264,13 +288,12 @@ void Bridge::command_ft(uint64_t client, const Json& id, const std::string& type
                       {"url", "/ft4-ft8.adi?token=" + ft_download_->token}});
         return;
     } else if (type == "ft_config") {
-        if (ft_authorized_ || ft_state_ != ft8::State::Receiving || tx2_active(Tx2Mode::ft8))
-            throw std::runtime_error("Disarm FT TX before changing the station settings");
         const auto level = ft_number(request, "tx_level", 1, 100);
         auto config = station_config(ft_config_, request);
         if (ft_ && config.callsign == ft_config_.callsign && config.locator == ft_config_.locator) {
             save_station(config_.ft_station_path, config, level);
             if (config.tx_hz != ft_config_.tx_hz) {
+                disarm_ft("settings_changed");
                 Command command(Type::SetTxFrequency);
                 command.tx_hz = config.tx_hz;
                 queue(command);
@@ -278,12 +301,14 @@ void Bridge::command_ft(uint64_t client, const Json& id, const std::string& type
         } else {
             auto new_radio = make_ft_transceiver(config);
             save_station(config_.ft_station_path, config, level);
+            disarm_ft("settings_changed");
             retire_ft();
             ft_ = std::move(new_radio);
             reset_ft_receive();
         }
         ft_config_ = std::move(config);
         ft_level_ = level;
+        if (tx2_active(Tx2Mode::ft8)) tx2_job_->level = level;
     } else if (type == "ft_mode") {
         const auto name = request.at("mode").get<std::string>();
         if (name != "FT4" && name != "FT8") throw std::invalid_argument("Expected FT4 or FT8");
@@ -307,7 +332,7 @@ void Bridge::command_ft(uint64_t client, const Json& id, const std::string& type
     } else if (type == "ft_arm" && !request.at("armed").get<bool>()) {
         disarm_ft("disarmed");
     } else if (type == "ft_abort") {
-        if (ft_ && !ft_abort_request_) {
+        if (ft_armed_ && !ft_abort_request_) {
             Command command(Type::Abort);
             command.request_id = ++ft_next_request_;
             queue(command);
@@ -320,29 +345,12 @@ void Bridge::command_ft(uint64_t client, const Json& id, const std::string& type
     } else {
         if (!ft_operator() || !ft_ || ft_config_.callsign.empty())
             throw std::runtime_error("Open FT4/8 and save a callsign and locator to enable TX");
-        if (!ft_tx_ready(Clock::now())) {
+        if (!ft_armed_ || !ft_tx_ready(Clock::now())) {
             const bool busy = sstv_upload_ || tx2_holds_audio() || digital_tx_busy() || pending_.count(tx2_key);
             error(client, id, busy ? "tx2_busy" : "not_ready", busy ? "TX2 is busy" : "TX2 is not ready");
             return;
         }
-        if (type == "ft_arm") {
-            if (!ft_authorized_) {
-                const auto uplink = state_["tx2"]["frequency_hz"].get<uint64_t>();
-                const auto downlink = state_["rx"]["2"]["frequency_hz"].get<uint64_t>();
-                Command dial(Type::SetDialFrequency);
-                dial.dial_frequency_hz = uplink;
-                dial.rx_dial_frequency_hz = downlink;
-                queue(dial);
-                queue(Command(Type::ArmTx));
-                ft_uplink_ = uplink;
-                ft_downlink_ = downlink;
-                ft_authorized_ = true;
-                next_activity_ = {};
-                update_digital_activity();
-            }
-        } else if (!ft_authorized_) {
-            throw std::runtime_error("Enable FT TX first");
-        } else if (type == "ft_auto") {
+        if (type == "ft_auto") {
             const auto automatic = request.at("auto").get<std::string>();
             Command command(Type::SetAuto);
             if (automatic == "call-cq") command.automatic = ft8::AutoMode::CallCQ;
@@ -368,7 +376,7 @@ void Bridge::command_ft(uint64_t client, const Json& id, const std::string& type
             command.peer = row->second.message.source;
             command.selected = row->second;
             queue(std::move(command));
-        } else {
+        } else if (type != "ft_arm") {
             throw std::invalid_argument("Unknown FT command: " + type);
         }
     }
@@ -393,13 +401,14 @@ void Bridge::process_ft_event(const ft8::Event& event)
     }
     if (event.type == Event::CommandApplied) {
         if (event.request_id == ft_abort_request_) ft_abort_request_ = 0;
+        if (event.request_id == ft_disarm_request_) ft_disarm_request_ = 0;
         return;
     }
     if (event.type == Event::StateChanged) {
         const bool lost_arm = ft_armed_ && !event.armed;
         if (lost_arm) disarm_ft("unavailable");
         ft_armed_ = ft_authorized_ && event.armed;
-        ft_auto_ = event.automatic;
+        ft_auto_ = ft_authorized_ ? event.automatic : ft8::AutoMode::Off;
         ft_state_ = event.state;
         ft_peer_ = event.peer;
         ft_retries_ = event.retries;
@@ -440,6 +449,7 @@ void Bridge::process_ft_event(const ft8::Event& event)
         case Event::QrzError: kind = "qrz"; break;
         case Event::CommandRejected:
             if (event.request_id && event.request_id == ft_abort_request_) ft_abort_request_ = 0;
+            if (event.request_id && event.request_id == ft_disarm_request_) ft_disarm_request_ = 0;
             break;
         default: break;
     }
@@ -523,6 +533,7 @@ void Bridge::poll_ft()
         ft_timing_ = timing;
         for (const auto& event : events) process_ft_event(event);
     }
+    maybe_arm_ft(now);
     refresh_ft_state();
     ft_timer_.expires_after(ft8_active_ || ft_authorized_ ? milliseconds(5) : milliseconds(100));
     ft_timer_.async_wait([this](auto error) { if (!error) poll_ft(); });

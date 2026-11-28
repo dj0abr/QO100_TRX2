@@ -12,15 +12,17 @@ QSO-Automatik verarbeitet weiterhin die Antworten aus den Empfangs-Slots.
 **Default-QRG** stimmt RX2 auf 10 489 540 000 Hz und TX2 auf
 2 400 040 000 Hz. **Betriebsart** wählt FT4 oder FT8 für beide Richtungen.
 
-Rufzeichen, QTH-Locator, Audiofrequenz und TX-Pegel eintragen und
-**Einstellungen speichern** wählen. Die Webbridge speichert die Werte
-standardmäßig in `data/ft-station.json`. Die Audiofrequenz ist der
-Abstand des untersten Sendetons vom TX2-USB-Träger. Der Pegel regelt dessen
-Amplitude. Sobald die FT-Betriebsart aktiv ist, dekodiert RX2 auch ohne
-Stationsdaten und bei stummem Browser-Audio. Zuschauer können empfangen.
-Für FT-TX muss der Bediener gültige Stationsdaten speichern.
+Rufzeichen, QTH-Locator, Audiofrequenz und TX-Pegel sind für den Bediener
+auch während eines QSOs bearbeitbar. Eine Sekunde nach der letzten Eingabe
+speichert die Webbridge die gültigen Werte, standardmäßig in
+`data/ft-station.json`. Die Audiofrequenz ist der Abstand des untersten
+Sendetons vom TX2-USB-Träger. Änderungen an Rufzeichen, Locator oder
+Audiofrequenz beenden ein laufendes FT-QSO beim Speichern. Ein neuer TX-Pegel
+wird auch während einer Sendung übernommen. RX2 dekodiert bei aktivem
+FT-DigiMode auch ohne Stationsdaten und bei stummem Browser-Audio.
 
-**FT-TX freigeben** vor dem ersten Ruf aktivieren. Mit **CQ rufen** geht
+FT-TX wird automatisch freigegeben, sobald der Bediener FT4/8 ausgewählt
+hat, die Stationsdaten gültig sind und der Sendeweg bereit ist. Mit **CQ rufen** geht
 ein CQ in den nächsten verfügbaren Slot. Die Slotfolge lässt sich dafür
 manuell auswählen. Ein Klick auf einen Decode startet ein QSO mit dessen
 Absender im passenden Gegenslot. libft8 führt den Austausch und eventuelle
@@ -29,11 +31,11 @@ Wiederholungen aus. **Auto-Modus** bietet **Aus**, **CQ rufen** und
 13 Zeichen Freitext im nächsten verfügbaren Slot.
 
 **Abbrechen** beendet das QSO, die Automatik und gegebenenfalls die
-laufende Aussendung. Die FT-TX-Freigabe kann separat aufgehoben werden.
-Ein Wechsel der Betriebsart, eine Umstimmung von RX2 oder TX2,
-**DigiModes → Aus**, ein Wechsel zu einem anderen DigiMode oder der
-Verlust des Bedieners sperrt FT-TX. Beim reinen Wechsel der Anzeige
-zwischen Zoom und Monitor bleibt der gewählte DigiMode aktiv.
+laufende Aussendung. Eine Umstimmung von RX2 oder TX2 und ein Wechsel zwischen
+FT4 und FT8 beenden einen laufenden Austausch. Die Sendebereitschaft kehrt
+nach der Umstellung automatisch zurück. **DigiModes → Aus**, ein anderer
+DigiMode oder der Verlust des Bedieners beendet den FT-Betrieb. Beim Wechsel
+der Anzeige zwischen Zoom und Monitor bleibt der gewählte DigiMode aktiv.
 TX2 wird mit SSTV, RTTY, Wasserfalltext und externem Digitalaudio geteilt.
 Ein belegter Audioweg kann eine FT-Sendung verhindern.
 

@@ -137,9 +137,10 @@ def main():
         def event(kind, predicate, timeout=10):
             return owner.wait(lambda p: isinstance(p, dict) and p.get('type') == kind and predicate(p), timeout)
 
-        assert request(viewer, 'ft_arm', armed=True)['code'] == 'read_only'
+        station_settings = dict(callsign='DJ0ABR', locator='JN68', tx_hz=1500, tx_level=25)
+        assert request(viewer, 'ft_config', **station_settings)['code'] == 'read_only'
         owner.send({'type': 'ft8_subscribe', 'enabled': True})
-        assert request(owner, 'ft_arm', armed=True)['type'] == 'error'
+        assert request(owner, 'ft_cq')['type'] == 'error'
         assert not station.exists()
         wait(lambda: any(p[5] == 20 and HEADER.unpack_from(p)[11] & 1 for p in proxy.log))
         time.sleep(.25)
@@ -160,13 +161,11 @@ def main():
             assert not any(isinstance(p, dict) and p.get('type') == 'ft_decode' for p in list(viewer.messages))
             print('RX2 without station settings and independent RX3 decoded the same FT8 slot', flush=True)
 
-            command('ft_config', callsign='DJ0ABR', locator='JN68', tx_hz=1500, tx_level=25)
+            command('ft_config', **station_settings)
             assert '"callsign": "DJ0ABR"' in station.read_text()
-            state_ft(lambda ft: ft['configured'] and ft['tx_ready'])
+            state_ft(lambda ft: ft['configured'] and ft['tx_ready'] and ft['armed'])
             command('ft_mode', mode='FT4')
-            state_ft(lambda ft: ft['mode'] == 'FT4' and ft['tx_ready'])
-            command('ft_arm', armed=True)
-            state_ft(lambda ft: ft['armed'])
+            state_ft(lambda ft: ft['mode'] == 'FT4' and ft['tx_ready'] and ft['armed'])
             assert request(owner, 'ft_start_qso', decode_id=row['decode_id'])['code'] == 'invalid'
             command('ft_auto', auto='answer-cq')
             state_ft(lambda ft: ft['auto'] == 'answer-cq')
@@ -225,17 +224,25 @@ def main():
             play_captured('FT4', first_sent, 'K1ABC DJ0ABR JN68')
 
             command('ft_mode', mode='FT8')
-            state_ft(lambda ft: ft['mode'] == 'FT8' and not ft['armed'] and ft['tx_ready'])
-            command('ft_arm', armed=True)
-            state_ft(lambda ft: ft['armed'])
+            state_ft(lambda ft: ft['mode'] == 'FT8' and ft['armed'] and ft['tx_ready'])
             before = len(tx_packets())
-            if time.time() % 15 < 1:
-                time.sleep(1)
-            command('ft_cq', parity=(int(time.time()) // 15) % 2)
-            state_ft(lambda ft: ft['busy'] and ft.get('next_tx_planned'))
+
+            def schedule_cq_later():
+                command('ft_cq', parity=int((time.time() - 1) // 15) % 2)
+                state_ft(lambda ft: ft['busy'] and ft.get('next_tx_planned'))
+
+            schedule_cq_later()
             command('ft_abort')
             state_ft(lambda ft: ft['armed'] and not ft['busy'] and ft['auto'] == 'off')
             assert len(tx_packets()) == before, 'Aborted preparation emitted PCM'
+
+            schedule_cq_later()
+            command('ft_config', **{**station_settings, 'tx_hz': 1575})
+            command('ft_abort')
+            state_ft(lambda ft: ft['armed'] and ft['tx_ready'] and not ft['busy'] and ft['tx_hz'] == 1575)
+            assert len(tx_packets()) == before, 'Changing the offset left an old TX action pending'
+            command('ft_config', **station_settings)
+            state_ft(lambda ft: ft['armed'] and ft['tx_ready'] and ft['tx_hz'] == 1500)
 
             return_pcm = waveform('FT8', 'TNX 73')
             command('ft_free_text', text='TNX 73')
@@ -243,6 +250,9 @@ def main():
             assert tx['mode'] == 'FT8' and 500 <= tx['audio_start_ms'] - tx['slot_utc_ms'] <= 680, tx
             # Model the downlink by delaying the RX waveform by thirteen PCM blocks.
             rx.schedule(2, tx['slot_utc_ms'] / 1000 + .26, return_pcm[:-13 * BLOCK])
+            command('ft_config', **{**station_settings, 'tx_level': 35})
+            state_ft(lambda ft: ft['armed'] and ft['busy'] and ft['tx_level'] == 35)
+            assert '"tx_level": 35' in station.read_text()
             echo = event('ft_decode', lambda p: p['slot_utc_ms'] == tx['slot_utc_ms'] and p['text'] == tx['text'], timeout=17)
             assert isinstance(echo['snr_db'], int) and abs(echo['dt_s'] - .26) < .2, echo
             event('ft_notice', lambda p: p['kind'] == 'free-text' and p['outcome'] == 'completed', timeout=16)
@@ -250,9 +260,7 @@ def main():
             state_ft(lambda ft: not ft['busy'] and ft['armed'])
 
             command('ft_mode', mode='FT4')
-            state_ft(lambda ft: ft['mode'] == 'FT4' and ft['tx_ready'])
-            command('ft_arm', armed=True)
-            state_ft(lambda ft: ft['armed'])
+            state_ft(lambda ft: ft['mode'] == 'FT4' and ft['tx_ready'] and ft['armed'])
             command('ft_cq')
             event('ft_tx', lambda p: p['text'] == 'CQ DJ0ABR JN68', timeout=11)
             owner.send({'type': 'ft8_subscribe', 'enabled': False})
@@ -263,6 +271,7 @@ def main():
             assert len(tx_packets()) == count, 'TX2 continued emitting after leaving the FT mode'
             assert not radio['tx']['ptt'], 'This test must use TX2 rather than TX1'
             print('RX2 decoded the FT4 and FT8 transmit slots with SNR', flush=True)
+            print('FT TX armed automatically and accepted station settings during operation', flush=True)
             print('FT4/FT8 TX2 waveform, UTC start, queued abort and active cancellation passed', flush=True)
         except BaseException:
             for item in list(owner.messages):

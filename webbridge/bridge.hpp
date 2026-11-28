@@ -78,7 +78,7 @@ class Bridge {
     unsigned ft_retries_ = 0;
     uint64_t ft_uplink_ = 0, ft_downlink_ = 0;
     uint64_t ft_receive_revision_ = 1, ft_receive_reset_ = 0;
-    uint64_t ft_next_decode_id_ = 0, ft_next_request_ = 0, ft_abort_request_ = 0;
+    uint64_t ft_next_decode_id_ = 0, ft_next_request_ = 0, ft_abort_request_ = 0, ft_disarm_request_ = 0;
     std::deque<std::pair<uint64_t, ft8::Decode>> ft_decodes_;
     std::optional<ft8::TxTiming> ft_timing_;
     Clock::time_point ft_next_clock_{};
@@ -169,6 +169,7 @@ class Bridge {
     void command_ft(uint64_t client, const Json& id, const std::string& type, const Json& request);
     bool ft_operator() const;
     bool ft_tx_ready(Clock::time_point now) const;
+    void maybe_arm_ft(Clock::time_point now);
     void disarm_ft(const char* reason, bool flush = true);
     void retire_ft();
     void process_ft_event(const ft8::Event& event);

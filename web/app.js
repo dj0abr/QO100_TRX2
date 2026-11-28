@@ -69,7 +69,8 @@ function notify(text, error = false, duration = 5000) {
 function report(error) { if (error?.code !== 'superseded') notify(error.message || String(error), true); }
 function fail(message, code = 'invalid') { return Object.assign(new Error(message), {code}); }
 function command(type, values = {}) {
-  if (!canControl()) return Promise.reject(fail(operator ? 'Backend ist nicht bedienbereit.' : 'Zuschauer können nur empfangen.', 'not_ready'));
+  const allowed = type === 'ft_config' ? operator && isOpen() : canControl();
+  if (!allowed) return Promise.reject(fail(operator ? 'Backend ist nicht bedienbereit.' : 'Zuschauer können nur empfangen.', 'not_ready'));
   const id = request = (request + 1) >>> 0;
   const promise = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => { pending.delete(id); reject(fail('Keine Bestätigung vom Backend.', 'timeout')); }, 14000);
@@ -1076,7 +1077,7 @@ for (const id of ['zoom-sources', 'decoder-monitor', 'decoder-digital', 'decoder
   if (event.code === 'Space' || event.key === ' ') event.stopPropagation();
 });
 function renderFt8Controls() {
-  ft.update(state.ft ?? {}, {connected: isOpen(), operator: operator && canControl(), session,
+  ft.update(state.ft ?? {}, {connected: isOpen(), operator, control: canControl(), session,
     active: digitalView === 'ft8', visible: ft8Visible(), phase: state.ft8_tx?.phase,
     tuning: wanted.has('2') || wanted.has('tx2')});
 }
