@@ -55,12 +55,16 @@ gemeinsam. Ein leerer `ft_log_path` deaktiviert die Datei und die
 CQ-Markierung.
 
 `start_all.sh` liest den optionalen QRZ-Schlüssel beim Start aus
-`~/.config/qo100-trx2/qrz.env` des startenden Benutzers. Die Datei mit
-Rechten `600` enthält diese Zuweisung.
+`~/.config/qo100-trx2/qrz.env` des startenden Benutzers. Das Installationsskript
+speichert den als Argument übergebenen Schlüssel in dieser Datei mit Rechten
+`600`. Ersetze den Platzhalter im Aufruf durch deinen API-Key.
 
 ```sh
-export QO100_QRZ_API_KEY='DEIN_QRZ_LOGBOOK_API_KEY'
+./install_qrz_api.sh 'DEIN_QRZ_LOGBOOK_API_KEY'
 ```
+
+Ohne Argument erstellt `./install_qrz_api.sh` bei Bedarf eine Vorlage, die du
+im Texteditor ausfüllen kannst.
 
 Eine bereits gesetzte Umgebungsvariable `QO100_QRZ_API_KEY` hat Vorrang.
 Mit einem Schlüssel lädt libft8 neue Einträge nach dem lokalen Speichern
